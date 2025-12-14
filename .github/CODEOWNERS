@@ -1,0 +1,14 @@
+# Default owner for everything
+* @dwsmith1983
+
+# CI/CD workflows
+/.github/ @dwsmith1983
+
+# Core library code
+/src/ @dwsmith1983
+
+# Tests
+/tests/ @dwsmith1983
+
+# Documentation
+/docs/ @dwsmith1983

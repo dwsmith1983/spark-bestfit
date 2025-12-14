@@ -1,0 +1,219 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spark-bestfit"
+version = "0.0.0"
+description = "Modern Spark distribution fitting library with efficient parallel processing"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = {text = "MIT"}
+authors = [
+    {name = "Dustin Smith", email = "dustin.william.smith@gmail.com"},
+]
+keywords = ["spark", "pyspark", "distribution", "fitting", "statistics", "scipy"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "pandas>=1.5.0,<3.0.0",
+    "numpy>=1.24.0,<3.0.0",
+    "scipy>=1.11.0,<2.0.0",
+    "matplotlib>=3.7.0,<4.0.0",
+]
+
+[project.urls]
+Documentation = "https://spark-bestfit.readthedocs.io/en/latest/"
+Homepage = "https://github.com/dwsmith1983/spark-bestfit"
+Repository = "https://github.com/dwsmith1983/spark-bestfit"
+Issues = "https://github.com/dwsmith1983/spark-bestfit/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pyspark>=3.5.0,<5.0.0",
+    "pyarrow>=12.0.0,<19.0.0",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+    "ruff>=0.8.0",
+    "black>=24.10.0",
+    "isort>=5.13.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.5.0",
+    "scipy-stubs>=1.14.0",
+    "pandas-stubs>=2.2.0",
+]
+
+# Test dependencies (subset of dev for CI)
+test = [
+    "pyspark>=3.5.0,<5.0.0",
+    "pyarrow>=12.0.0,<19.0.0",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+]
+
+# Base test dependencies without pyspark/pyarrow
+test-base = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+]
+
+# Documentation dependencies
+docs = [
+    "pyspark>=3.5.0,<5.0.0",
+    "pyarrow>=12.0.0,<19.0.0",
+    "sphinx>=8.0.0",
+    "sphinx-rtd-theme>=3.0.0",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/examples", "/README.md"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spark_bestfit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.coverage.run]
+source = ["src/spark_bestfit"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+# Hatch test environments for cross-version testing
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+]
+
+[tool.hatch.envs.test.scripts]
+run = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+
+# Spark 3.5 with Python 3.11
+[[tool.hatch.envs.test.matrix]]
+python = ["3.11"]
+spark = ["3.5"]
+
+[tool.hatch.envs.test.overrides]
+matrix.spark.dependencies = [
+    { value = "pyspark>=3.5.0,<4.0.0", if = ["3.5"] },
+    { value = "pyspark>=4.0.0,<5.0.0", if = ["4.0"] },
+]
+
+# Separate environments with explicit dependencies for each combo
+[tool.hatch.envs.spark35-py311]
+python = "3.11"
+dependencies = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+    "pyspark>=3.5.0,<4.0.0",
+    "numpy>=1.24.0,<2.0.0",
+    "pandas>=1.5.0,<3.0.0",
+    "pyarrow>=12.0.0,<17.0.0",
+]
+
+[tool.hatch.envs.spark35-py311.scripts]
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+
+[tool.hatch.envs.spark35-py312]
+python = "3.12"
+dependencies = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+    "pyspark>=3.5.0,<4.0.0",
+    "numpy>=1.26.0,<2.0.0",
+    "pandas>=2.0.0,<3.0.0",
+    "pyarrow>=14.0.0,<17.0.0",
+    "setuptools",  # Provides distutils for PySpark 3.5 on Python 3.12+
+]
+
+[tool.hatch.envs.spark35-py312.scripts]
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+
+[tool.hatch.envs.spark40-py312]
+python = "3.12"
+dependencies = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+    "pyspark>=4.0.0,<5.0.0",
+    "numpy>=2.0.0,<3.0.0",
+    "pandas>=2.2.0,<3.0.0",
+    "pyarrow>=17.0.0,<19.0.0",
+]
+
+[tool.hatch.envs.spark40-py312.scripts]
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+
+[tool.hatch.envs.spark40-py313]
+python = "3.13"
+dependencies = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-spark>=0.6.0",
+    "pyspark>=4.0.0,<5.0.0",
+    "numpy>=2.0.0,<3.0.0",
+    "pandas>=2.2.0,<3.0.0",
+    "pyarrow>=17.0.0,<19.0.0",
+]
+
+[tool.hatch.envs.spark40-py313.scripts]
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+
+# Semantic Release configuration
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/spark_bestfit/_version.py:__version__"]
+branch = "main"
+build_command = "pip install hatch && hatch build"
+commit_message = "chore(release): {version}\n\nAutomatically generated by python-semantic-release"
+
+[tool.semantic_release.changelog]
+exclude_commit_patterns = [
+    "^chore.*",
+    "^ci.*",
+    "^docs.*",
+    "^style.*",
+]
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "perf", "refactor", "build"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "refactor", "build"]

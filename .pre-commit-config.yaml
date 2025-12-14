@@ -1,0 +1,62 @@
+repos:
+  # Ruff for fast Python linting and formatting (config in ruff.toml)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run the linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        exclude: ^(tests/|examples/)
+      # Run the formatter
+      - id: ruff-format
+        args: [--line-length=120]
+        exclude: ^(tests/|examples/)
+
+  # Black for code formatting
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        args: [--line-length=120]
+        exclude: ^(tests/|examples/)
+
+  # isort for import sorting
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black", "--line-length", "120"]
+        exclude: ^(tests/|examples/)
+
+  # Pre-commit hooks for general file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # MyPy for static type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-PyYAML
+        args:
+          - --ignore-missing-imports
+          - --no-strict-optional
+          - --python-version=3.12
+          - --explicit-package-bases
+          - --namespace-packages
+        exclude: ^(tests/|examples/)
+        # Set MYPYPATH for src layout
+        entry: env MYPYPATH=src mypy

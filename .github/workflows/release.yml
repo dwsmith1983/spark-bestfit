@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release:
+    # Skip if commit is from semantic-release
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    runs-on: ubuntu-latest
+    concurrency: release
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install python-semantic-release build
+
+      - name: Python Semantic Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          semantic-release version --no-vcs-release
+          echo "released=$(git tag --points-at HEAD | grep -q '^v' && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "version=$(cat pyproject.toml | grep '^version' | head -1 | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
+      - name: Push changes
+        if: steps.release.outputs.released == 'true'
+        run: |
+          git push origin main --follow-tags
+
+      - name: Build package
+        if: steps.release.outputs.released == 'true'
+        run: python -m build
+
+      - name: Create GitHub Release
+        if: steps.release.outputs.released == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.release.outputs.version }}
+          generate_release_notes: true
+          files: dist/*
+
+      - name: Publish to PyPI
+        if: steps.release.outputs.released == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
