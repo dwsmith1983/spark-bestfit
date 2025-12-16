@@ -28,9 +28,11 @@ print("-" * 80)
 fitter = DistributionFitter(spark)
 results = fitter.fit(df, column="value")
 
-# Get best distribution
+# Get best distribution (by K-S statistic, the default)
 best = results.best(n=1)[0]
 print(f"\nBest distribution: {best.distribution}")
+print(f"K-S statistic: {best.ks_statistic:.6f}")
+print(f"p-value: {best.pvalue:.4f}")
 print(f"SSE: {best.sse:.6f}")
 print(f"AIC: {best.aic:.2f}")
 print(f"BIC: {best.bic:.2f}")
@@ -39,12 +41,12 @@ print(f"Parameters: {[f'{p:.4f}' for p in best.parameters]}")
 # ============================================================================
 # Example 2: Get top 5 distributions
 # ============================================================================
-print("\n2. Top 5 distributions by SSE")
+print("\n2. Top 5 distributions by K-S statistic (default)")
 print("-" * 80)
 
-top_5 = results.best(n=5, metric="sse")
+top_5 = results.best(n=5)
 for i, result in enumerate(top_5, 1):
-    print(f"{i}. {result.distribution:20s} SSE={result.sse:.6f}")
+    print(f"{i}. {result.distribution:20s} KS={result.ks_statistic:.6f} p={result.pvalue:.4f}")
 
 # ============================================================================
 # Example 3: Custom parameters (non-negative distributions only)
@@ -68,7 +70,8 @@ results_custom = fitter_custom.fit(
 
 best_custom = results_custom.best(n=1)[0]
 print(f"\nBest non-negative distribution: {best_custom.distribution}")
-print(f"SSE: {best_custom.sse:.6f}")
+print(f"K-S statistic: {best_custom.ks_statistic:.6f}")
+print(f"p-value: {best_custom.pvalue:.4f}")
 
 # ============================================================================
 # Example 4: Plotting
