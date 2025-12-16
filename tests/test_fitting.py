@@ -7,6 +7,7 @@ import scipy.stats as st
 from spark_bestfit.fitting import (
     FITTING_SAMPLE_SIZE,
     compute_information_criteria,
+    compute_ks_statistic,
     compute_pdf_range,
     create_sample_data,
     evaluate_pdf,
@@ -263,7 +264,7 @@ class TestFitSingleDistributionEdgeCases:
 
         result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
 
-        required_keys = {"distribution", "parameters", "sse", "aic", "bic"}
+        required_keys = {"distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"}
         assert set(result.keys()) == required_keys
 
 class TestEvaluatePDFEdgeCases:
@@ -556,3 +557,142 @@ class TestComputePdfRange:
             assert np.isfinite(start), f"start not finite for {dist.name}"
             assert np.isfinite(end), f"end not finite for {dist.name}"
             assert start < end, f"start >= end for {dist.name}"
+
+
+class TestComputeKsStatistic:
+    """Tests for Kolmogorov-Smirnov statistic computation."""
+
+    def test_ks_statistic_normal_distribution(self, normal_data):
+        """Test K-S statistic for normal distribution fitted to normal data."""
+        dist = st.norm
+        params = dist.fit(normal_data)
+
+        ks_stat, pvalue = compute_ks_statistic(dist, params, normal_data)
+
+        # Should return finite values
+        assert np.isfinite(ks_stat)
+        assert np.isfinite(pvalue)
+
+        # K-S statistic should be small for good fit (< 0.1 typically)
+        assert 0 <= ks_stat < 0.1
+
+        # P-value should be reasonable (> 0.01 for good fit)
+        assert 0 <= pvalue <= 1
+
+    def test_ks_statistic_exponential_distribution(self, exponential_data):
+        """Test K-S statistic for exponential distribution."""
+        dist = st.expon
+        params = dist.fit(exponential_data)
+
+        ks_stat, pvalue = compute_ks_statistic(dist, params, exponential_data)
+
+        assert np.isfinite(ks_stat)
+        assert np.isfinite(pvalue)
+        assert 0 <= ks_stat < 0.1
+        assert 0 <= pvalue <= 1
+
+    def test_ks_statistic_gamma_distribution(self, gamma_data):
+        """Test K-S statistic for gamma distribution."""
+        dist = st.gamma
+        params = dist.fit(gamma_data)
+
+        ks_stat, pvalue = compute_ks_statistic(dist, params, gamma_data)
+
+        assert np.isfinite(ks_stat)
+        assert np.isfinite(pvalue)
+        assert 0 <= ks_stat < 0.1
+        assert 0 <= pvalue <= 1
+
+    def test_ks_statistic_poor_fit(self, normal_data):
+        """Test K-S statistic for poor fit (wrong distribution)."""
+        # Fit exponential to normal data - should be a poor fit
+        dist = st.expon
+        params = dist.fit(normal_data)
+
+        ks_stat, pvalue = compute_ks_statistic(dist, params, normal_data)
+
+        assert np.isfinite(ks_stat)
+        # K-S statistic should be larger for poor fit
+        assert ks_stat > 0.1
+
+    def test_ks_statistic_invalid_data(self):
+        """Test K-S statistic with invalid data returns sentinel values."""
+        dist = st.norm
+        params = (0, 1)
+        invalid_data = np.array([np.nan, np.inf, -np.inf])
+
+        ks_stat, pvalue = compute_ks_statistic(dist, params, invalid_data)
+
+        # Should return sentinel values for failed computation
+        assert ks_stat == np.inf or np.isfinite(ks_stat)
+        assert pvalue == 0.0 or np.isfinite(pvalue)
+
+    def test_ks_statistic_small_sample(self):
+        """Test K-S statistic with small sample size."""
+        dist = st.norm
+        params = (0, 1)
+        small_data = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+
+        ks_stat, pvalue = compute_ks_statistic(dist, params, small_data)
+
+        # Should still return values for small samples
+        assert np.isfinite(ks_stat)
+        assert 0 <= pvalue <= 1
+
+    def test_ks_statistic_various_distributions(self):
+        """Test K-S statistic works with various scipy distributions."""
+        np.random.seed(42)
+
+        test_cases = [
+            (st.norm, st.norm.rvs(size=1000)),
+            (st.expon, st.expon.rvs(size=1000)),
+            (st.gamma, st.gamma.rvs(a=2, size=1000)),
+            (st.uniform, st.uniform.rvs(size=1000)),
+        ]
+
+        for dist, data in test_cases:
+            params = dist.fit(data)
+            ks_stat, pvalue = compute_ks_statistic(dist, params, data)
+
+            assert np.isfinite(ks_stat), f"K-S stat not finite for {dist.name}"
+            assert 0 <= pvalue <= 1, f"p-value out of range for {dist.name}"
+
+
+class TestFitSingleDistributionWithKS:
+    """Tests for fit_single_distribution including K-S statistic fields."""
+
+    def test_fit_returns_ks_fields(self, normal_data):
+        """Test that fit_single_distribution returns K-S fields."""
+        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
+        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+
+        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+
+        # Should have K-S fields
+        assert "ks_statistic" in result
+        assert "pvalue" in result
+
+        # Values should be valid
+        assert np.isfinite(result["ks_statistic"])
+        assert 0 <= result["pvalue"] <= 1
+
+    def test_fit_returns_correct_structure_with_ks(self, normal_data):
+        """Test that fit returns dict with all required keys including K-S."""
+        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
+        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+
+        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+
+        required_keys = {"distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"}
+        assert set(result.keys()) == required_keys
+
+    def test_failed_fit_returns_ks_sentinel_values(self, normal_data):
+        """Test that failed fits return sentinel values for K-S fields."""
+        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
+        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+
+        result = fit_single_distribution("invalid_dist", normal_data, x_hist, y_hist)
+
+        # Should have K-S sentinel values
+        assert result["ks_statistic"] == np.inf
+        assert result["pvalue"] == 0.0

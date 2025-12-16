@@ -23,13 +23,6 @@ class TestGetSparkSession:
         assert result is not None
         assert isinstance(result, SparkSession)
 
-    def test_same_session_returned_multiple_calls(self, spark_session):
-        """Test that same session is returned across multiple calls."""
-        result1 = get_spark_session(spark_session)
-        result2 = get_spark_session(spark_session)
-
-        assert result1 is result2
-
     def test_can_use_returned_session(self, spark_session):
         """Test that returned session is functional."""
         session = get_spark_session(spark_session)

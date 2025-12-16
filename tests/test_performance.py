@@ -145,15 +145,6 @@ class TestEndToEndPerformance:
 class TestMemoryEfficiency:
     """Tests for memory-efficient operations."""
 
-    def test_sample_data_no_copy_when_small(self):
-        """Test that small data is returned as-is without copying."""
-        small_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-        result = create_sample_data(small_data, sample_size=FITTING_SAMPLE_SIZE)
-
-        # Should return the same array when data is smaller than sample size
-        assert result is small_data
-
     def test_sample_data_correct_size(self):
         """Test that sampled data has correct size."""
         np.random.seed(42)

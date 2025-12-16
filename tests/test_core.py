@@ -5,6 +5,7 @@ import pytest
 
 from spark_bestfit import DEFAULT_EXCLUDED_DISTRIBUTIONS, DistributionFitter
 from spark_bestfit.distributions import DistributionRegistry
+from spark_bestfit.results import FitResults
 
 class TestDistributionFitter:
     """Tests for DistributionFitter class."""
@@ -23,17 +24,20 @@ class TestDistributionFitter:
         assert fitter.random_seed == expected_seed
 
     def test_fit_basic(self, spark_session, small_dataset):
-        """Test basic fitting operation."""
+        """Test basic fitting operation returns valid results."""
         fitter = DistributionFitter(spark_session)
         results = fitter.fit(small_dataset, column="value", max_distributions=5)
 
         # Should return results
-        assert results.count() > 0
+        assert results.count() == 5  # Requested 5 distributions
 
-        # Should find best distribution
+        # Should find best distribution with valid data
         best = results.best(n=1)[0]
         assert best.distribution is not None
         assert best.sse < np.inf
+        assert len(best.parameters) >= 2  # At least loc and scale
+        assert best.ks_statistic is not None
+        assert best.pvalue is not None
 
     def test_fit_identifies_correct_distribution(self, spark_session, normal_data):
         """Test that fitter identifies the correct distribution."""
@@ -54,15 +58,16 @@ class TestDistributionFitter:
         fitter = DistributionFitter(spark_session)
         results = fitter.fit(small_dataset, column="value", bins=25, max_distributions=5)
 
-        assert results.count() > 0
+        # Should fit all 5 requested distributions
+        assert results.count() == 5
 
     def test_fit_support_at_zero(self, spark_session, positive_dataset):
         """Test fitting only non-negative distributions."""
         fitter = DistributionFitter(spark_session)
         results = fitter.fit(positive_dataset, column="value", support_at_zero=True, max_distributions=5)
 
-        # Should have fitted distributions
-        assert results.count() > 0
+        # Should fit all 5 requested non-negative distributions
+        assert results.count() == 5
 
         # All distributions should be non-negative
         registry = DistributionRegistry()
@@ -82,7 +87,8 @@ class TestDistributionFitter:
             max_distributions=5,
         )
 
-        assert results.count() > 0
+        # Should fit all 5 requested distributions
+        assert results.count() == 5
 
     @pytest.mark.parametrize("enable,threshold,desc", [
         (False, 10_000_000, "sampling disabled"),
@@ -167,18 +173,6 @@ class TestDistributionFitter:
         assert len(df1) == len(df2)
         assert list(df1["distribution"]) == list(df2["distribution"])
 
-    def test_fit_returns_valid_results(self, spark_session, small_dataset):
-        """Test that fitter returns valid FitResults."""
-        fitter = DistributionFitter(spark_session)
-
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
-
-        # Should return results with valid data
-        assert results.count() > 0
-        best = results.best(n=1)[0]
-        assert best.distribution is not None
-        assert len(best.parameters) >= 2  # At least loc and scale
-
     def test_fit_filters_failed_fits(self, spark_session, small_dataset):
         """Test that failed fits are filtered out."""
         fitter = DistributionFitter(spark_session)
@@ -192,18 +186,21 @@ class TestDistributionFitter:
         """Test fitting with constant data (edge case)."""
         fitter = DistributionFitter(spark_session)
 
-        # Should handle gracefully
+        # Should handle gracefully without crashing
         results = fitter.fit(constant_dataset, column="value", max_distributions=5)
 
-        # May have some results or none, but should not crash
-        assert results.count() >= 0
+        # Returns valid FitResults (may have 0 or more distributions)
+        assert isinstance(results, FitResults)
+        # Verify we can call methods on it without error
+        _ = results.to_pandas()
 
     def test_fit_with_rice_rule(self, spark_session, small_dataset):
         """Test fitting with Rice rule for bins."""
         fitter = DistributionFitter(spark_session)
         results = fitter.fit(small_dataset, column="value", use_rice_rule=True, max_distributions=5)
 
-        assert results.count() > 0
+        # Should fit all 5 requested distributions
+        assert results.count() == 5
 
     def test_fit_excluded_distributions(self, spark_session, small_dataset):
         """Test that excluded distributions are not fitted."""
@@ -315,11 +312,12 @@ class TestEdgeCases:
 
         fitter = DistributionFitter(spark_session)
 
-        # Should handle gracefully
+        # Should handle gracefully without crashing
         results = fitter.fit(df, column="value", max_distributions=5)
 
-        # May or may not find distributions, but should not crash
-        assert results.count() >= 0
+        # Returns valid FitResults
+        assert isinstance(results, FitResults)
+        _ = results.to_pandas()
 
     def test_single_value_dataset(self, spark_session):
         """Test with single value."""
@@ -327,10 +325,12 @@ class TestEdgeCases:
 
         fitter = DistributionFitter(spark_session)
 
-        # Should handle gracefully
+        # Should handle gracefully without crashing
         results = fitter.fit(df, column="value", max_distributions=5)
 
-        assert results.count() >= 0
+        # Returns valid FitResults
+        assert isinstance(results, FitResults)
+        _ = results.to_pandas()
 
     def test_dataset_with_outliers(self, spark_session):
         """Test with dataset containing extreme outliers."""
@@ -343,10 +343,10 @@ class TestEdgeCases:
 
         fitter = DistributionFitter(spark_session)
 
-        # Should handle outliers
+        # Should handle outliers and fit all 5 requested distributions
         results = fitter.fit(df, column="value", max_distributions=5)
 
-        assert results.count() > 0
+        assert results.count() == 5
         best = results.best(n=1)[0]
         assert best.sse < np.inf
 
@@ -377,7 +377,8 @@ class TestEdgeCases:
         fitter = DistributionFitter(spark_session)
         results = fitter.fit(df, column="custom_column_name", max_distributions=3)
 
-        assert results.count() > 0
+        # Should fit all 3 requested distributions
+        assert results.count() == 3
 
     def test_fit_invalid_bins(self, spark_session, small_dataset):
         """Test that invalid bins raises error."""

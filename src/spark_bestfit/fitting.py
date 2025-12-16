@@ -23,6 +23,8 @@ FIT_RESULT_SCHEMA = StructType(
         StructField("sse", FloatType(), True),
         StructField("aic", FloatType(), True),
         StructField("bic", FloatType(), True),
+        StructField("ks_statistic", FloatType(), True),
+        StructField("pvalue", FloatType(), True),
     ]
 )
 
@@ -132,6 +134,10 @@ def fit_single_distribution(
             # Compute information criteria
             aic, bic = compute_information_criteria(dist, params, data_sample)
 
+            # Compute Kolmogorov-Smirnov statistic and p-value
+            # Note: p-values are approximate when parameters are estimated from data
+            ks_stat, pvalue = compute_ks_statistic(dist, params, data_sample)
+
             # Log any warnings that were caught (for debugging)
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
@@ -144,6 +150,8 @@ def fit_single_distribution(
                 "sse": float(sse),
                 "aic": float(aic),
                 "bic": float(bic),
+                "ks_statistic": float(ks_stat),
+                "pvalue": float(pvalue),
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
@@ -165,6 +173,8 @@ def _failed_fit_result(dist_name: str) -> Dict[str, Any]:
         "sse": float(np.inf),
         "aic": float(np.inf),
         "bic": float(np.inf),
+        "ks_statistic": float(np.inf),
+        "pvalue": 0.0,
     }
 
 
@@ -230,6 +240,45 @@ def compute_information_criteria(
 
     except (ValueError, RuntimeError, FloatingPointError):
         return np.inf, np.inf
+
+
+def compute_ks_statistic(dist: rv_continuous, params: Tuple[float, ...], data: np.ndarray) -> Tuple[float, float]:
+    """Compute Kolmogorov-Smirnov statistic and p-value.
+
+    The KS statistic measures the maximum distance between the empirical
+    distribution function of the sample and the CDF of the fitted distribution.
+    Lower values indicate better fit.
+
+    Note:
+        When parameters are estimated from the same data being tested (as is
+        the case here), the p-values are approximate and tend to be conservative
+        (larger than they should be). The KS statistic itself remains valid for
+        comparing fits, but p-values should be interpreted with caution.
+
+    Args:
+        dist: scipy.stats distribution object
+        params: Fitted distribution parameters
+        data: Original data sample
+
+    Returns:
+        Tuple of (ks_statistic, pvalue)
+    """
+    try:
+        # Use scipy's kstest with the distribution name and fitted parameters
+        result = st.kstest(data, dist.name, args=params)
+        ks_stat = result.statistic
+        pvalue = result.pvalue
+
+        # Handle numerical issues
+        if not np.isfinite(ks_stat):
+            return np.inf, 0.0
+        if not np.isfinite(pvalue):
+            pvalue = 0.0
+
+        return ks_stat, pvalue
+
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.inf, 0.0
 
 
 def create_sample_data(

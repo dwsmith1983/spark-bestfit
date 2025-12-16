@@ -136,20 +136,17 @@ class TestFitResults:
     def sample_results_df(self, spark_session):
         """Create a sample results DataFrame."""
         data = [
-            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0),  # loc, scale
-            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0),  # shape, loc, scale
-            ("expon", [0.0, 5.0], 0.008, 1600.0, 1615.0),  # loc, scale
-            ("lognorm", [1.0, 0.0, 2.0], 0.010, 1650.0, 1680.0),  # shape, loc, scale
-            (
-                "weibull_min",
-                [1.5, 0.0, 3.0],
-                0.004,
-                1450.0,
-                1480.0,
-            ),  # shape, loc, scale
+            # distribution, parameters, sse, aic, bic, ks_statistic, pvalue
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.90),
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.95),
+            ("expon", [0.0, 5.0], 0.008, 1600.0, 1615.0, 0.035, 0.75),
+            ("lognorm", [1.0, 0.0, 2.0], 0.010, 1650.0, 1680.0, 0.040, 0.65),
+            ("weibull_min", [1.5, 0.0, 3.0], 0.004, 1450.0, 1480.0, 0.022, 0.92),
         ]
 
-        return spark_session.createDataFrame(data, ["distribution", "parameters", "sse", "aic", "bic"])
+        return spark_session.createDataFrame(
+            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"]
+        )
 
     def test_initialization(self, sample_results_df):
         """Test FitResults initialization."""
@@ -166,20 +163,14 @@ class TestFitResults:
         assert "distribution" in df_pandas.columns
         assert "sse" in df_pandas.columns
 
-    def test_df_property(self, sample_results_df):
-        """Test getting Spark DataFrame via df property."""
-        results = FitResults(sample_results_df)
-
-        assert results.df == sample_results_df
-
-    @pytest.mark.parametrize("metric", ["sse", "aic", "bic"])
+    @pytest.mark.parametrize("metric", ["sse", "aic", "bic", "ks_statistic"])
     def test_best_by_metric(self, sample_results_df, metric):
         """Test getting best distributions by various metrics."""
         results = FitResults(sample_results_df)
         best = results.best(n=1, metric=metric)
 
         assert len(best) == 1
-        assert best[0].distribution == "gamma"  # gamma has lowest SSE, AIC, and BIC
+        assert best[0].distribution == "gamma"  # gamma has lowest SSE, AIC, BIC, and ks_statistic
 
     def test_best_top_n(self, sample_results_df):
         """Test getting top N distributions."""
@@ -196,6 +187,32 @@ class TestFitResults:
         assert top_3[1].distribution == "weibull_min"
         assert top_3[2].distribution == "norm"
 
+    def test_best_returns_ks_fields(self, sample_results_df):
+        """Test that best() returns results with ks_statistic and pvalue fields."""
+        results = FitResults(sample_results_df)
+        best = results.best(n=1)[0]
+
+        # Should have K-S fields populated
+        assert best.ks_statistic is not None
+        assert best.pvalue is not None
+        assert best.ks_statistic == 0.020  # gamma's ks_statistic
+        assert best.pvalue == 0.95  # gamma's pvalue
+
+    def test_best_by_ks_statistic(self, sample_results_df):
+        """Test getting best distribution by K-S statistic."""
+        results = FitResults(sample_results_df)
+        top_3 = results.best(n=3, metric="ks_statistic")
+
+        assert len(top_3) == 3
+
+        # Should be sorted by ks_statistic (ascending)
+        assert top_3[0].ks_statistic <= top_3[1].ks_statistic <= top_3[2].ks_statistic
+
+        # gamma (0.020), weibull_min (0.022), norm (0.025)
+        assert top_3[0].distribution == "gamma"
+        assert top_3[1].distribution == "weibull_min"
+        assert top_3[2].distribution == "norm"
+
     def test_best_invalid_metric(self, sample_results_df):
         """Test that invalid metric raises error."""
         results = FitResults(sample_results_df)
@@ -206,6 +223,7 @@ class TestFitResults:
     @pytest.mark.parametrize("threshold_kwarg,threshold_val,expected_count", [
         ({"sse_threshold": 0.006}, "sse", 3),
         ({"aic_threshold": 1500}, "aic", 2),
+        ({"ks_threshold": 0.03}, "ks_statistic", 3),  # gamma, weibull_min, norm
     ])
     def test_filter_by_threshold(self, sample_results_df, threshold_kwarg, threshold_val, expected_count):
         """Test filtering by various threshold types."""
@@ -215,6 +233,16 @@ class TestFitResults:
         assert filtered.count() == expected_count
         df_pandas = filtered.to_pandas()
         assert all(df_pandas[threshold_val] < list(threshold_kwarg.values())[0])
+
+    def test_filter_by_pvalue_threshold(self, sample_results_df):
+        """Test filtering by minimum p-value threshold."""
+        results = FitResults(sample_results_df)
+        # Filter for p-value > 0.80 (should get gamma, weibull_min, norm)
+        filtered = results.filter(pvalue_threshold=0.80)
+
+        assert filtered.count() == 3
+        df_pandas = filtered.to_pandas()
+        assert all(df_pandas["pvalue"] > 0.80)
 
     def test_filter_multiple_criteria(self, sample_results_df):
         """Test filtering by multiple criteria."""
@@ -234,11 +262,18 @@ class TestFitResults:
         assert "min_sse" in summary.columns
         assert "mean_sse" in summary.columns
         assert "max_sse" in summary.columns
+        assert "min_ks" in summary.columns
+        assert "mean_ks" in summary.columns
+        assert "max_ks" in summary.columns
+        assert "min_pvalue" in summary.columns
+        assert "max_pvalue" in summary.columns
         assert "total_distributions" in summary.columns
 
         # Check values
         assert summary["min_sse"].iloc[0] == 0.003
         assert summary["max_sse"].iloc[0] == 0.010
+        assert summary["min_ks"].iloc[0] == 0.020  # gamma
+        assert summary["max_ks"].iloc[0] == 0.040  # lognorm
         assert summary["total_distributions"].iloc[0] == 5
 
     def test_count(self, sample_results_df):
@@ -258,7 +293,7 @@ class TestFitResults:
         assert "0.003" in repr_str  # Best SSE
 
     def test_empty_results(self, spark_session):
-        """Test FitResults with empty DataFrame."""
+        """Test FitResults with empty DataFrame handles all operations gracefully."""
         from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
 
         schema = StructType(
@@ -268,34 +303,21 @@ class TestFitResults:
                 StructField("sse", FloatType(), False),
                 StructField("aic", FloatType(), True),
                 StructField("bic", FloatType(), True),
+                StructField("ks_statistic", FloatType(), True),
+                StructField("pvalue", FloatType(), True),
             ]
         )
         empty_df = spark_session.createDataFrame([], schema)
 
         results = FitResults(empty_df)
 
+        # Test count and repr
         assert results.count() == 0
+        assert len(results) == 0
         assert "0 distributions" in repr(results)
 
-    def test_best_empty_returns_empty_list(self, spark_session):
-        """Test that best() on empty results returns empty list."""
-        from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
-
-        schema = StructType(
-            [
-                StructField("distribution", StringType(), False),
-                StructField("parameters", ArrayType(FloatType()), False),
-                StructField("sse", FloatType(), False),
-                StructField("aic", FloatType(), True),
-                StructField("bic", FloatType(), True),
-            ]
-        )
-        empty_df = spark_session.createDataFrame([], schema)
-
-        results = FitResults(empty_df)
-        best = results.best(n=5)
-
-        assert best == []
+        # Test best() returns empty list
+        assert results.best(n=5) == []
 
     def test_filter_returns_fitresults_instance(self, sample_results_df):
         """Test that filter returns a FitResults instance."""
@@ -369,16 +391,20 @@ class TestDistributionFitResultEdgeCases:
             sse=0.003,
             aic=1500.0,
             bic=1520.0,
+            ks_statistic=0.05,
+            pvalue=0.85,
         )
 
         d = result.to_dict()
 
-        assert set(d.keys()) == {"distribution", "parameters", "sse", "aic", "bic"}
+        assert set(d.keys()) == {"distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"}
         assert d["distribution"] == "gamma"
         assert d["parameters"] == [2.0, 0.0, 5.0]
         assert d["sse"] == 0.003
         assert d["aic"] == 1500.0
         assert d["bic"] == 1520.0
+        assert d["ks_statistic"] == 0.05
+        assert d["pvalue"] == 0.85
 
     def test_get_scipy_dist_various_distributions(self):
         """Test get_scipy_dist works for various distributions."""

@@ -8,13 +8,6 @@ from spark_bestfit.histogram import HistogramComputer
 class TestHistogramComputer:
     """Tests for HistogramComputer class."""
 
-    def test_initialization(self):
-        """Test histogram computer initialization."""
-        computer = HistogramComputer()
-
-        # HistogramComputer is a simple class with no required initialization
-        assert computer is not None
-
     def test_compute_histogram_basic(self, spark_session, small_dataset):
         """Test basic histogram computation."""
         computer = HistogramComputer()

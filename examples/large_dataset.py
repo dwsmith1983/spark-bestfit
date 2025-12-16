@@ -107,7 +107,8 @@ for size in data_sizes:
     print(f"Distributions fitted: {num_fitted}")
     print(f"Rows per second: {size / elapsed:,.0f}")
     print(f"\nBest distribution: {best.distribution}")
-    print(f"SSE: {best.sse:.6f}")
+    print(f"K-S statistic: {best.ks_statistic:.6f}")
+    print(f"p-value: {best.pvalue:.4f}")
     print(f"Parameters: {[f'{p:.4f}' for p in best.parameters]}")
 
     # Clean up

@@ -16,7 +16,8 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Parallel Processing**: Fits distributions in parallel using Spark
 - **~100 Distributions**: Access to nearly all scipy.stats continuous distributions
 - **Histogram-Based Fitting**: Efficient fitting using histogram representation
-- **Multiple Metrics**: Compare fits using SSE, AIC, and BIC
+- **Multiple Metrics**: Compare fits using K-S statistic (default), SSE, AIC, and BIC
+- **Statistical Validation**: Kolmogorov-Smirnov test with p-values for goodness-of-fit
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
@@ -46,9 +47,9 @@ df = spark.createDataFrame([(float(x),) for x in data], ["value"])
 # Fit distributions
 results = fitter.fit(df, column="value")
 
-# Get best fit
+# Get best fit (by K-S statistic, the default)
 best = results.best(n=1)[0]
-print(f"Best: {best.distribution} with SSE={best.sse:.6f}")
+print(f"Best: {best.distribution} (KS={best.ks_statistic:.4f}, p={best.pvalue:.4f})")
 
 # Plot
 fitter.plot(best, df, "value", title="Best Fit Distribution")
@@ -85,14 +86,16 @@ results = fitter.fit(
 ### Working with Results
 
 ```python
-# Get top 5 distributions by SSE
-top_5 = results.best(n=5, metric="sse")
+# Get top 5 distributions (by K-S statistic, the default)
+top_5 = results.best(n=5)
 
-# Get best by AIC
+# Get best by other metrics
+best_sse = results.best(n=1, metric="sse")[0]
 best_aic = results.best(n=1, metric="aic")[0]
 
-# Filter good fits
-good_fits = results.filter(sse_threshold=0.01)
+# Filter by goodness-of-fit
+good_fits = results.filter(ks_threshold=0.05)        # K-S statistic < 0.05
+significant = results.filter(pvalue_threshold=0.05)  # p-value > 0.05
 
 # Convert to pandas for analysis
 df_pandas = results.to_pandas()
