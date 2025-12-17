@@ -132,6 +132,25 @@ Custom Plotting
        save_path="output/distribution.png",
    )
 
+Q-Q Plots
+---------
+
+Q-Q (quantile-quantile) plots provide visual assessment of goodness-of-fit by comparing
+sample quantiles against theoretical quantiles. Points close to the diagonal indicate a good fit.
+
+.. code-block:: python
+
+   # Q-Q plot for goodness-of-fit assessment
+   fitter.plot_qq(
+       best,
+       df,
+       "value",
+       max_points=1000,           # Sample size for plotting
+       figsize=(10, 10),
+       title="Q-Q Plot",
+       save_path="output/qq_plot.png",
+   )
+
 Excluding Distributions
 -----------------------
 

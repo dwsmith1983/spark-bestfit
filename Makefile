@@ -19,10 +19,10 @@ install-test: ## Install package with test dependencies only
 	pip install -e ".[test]"
 
 test: ## Run tests with pytest
-	pytest
+	PYTHONPATH=src pytest
 
 test-cov: ## Run tests with coverage report
-	pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=html -v
+	PYTHONPATH=src pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=html -v
 
 clean: ## Clean build artifacts and cache files
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache htmlcov/ .coverage
