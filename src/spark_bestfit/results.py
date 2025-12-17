@@ -254,7 +254,7 @@ class FitResults:
         if pvalue_threshold is not None:
             filtered = filtered.filter(F.col("pvalue") > pvalue_threshold)
 
-        return FitResults(filtered)
+        return FitResults(filtered.cache())
 
     def summary(self) -> pd.DataFrame:
         """Get summary statistics of fit quality.

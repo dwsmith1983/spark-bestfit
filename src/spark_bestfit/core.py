@@ -453,11 +453,9 @@ class DistributionFitter:
         """
         from spark_bestfit.plotting import plot_qq
 
-        # Sample data for Q-Q plot
-        row_count = df.count()
-        sample_size = min(max_points, row_count)
-        fraction = min(sample_size / row_count, 1.0)
-        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed)
+        # Sample data for Q-Q plot without requiring count()
+        # orderBy(rand()) + limit() avoids expensive count() operation
+        sample_df = df.select(column).orderBy(F.rand(seed=self.random_seed)).limit(max_points)
         data = sample_df.toPandas()[column].values
 
         return plot_qq(
