@@ -8,6 +8,22 @@ from spark_bestfit.distributions import DistributionRegistry
 from spark_bestfit.results import FitResults
 
 class TestDistributionFitter:
+    def test_fit_with_progress_callback(self, spark_session, small_dataset):
+        """Test that progress_callback is called and results are correct."""
+        fitter = DistributionFitter(spark_session)
+        progress_calls = []
+        def progress(current, total, dist_name):
+            progress_calls.append((current, total, dist_name))
+        results = fitter.fit(small_dataset, column="value", max_distributions=3, progress_callback=progress)
+        # Should fit all 3 requested distributions
+        assert results.count() == 3
+        # Progress callback should be called 3 times
+        assert len(progress_calls) == 3
+        # Each call should have correct current and total
+        for idx, (current, total, dist_name) in enumerate(progress_calls, 1):
+            assert current == idx
+            assert total == 3
+            assert isinstance(dist_name, str)
     """Tests for DistributionFitter class."""
 
     @pytest.mark.parametrize("excluded,seed,expected_excluded,expected_seed", [
