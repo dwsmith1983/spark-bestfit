@@ -290,7 +290,7 @@ class TestFitResults:
 
         assert "5 distributions" in repr_str
         assert "gamma" in repr_str  # Best distribution
-        assert "0.003" in repr_str  # Best SSE
+        assert "0.020" in repr_str  # Best KS statistic
 
     def test_empty_results(self, spark_session):
         """Test FitResults with empty DataFrame handles all operations gracefully."""

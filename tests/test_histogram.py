@@ -101,7 +101,7 @@ class TestHistogramComputer:
         # Should have at most len(bin_edges) - 1 rows (some bins may be empty)
         assert histogram_df.count() <= len(bin_edges) - 1
 
-    def test_compute_statistics(self, spark_session, normal_data, small_dataset):
+    def test_compute_statistics(self, spark_session, small_dataset):
         """Test computing basic statistics."""
         computer = HistogramComputer()
         stats = computer.compute_statistics(small_dataset, "value")
@@ -120,7 +120,7 @@ class TestHistogramComputer:
         assert stats["stddev"] is not None
         assert 8 < stats["stddev"] < 12  # Close to 10
 
-        assert stats["count"] == len(normal_data)
+        assert stats["count"] == small_dataset.count()
 
     def test_compute_statistics_types(self, spark_session, small_dataset):
         """Test that statistics are returned as floats."""
