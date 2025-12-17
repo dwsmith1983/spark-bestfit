@@ -66,19 +66,12 @@ fitter.plot(best, df, "value", title="Best Fit Distribution")
 
 ## API Overview
 
-fitter = DistributionFitter(spark, random_seed=123)
-
 ### Fitting Distributions
 
 ```python
 from spark_bestfit import DistributionFitter
 
 fitter = DistributionFitter(spark, random_seed=123)
-
-# Optional: show progress for long fits
-def progress(current, total, dist_name):
-    print(f"Fitted {current}/{total}: {dist_name}")
-
 results = fitter.fit(
     df,
     column="value",
@@ -87,7 +80,6 @@ results = fitter.fit(
     enable_sampling=True,        # Enable adaptive sampling
     sample_fraction=0.3,         # Sample 30% of data
     max_distributions=50,        # Limit distributions to fit
-    progress_callback=progress,  # Show progress (optional)
 )
 ```
 
