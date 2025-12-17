@@ -71,7 +71,7 @@ class TestDistributionFitter:
 
         # All distributions should be non-negative
         registry = DistributionRegistry()
-        df_pandas = results.to_pandas()
+        df_pandas = results.df.toPandas()
         for dist_name in df_pandas["distribution"]:
             assert registry._has_support_at_zero(dist_name) is True
 
@@ -168,8 +168,8 @@ class TestDistributionFitter:
         assert best1.parameters == best2.parameters
 
         # DataFrame should also be consistent
-        df1 = results.to_pandas()
-        df2 = results.to_pandas()
+        df1 = results.df.toPandas()
+        df2 = results.df.toPandas()
         assert len(df1) == len(df2)
         assert list(df1["distribution"]) == list(df2["distribution"])
 
@@ -179,7 +179,7 @@ class TestDistributionFitter:
         results = fitter.fit(small_dataset, column="value", max_distributions=5)
 
         # All results should have finite SSE
-        df_pandas = results.to_pandas()
+        df_pandas = results.df.toPandas()
         assert all(np.isfinite(df_pandas["sse"]))
 
     def test_fit_with_constant_data(self, spark_session, constant_dataset):
@@ -192,7 +192,7 @@ class TestDistributionFitter:
         # Returns valid FitResults (may have 0 or more distributions)
         assert isinstance(results, FitResults)
         # Verify we can call methods on it without error
-        _ = results.to_pandas()
+        _ = results.df.toPandas()
 
     def test_fit_with_rice_rule(self, spark_session, small_dataset):
         """Test fitting with Rice rule for bins."""
@@ -208,7 +208,7 @@ class TestDistributionFitter:
         results = fitter.fit(small_dataset, column="value", max_distributions=5)
 
         # norm and expon should not be in results
-        df_pandas = results.to_pandas()
+        df_pandas = results.df.toPandas()
         assert "norm" not in df_pandas["distribution"].values
         assert "expon" not in df_pandas["distribution"].values
 
@@ -317,7 +317,7 @@ class TestEdgeCases:
 
         # Returns valid FitResults
         assert isinstance(results, FitResults)
-        _ = results.to_pandas()
+        _ = results.df.toPandas()
 
     def test_single_value_dataset(self, spark_session):
         """Test with single value."""
@@ -330,7 +330,7 @@ class TestEdgeCases:
 
         # Returns valid FitResults
         assert isinstance(results, FitResults)
-        _ = results.to_pandas()
+        _ = results.df.toPandas()
 
     def test_dataset_with_outliers(self, spark_session):
         """Test with dataset containing extreme outliers."""

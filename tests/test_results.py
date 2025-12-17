@@ -154,10 +154,10 @@ class TestFitResults:
 
         assert results._df == sample_results_df
 
-    def test_to_pandas(self, sample_results_df):
-        """Test converting to pandas DataFrame."""
+    def test_df_to_pandas(self, sample_results_df):
+        """Test converting to pandas DataFrame via df property."""
         results = FitResults(sample_results_df)
-        df_pandas = results.to_pandas()
+        df_pandas = results.df.toPandas()
 
         assert len(df_pandas) == 5
         assert "distribution" in df_pandas.columns
@@ -231,7 +231,7 @@ class TestFitResults:
         filtered = results.filter(**threshold_kwarg)
 
         assert filtered.count() == expected_count
-        df_pandas = filtered.to_pandas()
+        df_pandas = filtered.df.toPandas()
         assert all(df_pandas[threshold_val] < list(threshold_kwarg.values())[0])
 
     def test_filter_by_pvalue_threshold(self, sample_results_df):
@@ -241,7 +241,7 @@ class TestFitResults:
         filtered = results.filter(pvalue_threshold=0.80)
 
         assert filtered.count() == 3
-        df_pandas = filtered.to_pandas()
+        df_pandas = filtered.df.toPandas()
         assert all(df_pandas["pvalue"] > 0.80)
 
     def test_filter_multiple_criteria(self, sample_results_df):
@@ -250,7 +250,7 @@ class TestFitResults:
         filtered = results.filter(sse_threshold=0.010, aic_threshold=1600)
 
         # Should meet both criteria
-        df_pandas = filtered.to_pandas()
+        df_pandas = filtered.df.toPandas()
         assert all(df_pandas["sse"] < 0.010)
         assert all(df_pandas["aic"] < 1600)
 

@@ -153,7 +153,7 @@ class FitResults:
         >>> # Get top 5 by AIC
         >>> top_aic = results.best(n=5, metric='aic')
         >>> # Convert to pandas for analysis
-        >>> df_pandas = results.to_pandas()
+        >>> df_pandas = results.df.toPandas()
         >>> # Filter by SSE threshold
         >>> good_fits = results.filter(sse_threshold=0.01)
     """
@@ -165,14 +165,6 @@ class FitResults:
             results_df: Spark DataFrame with fit results
         """
         self._df = results_df
-
-    def to_pandas(self) -> pd.DataFrame:
-        """Convert results to pandas DataFrame.
-
-        Returns:
-            Pandas DataFrame with all results
-        """
-        return self._df.toPandas()
 
     @property
     def df(self) -> DataFrame:

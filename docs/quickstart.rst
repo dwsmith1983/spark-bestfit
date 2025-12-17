@@ -102,7 +102,7 @@ Working with Results
    significant = results.filter(pvalue_threshold=0.05)  # p-value > 0.05
 
    # Convert to pandas for analysis
-   df_pandas = results.to_pandas()
+   df_pandas = results.df.toPandas()
 
    # Use fitted distribution
    samples = best.sample(size=10000)  # Generate samples
