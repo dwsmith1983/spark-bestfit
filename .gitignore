@@ -151,3 +151,4 @@ Thumbs.db
 
 # Claude Code
 .claude/
+.venv312/
