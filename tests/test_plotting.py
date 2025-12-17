@@ -7,7 +7,7 @@ import pytest
 matplotlib.use("Agg")  # Non-interactive backend for tests
 import matplotlib.pyplot as plt
 
-from spark_bestfit.plotting import plot_comparison, plot_distribution
+from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq
 from spark_bestfit.results import DistributionFitResult
 
 
@@ -54,6 +54,27 @@ def expon_result():
         sse=0.008,
         aic=1600.0,
         bic=1615.0,
+    )
+
+
+@pytest.fixture
+def sample_data():
+    """Create sample data array for Q-Q plots."""
+    np.random.seed(42)
+    return np.random.normal(50, 10, 1000)
+
+
+@pytest.fixture
+def result_with_ks():
+    """Create a result with KS statistic and p-value."""
+    return DistributionFitResult(
+        distribution="norm",
+        parameters=[50.0, 10.0],
+        sse=0.005,
+        aic=1500.0,
+        bic=1520.0,
+        ks_statistic=0.015,
+        pvalue=0.85,
     )
 
 
@@ -289,6 +310,136 @@ class TestPlotSaving:
         )
 
         assert (tmp_path / "comparison.png").exists()
+        plt.close(fig)
+
+    def test_save_qq_plot(self, result_with_ks, sample_data, tmp_path):
+        """Test saving Q-Q plot to file."""
+        save_path = str(tmp_path / "qq_plot.png")
+
+        fig, ax = plot_qq(result_with_ks, sample_data, save_path=save_path)
+
+        assert (tmp_path / "qq_plot.png").exists()
+        plt.close(fig)
+
+
+class TestPlotQQ:
+    """Tests for plot_qq function."""
+
+    def test_basic_qq_plot(self, result_with_ks, sample_data):
+        """Test basic Q-Q plot creates valid figure with expected elements."""
+        fig, ax = plot_qq(result_with_ks, sample_data)
+
+        # Verify figure and axes are valid matplotlib objects
+        assert fig is not None
+        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Verify plot has scatter points (collections) and reference line
+        assert len(ax.collections) >= 1  # Scatter plot
+        assert len(ax.lines) >= 1  # Reference line
+
+        # Verify legend exists
+        legend = ax.get_legend()
+        assert legend is not None
+
+        plt.close(fig)
+
+    def test_qq_plot_with_title(self, result_with_ks, sample_data):
+        """Test Q-Q plot with custom title."""
+        fig, ax = plot_qq(result_with_ks, sample_data, title="Test Q-Q Plot")
+
+        assert "Test Q-Q Plot" in ax.get_title()
+        plt.close(fig)
+
+    def test_qq_plot_with_custom_labels(self, result_with_ks, sample_data):
+        """Test Q-Q plot with custom axis labels."""
+        fig, ax = plot_qq(
+            result_with_ks,
+            sample_data,
+            xlabel="Custom Theoretical",
+            ylabel="Custom Sample",
+        )
+
+        assert ax.get_xlabel() == "Custom Theoretical"
+        assert ax.get_ylabel() == "Custom Sample"
+        plt.close(fig)
+
+    def test_qq_plot_shows_ks_statistic(self, result_with_ks, sample_data):
+        """Test Q-Q plot shows KS statistic when available."""
+        fig, ax = plot_qq(result_with_ks, sample_data)
+
+        title = ax.get_title()
+        assert "KS=" in title
+        assert "p=" in title
+        plt.close(fig)
+
+    def test_qq_plot_without_ks_shows_sse(self, normal_result, sample_data):
+        """Test Q-Q plot shows SSE when KS statistic not available."""
+        fig, ax = plot_qq(normal_result, sample_data)
+
+        title = ax.get_title()
+        assert "SSE=" in title
+        plt.close(fig)
+
+    def test_qq_plot_gamma_distribution(self, gamma_result, sample_data):
+        """Test Q-Q plot with gamma distribution (has shape params)."""
+        fig, ax = plot_qq(gamma_result, sample_data)
+
+        assert fig is not None
+        assert "gamma" in ax.get_title()
+        plt.close(fig)
+
+    def test_qq_plot_custom_markers(self, result_with_ks, sample_data):
+        """Test Q-Q plot with custom marker settings."""
+        fig, ax = plot_qq(
+            result_with_ks,
+            sample_data,
+            marker="s",
+            marker_size=50,
+            marker_alpha=0.8,
+            marker_color="red",
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_qq_plot_custom_line(self, result_with_ks, sample_data):
+        """Test Q-Q plot with custom reference line settings."""
+        fig, ax = plot_qq(
+            result_with_ks,
+            sample_data,
+            line_color="blue",
+            line_style="-",
+            line_width=2.0,
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_qq_plot_small_data(self, result_with_ks):
+        """Test Q-Q plot with small sample size."""
+        small_data = np.array([45, 50, 55, 48, 52])
+
+        fig, ax = plot_qq(result_with_ks, small_data)
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_qq_plot_equal_aspect(self, result_with_ks, sample_data):
+        """Test Q-Q plot has equal aspect ratio."""
+        fig, ax = plot_qq(result_with_ks, sample_data)
+
+        # Check aspect is equal
+        assert ax.get_aspect() == "equal" or ax.get_aspect() == 1.0
+        plt.close(fig)
+
+    def test_qq_plot_figsize(self, result_with_ks, sample_data):
+        """Test Q-Q plot with custom figure size."""
+        fig, ax = plot_qq(result_with_ks, sample_data, figsize=(8, 8))
+
+        assert fig.get_figwidth() == 8
+        assert fig.get_figheight() == 8
         plt.close(fig)
 
 

@@ -13,7 +13,7 @@ Results
 -------
 
 .. autoclass:: spark_bestfit.results.DistributionFitResult
-   :members: sample, pdf, cdf
+   :members: sample, pdf, cdf, ppf
    :show-inheritance:
    :no-index:
 
