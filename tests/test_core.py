@@ -302,6 +302,29 @@ class TestDistributionFitterPlotting:
         assert fig is not None
         assert ax is not None
 
+    def test_plot_qq_after_fit(self, spark_session, small_dataset):
+        """Test Q-Q plotting after fitting."""
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        best = results.best(n=1)[0]
+
+        fig, ax = fitter.plot_qq(best, small_dataset, "value")
+
+        assert fig is not None
+        assert ax is not None
+
+    def test_plot_qq_with_max_points(self, spark_session, small_dataset):
+        """Test Q-Q plotting with custom max_points."""
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        best = results.best(n=1)[0]
+
+        fig, ax = fitter.plot_qq(best, small_dataset, "value", max_points=500, title="Q-Q Test")
+
+        assert fig is not None
+        assert ax is not None
+
+
 class TestEdgeCases:
     """Tests for edge cases and error handling."""
 
