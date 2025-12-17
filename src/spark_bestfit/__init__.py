@@ -15,9 +15,9 @@ Example:
     >>> fitter = DistributionFitter(spark)
     >>> results = fitter.fit(df, column='value')
     >>>
-    >>> # Get best distribution
+    >>> # Get best distribution (by K-S statistic, the default)
     >>> best = results.best(n=1)[0]
-    >>> print(f"Best: {best.distribution} with SSE={best.sse:.6f}")
+    >>> print(f"Best: {best.distribution} with KS={best.ks_statistic:.6f}")
     >>>
     >>> # Plot
     >>> fitter.plot(best, df, 'value', title='Best Fit Distribution')
