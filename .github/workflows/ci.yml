@@ -100,3 +100,19 @@ jobs:
         run: pip install -e .
       - name: Validate example imports
         run: python scripts/validate_examples.py
+
+  # Summary job for branch protection - single required check
+  ci:
+    needs: [test, docs, examples]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.docs.result }}" != "success" ] || \
+             [ "${{ needs.examples.result }}" != "success" ]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed"
