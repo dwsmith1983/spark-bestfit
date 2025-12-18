@@ -35,15 +35,15 @@ jobs:
             pandas: "pandas>=2.0.0,<3.0.0"
             pyarrow: "pyarrow>=14.0.0,<17.0.0"
             extra-deps: "setuptools"  # Provides distutils for PySpark 3.5 on Python 3.12+
-          # Spark 4.0.x with Python 3.12 and 3.13 (NumPy 2.x)
+          # Spark 4.x with Python 3.12 and 3.13 (NumPy 2.x)
           - python-version: "3.12"
-            spark-version: "4.0"
+            spark-version: "4.x"
             pyspark: "pyspark>=4.0.0,<5.0.0"
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
           - python-version: "3.13"
-            spark-version: "4.0"
+            spark-version: "4.x"
             pyspark: "pyspark>=4.0.0,<5.0.0"
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
@@ -70,7 +70,7 @@ jobs:
         run: pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=75 -v
       - name: Upload coverage
         uses: codecov/codecov-action@v4
-        if: matrix.python-version == '3.12' && matrix.spark-version == '4.0'
+        if: matrix.python-version == '3.12' && matrix.spark-version == '4.x'
         with:
           files: coverage.xml
           fail_ci_if_error: false
@@ -100,3 +100,19 @@ jobs:
         run: pip install -e .
       - name: Validate example imports
         run: python scripts/validate_examples.py
+
+  # Summary job for branch protection - single required check
+  ci:
+    needs: [test, docs, examples]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.docs.result }}" != "success" ] || \
+             [ "${{ needs.examples.result }}" != "success" ]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed"
