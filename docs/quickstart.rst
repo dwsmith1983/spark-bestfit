@@ -37,6 +37,15 @@ Installation
 
    pip install spark-bestfit
 
+This installs spark-bestfit without PySpark. You are responsible for providing a compatible
+Spark environment (see Compatibility Matrix above).
+
+**With PySpark included** (for users without a managed Spark environment):
+
+.. code-block:: bash
+
+   pip install spark-bestfit[spark]
+
 Basic Usage
 -----------
 

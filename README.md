@@ -28,6 +28,14 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 pip install spark-bestfit
 ```
 
+This installs spark-bestfit without PySpark. You are responsible for providing a compatible Spark environment (see Compatibility Matrix below).
+
+**With PySpark included** (for users without a managed Spark environment):
+
+```bash
+pip install spark-bestfit[spark]
+```
+
 ## Quick Start
 
 ```python

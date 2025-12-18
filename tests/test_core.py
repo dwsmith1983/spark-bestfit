@@ -33,11 +33,11 @@ class TestDistributionFitter:
 
         # Should find best distribution with valid data
         best = results.best(n=1)[0]
-        assert best.distribution is not None
+        assert isinstance(best.distribution, str) and len(best.distribution) > 0
         assert best.sse < np.inf
         assert len(best.parameters) >= 2  # At least loc and scale
-        assert best.ks_statistic is not None
-        assert best.pvalue is not None
+        assert isinstance(best.ks_statistic, float) and 0 <= best.ks_statistic <= 1
+        assert isinstance(best.pvalue, float) and 0 <= best.pvalue <= 1
 
     def test_fit_identifies_correct_distribution(self, spark_session, normal_data):
         """Test that fitter identifies the correct distribution."""

@@ -121,7 +121,7 @@ class TestEndToEndPerformance:
 
         # Full pipeline with 5 distributions should complete in under 30 seconds
         assert elapsed < 30.0, f"Full fit took {elapsed:.2f}s, expected < 30s"
-        assert results.count() > 0
+        assert results.count() == 5  # Should fit exactly 5 distributions as requested
 
     @pytest.mark.slow
     def test_full_fit_medium_dataset(self, spark_session):

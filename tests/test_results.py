@@ -415,3 +415,14 @@ class TestDistributionFitResultEdgeCases:
 
             dist = result.get_scipy_dist()
             assert dist.name == dist_name
+
+    def test_get_scipy_dist_invalid_distribution(self):
+        """Test get_scipy_dist raises AttributeError for invalid distribution name."""
+        result = DistributionFitResult(
+            distribution="nonexistent_distribution",
+            parameters=[1.0, 0.0, 1.0],
+            sse=0.01,
+        )
+
+        with pytest.raises(AttributeError):
+            result.get_scipy_dist()
