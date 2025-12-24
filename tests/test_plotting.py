@@ -11,71 +11,8 @@ from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq
 from spark_bestfit.results import DistributionFitResult
 
 
-@pytest.fixture
-def sample_histogram():
-    """Create sample histogram data."""
-    np.random.seed(42)
-    data = np.random.normal(50, 10, 10000)
-    y_hist, x_edges = np.histogram(data, bins=50, density=True)
-    x_hist = (x_edges[:-1] + x_edges[1:]) / 2
-    return y_hist, x_hist
-
-
-@pytest.fixture
-def normal_result():
-    """Create a sample normal distribution result."""
-    return DistributionFitResult(
-        distribution="norm",
-        parameters=[50.0, 10.0],  # loc, scale
-        sse=0.005,
-        aic=1500.0,
-        bic=1520.0,
-    )
-
-
-@pytest.fixture
-def gamma_result():
-    """Create a sample gamma distribution result."""
-    return DistributionFitResult(
-        distribution="gamma",
-        parameters=[2.0, 0.0, 2.0],  # shape, loc, scale
-        sse=0.003,
-        aic=1400.0,
-        bic=1430.0,
-    )
-
-
-@pytest.fixture
-def expon_result():
-    """Create a sample exponential distribution result."""
-    return DistributionFitResult(
-        distribution="expon",
-        parameters=[0.0, 5.0],  # loc, scale
-        sse=0.008,
-        aic=1600.0,
-        bic=1615.0,
-    )
-
-
-@pytest.fixture
-def sample_data():
-    """Create sample data array for Q-Q plots."""
-    np.random.seed(42)
-    return np.random.normal(50, 10, 1000)
-
-
-@pytest.fixture
-def result_with_ks():
-    """Create a result with KS statistic and p-value."""
-    return DistributionFitResult(
-        distribution="norm",
-        parameters=[50.0, 10.0],
-        sse=0.005,
-        aic=1500.0,
-        bic=1520.0,
-        ks_statistic=0.015,
-        pvalue=0.85,
-    )
+# Fixtures are now in conftest.py: normal_result, gamma_result, expon_result,
+# result_with_ks, sample_histogram, sample_data
 
 
 class TestPlotDistribution:
@@ -137,8 +74,10 @@ class TestPlotDistribution:
 
         fig, ax = plot_distribution(normal_result, y_hist, x_hist, show_histogram=False)
 
-        # Should only have PDF line, no bars
+        # Should only have PDF line, no histogram bars
         assert fig is not None
+        assert len(ax.patches) == 0, "Histogram bars should not be present when show_histogram=False"
+        assert len(ax.lines) >= 1, "PDF line should be present"
         plt.close(fig)
 
     def test_plot_gamma_distribution(self, gamma_result, sample_histogram):
@@ -148,6 +87,11 @@ class TestPlotDistribution:
         fig, ax = plot_distribution(gamma_result, y_hist, x_hist)
 
         assert fig is not None
+        # Verify title contains distribution name
+        assert "gamma" in ax.get_title().lower()
+        # Verify plot has both histogram and PDF line
+        assert len(ax.patches) > 0, "Should have histogram bars"
+        assert len(ax.lines) >= 1, "Should have PDF line"
         plt.close(fig)
 
     def test_plot_without_aic_bic(self, sample_histogram):

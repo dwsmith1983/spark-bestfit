@@ -390,3 +390,157 @@ def plot_qq(
         print(f"Plot saved to: {save_path}")
 
     return fig, ax
+
+
+def plot_discrete_distribution(
+    result: "DistributionFitResult",
+    data: np.ndarray,
+    title: str = "",
+    xlabel: str = "Value",
+    ylabel: str = "Probability",
+    figsize: Tuple[int, int] = (12, 8),
+    dpi: int = 100,
+    show_histogram: bool = True,
+    histogram_alpha: float = 0.7,
+    pmf_linewidth: int = 2,
+    title_fontsize: int = 14,
+    label_fontsize: int = 12,
+    legend_fontsize: int = 10,
+    grid_alpha: float = 0.3,
+    save_path: Optional[str] = None,
+    save_format: str = "png",
+) -> Tuple[Figure, Axes]:
+    """Plot fitted discrete distribution against data histogram.
+
+    Args:
+        result: Fitted discrete distribution result
+        data: Integer data array
+        title: Plot title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+        figsize: Figure size (width, height)
+        dpi: Dots per inch for saved figures
+        show_histogram: Show data histogram
+        histogram_alpha: Histogram transparency (0-1)
+        pmf_linewidth: Line width for PMF markers
+        title_fontsize: Title font size
+        label_fontsize: Axis label font size
+        legend_fontsize: Legend font size
+        grid_alpha: Grid transparency (0-1)
+        save_path: Optional path to save figure
+        save_format: Save format (png, pdf, svg)
+
+    Returns:
+        Tuple of (figure, axis)
+    """
+    # Get scipy distribution and parameters
+    dist = getattr(st, result.distribution)
+    params = list(result.parameters)
+
+    # Handle integer parameters for certain distributions
+    int_param_dists = {"binom", "betabinom", "hypergeom", "nhypergeom", "boltzmann", "zipfian"}
+    if result.distribution in int_param_dists:
+        params[0] = int(round(params[0]))
+
+    # Compute empirical PMF from data
+    data_int = data.astype(int)
+    unique_vals, counts = np.unique(data_int, return_counts=True)
+    empirical_pmf = counts / len(data_int)
+
+    # Extend range slightly for theoretical PMF
+    x_min = max(0, unique_vals.min() - 2)
+    x_max = unique_vals.max() + 2
+    x_range = np.arange(x_min, x_max + 1)
+
+    # Compute theoretical PMF
+    theoretical_pmf = dist.pmf(x_range, *params)
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Plot empirical histogram as bars
+    if show_histogram:
+        ax.bar(
+            unique_vals,
+            empirical_pmf,
+            width=0.8,
+            alpha=histogram_alpha,
+            label="Empirical PMF",
+            color="skyblue",
+            edgecolor="navy",
+            linewidth=0.5,
+            zorder=2,
+        )
+
+    # Plot theoretical PMF as stems/lollipops
+    markerline, stemlines, baseline = ax.stem(
+        x_range,
+        theoretical_pmf,
+        linefmt="r-",
+        markerfmt="ro",
+        basefmt=" ",
+        label="Fitted PMF",
+    )
+    plt.setp(markerline, markersize=6, zorder=3)
+    plt.setp(stemlines, linewidth=pmf_linewidth, zorder=3)
+
+    # Format parameter string
+    param_names = _get_discrete_param_names(result.distribution)
+    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
+
+    dist_title = f"{result.distribution}({param_str})"
+
+    # Build metrics string
+    metrics_parts = []
+    if result.sse is not None:
+        metrics_parts.append(f"SSE: {result.sse:.6f}")
+    if result.ks_statistic is not None:
+        metrics_parts.append(f"KS: {result.ks_statistic:.4f}")
+    metrics_str = ", ".join(metrics_parts)
+
+    # Set title
+    full_title = f"{title}\n{dist_title}\n{metrics_str}" if title else f"{dist_title}\n{metrics_str}"
+
+    ax.set_title(full_title, fontsize=title_fontsize, pad=15)
+    ax.set_xlabel(xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=label_fontsize)
+
+    # Configure legend
+    ax.legend(fontsize=legend_fontsize, loc="best", framealpha=0.9)
+
+    # Configure grid
+    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=1)
+
+    # Set x-axis to integers
+    ax.set_xticks(x_range[:: max(1, len(x_range) // 20)])
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
+
+    return fig, ax
+
+
+def _get_discrete_param_names(dist_name: str) -> List[str]:
+    """Get parameter names for discrete distributions."""
+    param_map = {
+        "poisson": ["mu"],
+        "binom": ["n", "p"],
+        "nbinom": ["n", "p"],
+        "geom": ["p"],
+        "hypergeom": ["M", "n", "N"],
+        "betabinom": ["n", "a", "b"],
+        "betanbinom": ["n", "a", "b"],
+        "zipf": ["a"],
+        "zipfian": ["a", "n"],
+        "boltzmann": ["lambda", "N"],
+        "dlaplace": ["a"],
+        "logser": ["p"],
+        "planck": ["lambda"],
+        "skellam": ["mu1", "mu2"],
+        "yulesimon": ["alpha"],
+        "nhypergeom": ["M", "n", "r"],
+    }
+    return param_map.get(dist_name, ["param" + str(i) for i in range(10)])

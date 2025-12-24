@@ -85,3 +85,105 @@ def constant_dataset(spark_session):
 def empty_dataset(spark_session):
     """Create empty Spark DataFrame (edge case)."""
     return spark_session.createDataFrame([], ["value DOUBLE"])
+
+
+@pytest.fixture
+def poisson_data():
+    """Generate Poisson distribution data."""
+    np.random.seed(42)
+    return np.random.poisson(lam=7, size=5_000)
+
+
+@pytest.fixture
+def poisson_dataset(spark_session, poisson_data):
+    """Create Spark DataFrame with Poisson count data."""
+    return spark_session.createDataFrame([(int(x),) for x in poisson_data], ["counts"])
+
+
+@pytest.fixture
+def nbinom_data():
+    """Generate negative binomial distribution data."""
+    np.random.seed(42)
+    return np.random.negative_binomial(n=5, p=0.4, size=5_000)
+
+
+@pytest.fixture
+def nbinom_dataset(spark_session, nbinom_data):
+    """Create Spark DataFrame with negative binomial count data."""
+    return spark_session.createDataFrame([(int(x),) for x in nbinom_data], ["counts"])
+
+
+# Distribution fit result fixtures (shared across test modules)
+@pytest.fixture
+def normal_result():
+    """Create a sample result for normal distribution."""
+    from spark_bestfit.results import DistributionFitResult
+
+    return DistributionFitResult(
+        distribution="norm",
+        parameters=[50.0, 10.0],  # loc, scale
+        sse=0.005,
+        aic=1500.0,
+        bic=1520.0,
+    )
+
+
+@pytest.fixture
+def gamma_result():
+    """Create a sample result for gamma distribution."""
+    from spark_bestfit.results import DistributionFitResult
+
+    return DistributionFitResult(
+        distribution="gamma",
+        parameters=[2.0, 0.0, 2.0],  # shape, loc, scale
+        sse=0.003,
+        aic=1400.0,
+        bic=1430.0,
+    )
+
+
+@pytest.fixture
+def expon_result():
+    """Create a sample exponential distribution result."""
+    from spark_bestfit.results import DistributionFitResult
+
+    return DistributionFitResult(
+        distribution="expon",
+        parameters=[0.0, 5.0],  # loc, scale
+        sse=0.008,
+        aic=1600.0,
+        bic=1615.0,
+    )
+
+
+@pytest.fixture
+def result_with_ks():
+    """Create a result with KS statistic and p-value."""
+    from spark_bestfit.results import DistributionFitResult
+
+    return DistributionFitResult(
+        distribution="norm",
+        parameters=[50.0, 10.0],
+        sse=0.005,
+        aic=1500.0,
+        bic=1520.0,
+        ks_statistic=0.015,
+        pvalue=0.85,
+    )
+
+
+@pytest.fixture
+def sample_histogram():
+    """Create sample histogram data."""
+    np.random.seed(42)
+    data = np.random.normal(50, 10, 10000)
+    y_hist, x_edges = np.histogram(data, bins=50, density=True)
+    x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+    return y_hist, x_hist
+
+
+@pytest.fixture
+def sample_data():
+    """Create sample data array for Q-Q plots."""
+    np.random.seed(42)
+    return np.random.normal(50, 10, 1000)

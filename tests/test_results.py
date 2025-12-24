@@ -6,31 +6,12 @@ import scipy.stats as st
 
 from spark_bestfit.results import DistributionFitResult, FitResults
 
+
+# Fixtures normal_result and gamma_result are now in conftest.py
+
+
 class TestDistributionFitResult:
     """Tests for DistributionFitResult dataclass."""
-
-    @pytest.fixture
-    def normal_result(self):
-        """Create a sample result for normal distribution."""
-        # norm has NO shape params, only loc and scale
-        return DistributionFitResult(
-            distribution="norm",
-            parameters=[50.0, 10.0],
-            sse=0.005,
-            aic=1500.0,
-            bic=1520.0,
-        )
-
-    @pytest.fixture
-    def gamma_result(self):
-        """Create a sample result for gamma distribution."""
-        return DistributionFitResult(
-            distribution="gamma",
-            parameters=[2.0, 0.0, 2.0],
-            sse=0.003,
-            aic=1400.0,
-            bic=1430.0,
-        )
 
     def test_to_dict(self, normal_result):
         """Test converting result to dictionary."""

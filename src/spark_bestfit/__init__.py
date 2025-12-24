@@ -24,8 +24,13 @@ Example:
 """
 
 from spark_bestfit._version import __version__
-from spark_bestfit.core import DEFAULT_EXCLUDED_DISTRIBUTIONS, DistributionFitter
-from spark_bestfit.distributions import DistributionRegistry
+from spark_bestfit.core import (
+    DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS,
+    DEFAULT_EXCLUDED_DISTRIBUTIONS,
+    DiscreteDistributionFitter,
+    DistributionFitter,
+)
+from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.results import DistributionFitResult, FitResults
 from spark_bestfit.utils import get_spark_session
 
@@ -33,15 +38,18 @@ __author__ = "Dustin Smith"
 __email__ = "dustin.william.smith@gmail.com"
 
 __all__ = [
-    # Main class
+    # Main classes
     "DistributionFitter",
+    "DiscreteDistributionFitter",
     # Constants
     "DEFAULT_EXCLUDED_DISTRIBUTIONS",
+    "DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS",
     # Results
     "FitResults",
     "DistributionFitResult",
     # Distribution management
     "DistributionRegistry",
+    "DiscreteDistributionRegistry",
     # Utilities
     "get_spark_session",
     # Version

@@ -8,7 +8,12 @@ import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import NumericType
 
-from spark_bestfit.distributions import DistributionRegistry
+from spark_bestfit.discrete_fitting import (
+    compute_discrete_histogram,
+    create_discrete_fitting_udf,
+    create_discrete_sample_data,
+)
+from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, create_fitting_udf
 from spark_bestfit.histogram import HistogramComputer
 from spark_bestfit.results import DistributionFitResult, FitResults
@@ -475,6 +480,285 @@ class DistributionFitter:
             line_width=line_width,
             title_fontsize=title_fontsize,
             label_fontsize=label_fontsize,
+            grid_alpha=grid_alpha,
+            save_path=save_path,
+            save_format=save_format,
+        )
+
+
+# Re-export for convenience
+DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS: Tuple[str, ...] = tuple(DiscreteDistributionRegistry.DEFAULT_EXCLUSIONS)
+
+
+class DiscreteDistributionFitter:
+    """Spark distribution fitting engine for discrete (count) data.
+
+    Efficiently fits scipy.stats discrete distributions to integer data using
+    Spark's parallel processing capabilities. Uses MLE optimization since
+    scipy discrete distributions don't have a built-in fit() method.
+
+    Metric Selection:
+        For discrete distributions, **AIC is recommended** for model selection:
+        - ``aic``: Proper model selection criterion with complexity penalty
+        - ``bic``: Similar to AIC but stronger penalty for complex models
+        - ``ks_statistic``: Valid for ranking, but p-values are not reliable
+        - ``sse``: Simple comparison metric
+
+        The K-S test assumes continuous distributions. For discrete data,
+        the K-S statistic can rank fits, but p-values are conservative and
+        should not be used for hypothesis testing.
+
+    Example:
+        >>> from pyspark.sql import SparkSession
+        >>> from spark_bestfit import DiscreteDistributionFitter
+        >>>
+        >>> spark = SparkSession.builder.appName("my-app").getOrCreate()
+        >>> df = spark.createDataFrame([(x,) for x in count_data], ['counts'])
+        >>>
+        >>> fitter = DiscreteDistributionFitter(spark)
+        >>> results = fitter.fit(df, column='counts')
+        >>>
+        >>> # Use AIC for model selection (recommended)
+        >>> best = results.best(n=1, metric='aic')[0]
+        >>> print(f"Best: {best.distribution} (AIC={best.aic:.2f})")
+    """
+
+    def __init__(
+        self,
+        spark: Optional[SparkSession] = None,
+        excluded_distributions: Optional[Tuple[str, ...]] = None,
+        random_seed: int = 42,
+    ):
+        """Initialize DiscreteDistributionFitter.
+
+        Args:
+            spark: SparkSession. If None, uses the active session.
+            excluded_distributions: Distributions to exclude from fitting.
+                Defaults to DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS.
+            random_seed: Random seed for reproducible sampling.
+
+        Raises:
+            RuntimeError: If no SparkSession provided and no active session exists
+        """
+        self.spark: SparkSession = get_spark_session(spark)
+        self.excluded_distributions = (
+            excluded_distributions if excluded_distributions is not None else DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
+        )
+        self.random_seed = random_seed
+        self._registry = DiscreteDistributionRegistry()
+
+    def fit(
+        self,
+        df: DataFrame,
+        column: str,
+        max_distributions: Optional[int] = None,
+        enable_sampling: bool = True,
+        sample_fraction: Optional[float] = None,
+        max_sample_size: int = 1_000_000,
+        sample_threshold: int = 10_000_000,
+        num_partitions: Optional[int] = None,
+    ) -> FitResults:
+        """Fit discrete distributions to integer data column.
+
+        Args:
+            df: Spark DataFrame containing integer count data
+            column: Name of column to fit distributions to
+            max_distributions: Limit number of distributions (for testing)
+            enable_sampling: Enable sampling for large datasets
+            sample_fraction: Fraction to sample (None = auto-determine)
+            max_sample_size: Maximum rows to sample when auto-determining
+            sample_threshold: Row count above which sampling is applied
+            num_partitions: Spark partitions (None = auto-determine)
+
+        Returns:
+            FitResults object with fitted distributions
+
+        Raises:
+            ValueError: If column not found, DataFrame empty, or invalid params
+            TypeError: If column is not numeric
+
+        Example:
+            >>> results = fitter.fit(df, 'counts')
+            >>> best = results.best(n=1, metric='ks_statistic')
+        """
+        # Input validation
+        self._validate_inputs(df, column, max_distributions, sample_fraction)
+
+        # Get row count
+        row_count = df.count()
+        if row_count == 0:
+            raise ValueError("DataFrame is empty")
+        logger.info(f"Row count: {row_count}")
+
+        # Sample if needed
+        df_sample = self._apply_sampling(
+            df, row_count, enable_sampling, sample_fraction, max_sample_size, sample_threshold
+        )
+
+        # Create integer data sample for fitting
+        logger.info("Creating data sample for parameter fitting...")
+        sample_size = min(FITTING_SAMPLE_SIZE, row_count)
+        fraction = min(sample_size / row_count, 1.0)
+        sample_df = df_sample.select(column).sample(fraction=fraction, seed=self.random_seed)
+        data_sample = sample_df.toPandas()[column].values.astype(int)
+        data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
+        logger.info(f"Data sample size: {len(data_sample)}")
+
+        # Compute discrete histogram (PMF)
+        logger.info("Computing discrete histogram (PMF)...")
+        x_values, empirical_pmf = compute_discrete_histogram(data_sample)
+        logger.info(f"Unique values: {len(x_values)} (range: {x_values.min()}-{x_values.max()})")
+
+        # Broadcast histogram and data
+        histogram_bc = self.spark.sparkContext.broadcast((x_values, empirical_pmf))
+        data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
+
+        # Get distributions to fit
+        distributions = self._registry.get_distributions(
+            additional_exclusions=list(self.excluded_distributions),
+        )
+
+        if max_distributions is not None and max_distributions > 0:
+            distributions = distributions[:max_distributions]
+
+        logger.info(f"Fitting {len(distributions)} discrete distributions...")
+
+        try:
+            # Create DataFrame of distributions
+            dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
+
+            # Determine partitioning
+            n_partitions = num_partitions or self._calculate_partitions(len(distributions))
+            dist_df = dist_df.repartition(n_partitions)
+
+            # Apply discrete fitting UDF
+            fitting_udf = create_discrete_fitting_udf(histogram_bc, data_sample_bc)
+            results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
+
+            # Filter failed fits and cache
+            results_df = results_df.filter(F.col("sse") < float(np.inf))
+            results_df = results_df.cache()
+
+            num_results = results_df.count()
+            logger.info(f"Successfully fit {num_results}/{len(distributions)} distributions")
+
+            return FitResults(results_df)
+
+        finally:
+            histogram_bc.unpersist()
+            data_sample_bc.unpersist()
+
+    @staticmethod
+    def _validate_inputs(
+        df: DataFrame,
+        column: str,
+        max_distributions: Optional[int],
+        sample_fraction: Optional[float],
+    ) -> None:
+        """Validate inputs."""
+        if max_distributions == 0:
+            raise ValueError("max_distributions cannot be 0")
+
+        if column not in df.columns:
+            raise ValueError(f"Column '{column}' not found in DataFrame. Available columns: {df.columns}")
+
+        col_type = df.schema[column].dataType
+        if not isinstance(col_type, NumericType):
+            raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
+
+        if sample_fraction is not None and not 0.0 < sample_fraction <= 1.0:
+            raise ValueError(f"sample_fraction must be in (0, 1], got {sample_fraction}")
+
+    def _apply_sampling(
+        self,
+        df: DataFrame,
+        row_count: int,
+        enable_sampling: bool,
+        sample_fraction: Optional[float],
+        max_sample_size: int,
+        sample_threshold: int,
+    ) -> DataFrame:
+        """Apply sampling if needed."""
+        if not enable_sampling or row_count <= sample_threshold:
+            return df
+
+        if sample_fraction is not None:
+            fraction = sample_fraction
+        else:
+            fraction = min(max_sample_size / row_count, 0.35)
+
+        logger.info(f"Sampling {fraction * 100:.1f}% of data ({int(row_count * fraction)} rows)")
+        return df.sample(fraction=fraction, seed=self.random_seed)
+
+    def _calculate_partitions(self, num_distributions: int) -> int:
+        """Calculate optimal partition count."""
+        total_cores = self.spark.sparkContext.defaultParallelism
+        return min(num_distributions, total_cores * 2)
+
+    def plot(
+        self,
+        result: DistributionFitResult,
+        df: DataFrame,
+        column: str,
+        title: str = "",
+        xlabel: str = "Value",
+        ylabel: str = "Probability",
+        figsize: Tuple[int, int] = (12, 8),
+        dpi: int = 100,
+        show_histogram: bool = True,
+        histogram_alpha: float = 0.7,
+        pmf_linewidth: int = 2,
+        title_fontsize: int = 14,
+        label_fontsize: int = 12,
+        legend_fontsize: int = 10,
+        grid_alpha: float = 0.3,
+        save_path: Optional[str] = None,
+        save_format: str = "png",
+    ):
+        """Plot fitted discrete distribution against data histogram.
+
+        Args:
+            result: DistributionFitResult to plot
+            df: DataFrame with data
+            column: Column name
+            title: Plot title
+            xlabel: X-axis label
+            ylabel: Y-axis label
+            figsize: Figure size (width, height)
+            dpi: Dots per inch for saved figures
+            show_histogram: Show data histogram
+            histogram_alpha: Histogram transparency (0-1)
+            pmf_linewidth: Line width for PMF curve
+            title_fontsize: Title font size
+            label_fontsize: Axis label font size
+            legend_fontsize: Legend font size
+            grid_alpha: Grid transparency (0-1)
+            save_path: Path to save figure (optional)
+            save_format: Save format (png, pdf, svg)
+
+        Returns:
+            Tuple of (figure, axis) from matplotlib
+        """
+        from spark_bestfit.plotting import plot_discrete_distribution
+
+        # Get data sample
+        sample_df = df.select(column).sample(fraction=min(10000 / df.count(), 1.0), seed=self.random_seed)
+        data = sample_df.toPandas()[column].values.astype(int)
+
+        return plot_discrete_distribution(
+            result=result,
+            data=data,
+            title=title,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            figsize=figsize,
+            dpi=dpi,
+            show_histogram=show_histogram,
+            histogram_alpha=histogram_alpha,
+            pmf_linewidth=pmf_linewidth,
+            title_fontsize=title_fontsize,
+            label_fontsize=label_fontsize,
+            legend_fontsize=legend_fontsize,
             grid_alpha=grid_alpha,
             save_path=save_path,
             save_format=save_format,

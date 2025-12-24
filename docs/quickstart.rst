@@ -160,6 +160,54 @@ sample quantiles against theoretical quantiles. Points close to the diagonal ind
        save_path="output/qq_plot.png",
    )
 
+Discrete Distributions
+----------------------
+
+For count data (integers), use ``DiscreteDistributionFitter``:
+
+.. code-block:: python
+
+   from spark_bestfit import DiscreteDistributionFitter
+   import numpy as np
+
+   # Generate count data
+   data = np.random.poisson(lam=7, size=10_000)
+   df = spark.createDataFrame([(int(x),) for x in data], ["counts"])
+
+   # Fit discrete distributions
+   fitter = DiscreteDistributionFitter(spark)
+   results = fitter.fit(df, column="counts")
+
+   # Get best fit - use AIC for model selection (recommended)
+   best = results.best(n=1, metric="aic")[0]
+   print(f"Best: {best.distribution} (AIC={best.aic:.2f})")
+
+   # Plot fitted PMF
+   fitter.plot(best, df, "counts", title="Best Discrete Fit")
+
+Metric Selection for Discrete
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Metric
+     - Use Case
+   * - ``aic``
+     - **Recommended** - Proper model selection criterion with complexity penalty
+   * - ``bic``
+     - Similar to AIC but stronger penalty for complex models
+   * - ``ks_statistic``
+     - Valid for ranking fits, but p-values are not reliable for discrete data
+   * - ``sse``
+     - Simple comparison metric
+
+.. note::
+   The K-S test assumes continuous distributions. For discrete data, the K-S statistic
+   can still rank fits, but p-values are conservative and should not be used for
+   hypothesis testing. Use AIC/BIC for proper model selection.
+
 Excluding Distributions
 -----------------------
 

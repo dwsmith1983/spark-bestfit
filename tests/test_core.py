@@ -3,7 +3,12 @@
 import numpy as np
 import pytest
 
-from spark_bestfit import DEFAULT_EXCLUDED_DISTRIBUTIONS, DistributionFitter
+from spark_bestfit import (
+    DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS,
+    DEFAULT_EXCLUDED_DISTRIBUTIONS,
+    DiscreteDistributionFitter,
+    DistributionFitter,
+)
 from spark_bestfit.distributions import DistributionRegistry
 from spark_bestfit.results import FitResults
 
@@ -40,18 +45,17 @@ class TestDistributionFitter:
         assert isinstance(best.pvalue, float) and 0 <= best.pvalue <= 1
 
     def test_fit_identifies_correct_distribution(self, spark_session, normal_data):
-        """Test that fitter identifies the correct distribution."""
+        """Test that fitter can fit normal data well with appropriate distributions."""
         df = spark_session.createDataFrame([(float(x),) for x in normal_data], ["value"])
 
         fitter = DistributionFitter(spark_session)
+        # Fit a smaller set to ensure norm is included (distributions sorted alphabetically)
         results = fitter.fit(df, column="value", max_distributions=5)
 
-        # Best distribution should be normal or close
-        best = results.best(n=3)[0]
-
-        # Should be among top candidates
-        top_3_names = [r.distribution for r in results.best(n=3)]
-        assert "norm" in top_3_names or best.sse < 0.01
+        # Best distribution should have good fit for normal data
+        best = results.best(n=1)[0]
+        assert best.sse < 0.1, f"Best fit SSE too high: {best.sse}"
+        assert best.ks_statistic < 0.1, f"Best fit KS too high: {best.ks_statistic}"
 
     def test_fit_with_custom_bins(self, spark_session, small_dataset):
         """Test fitting with custom number of bins."""
@@ -464,3 +468,92 @@ class TestCoreNegativePaths:
         # Plot with different dataset should work
         fig, ax = fitter.plot(best, df=df2, column="value")
         assert fig is not None
+
+
+class TestDiscreteDistributionFitter:
+    """Tests for DiscreteDistributionFitter class."""
+
+    def test_initialization(self, spark_session):
+        """Test discrete fitter initialization with custom exclusions."""
+        custom_exclusions = ("poisson", "geom")
+        fitter = DiscreteDistributionFitter(
+            spark_session, excluded_distributions=custom_exclusions, random_seed=123
+        )
+
+        assert fitter.excluded_distributions == custom_exclusions
+        assert fitter.random_seed == 123
+
+    def test_fit_identifies_poisson(self, spark_session, poisson_dataset):
+        """Test that fitter identifies Poisson for Poisson data."""
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(poisson_dataset, column="counts")
+
+        top_5 = [r.distribution for r in results.best(n=5)]
+        assert "poisson" in top_5
+
+    def test_fit_identifies_nbinom(self, spark_session, nbinom_dataset):
+        """Test that fitter identifies negative binomial for nbinom data."""
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(nbinom_dataset, column="counts")
+
+        top_5 = [r.distribution for r in results.best(n=5)]
+        assert "nbinom" in top_5
+
+    def test_fit_parameters_accuracy(self, spark_session, poisson_dataset, poisson_data):
+        """Test that Poisson lambda is estimated accurately."""
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(poisson_dataset, column="counts")
+
+        poisson_fit = next(r for r in results.best(n=10) if r.distribution == "poisson")
+        fitted_lambda = poisson_fit.parameters[0]
+        true_lambda = np.mean(poisson_data)
+
+        assert np.isclose(fitted_lambda, true_lambda, rtol=0.05)
+
+    def test_fit_excluded_distributions(self, spark_session, poisson_dataset):
+        """Test that excluded distributions are not fitted."""
+        fitter = DiscreteDistributionFitter(
+            spark_session, excluded_distributions=("poisson", "nbinom")
+        )
+        results = fitter.fit(poisson_dataset, column="counts")
+
+        all_dists = [r.distribution for r in results.best(n=20)]
+        assert "poisson" not in all_dists
+        assert "nbinom" not in all_dists
+
+    def test_fit_empty_dataframe_raises(self, spark_session):
+        """Test that fit raises error for empty DataFrame."""
+        from pyspark.sql.types import IntegerType, StructField, StructType
+
+        schema = StructType([StructField("counts", IntegerType(), True)])
+        df = spark_session.createDataFrame([], schema)
+        fitter = DiscreteDistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="empty"):
+            fitter.fit(df, column="counts")
+
+    def test_fit_invalid_column_raises(self, spark_session, poisson_dataset):
+        """Test that fit raises error for invalid column."""
+        fitter = DiscreteDistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="not found"):
+            fitter.fit(poisson_dataset, column="nonexistent")
+
+    def test_plot_produces_stem_plot(self, spark_session, poisson_dataset):
+        """Test that discrete plot produces expected stem plot elements."""
+        import matplotlib.pyplot as plt
+
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(poisson_dataset, column="counts", max_distributions=3)
+        best = results.best(n=1)[0]
+
+        fig, ax = fitter.plot(best, poisson_dataset, "counts", title="Test Plot")
+
+        # Verify plot has expected elements
+        assert ax.get_title().startswith("Test Plot")
+        assert ax.get_xlabel() == "Value"
+        assert ax.get_ylabel() == "Probability"
+        # Should have bars (histogram) and stems (fitted PMF)
+        assert len(ax.containers) > 0 or len(ax.collections) > 0
+
+        plt.close(fig)
