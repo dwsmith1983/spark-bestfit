@@ -19,7 +19,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Multiple Metrics**: Compare fits using K-S statistic (default), SSE, AIC, and BIC
 - **Statistical Validation**: Kolmogorov-Smirnov test with p-values for goodness-of-fit
 - **Results API**: Filter, sort, and export results easily
-- **Visualization**: Built-in plotting for distribution comparison and Q-Q plots
+- **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
 
 ## Installation
@@ -135,6 +135,20 @@ fitter.plot_qq(
     max_points=1000,           # Sample size for plotting
     title="Q-Q Plot",
     save_path="output/qq_plot.png",
+)
+```
+
+### P-P Plots
+
+```python
+# Create P-P plot for goodness-of-fit assessment
+fitter.plot_pp(
+    best,
+    df,
+    "value",
+    max_points=1000,           # Sample size for plotting
+    title="P-P Plot",
+    save_path="output/pp_plot.png",
 )
 ```
 
