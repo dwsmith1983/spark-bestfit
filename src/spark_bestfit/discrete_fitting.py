@@ -227,11 +227,11 @@ def compute_discrete_ks_statistic(
     Computes the two-sided KS statistic D_n = max(D+, D-) which measures
     the maximum distance between empirical and theoretical CDFs.
 
-    IMPORTANT: The standard KS test assumes continuous distributions.
-    For discrete distributions:
-    - The KS STATISTIC is valid for comparing/ranking distribution fits
-    - The P-VALUES are conservative (too large) and should NOT be used
-      for formal hypothesis testing. Use AIC/BIC for model selection instead.
+    Note:
+        The standard KS test assumes continuous distributions.
+        For discrete distributions, the KS statistic is valid for comparing
+        fits, but p-values are conservative and should not be used for
+        formal hypothesis testing. Use AIC/BIC for model selection instead.
 
     Args:
         dist: scipy.stats discrete distribution object
