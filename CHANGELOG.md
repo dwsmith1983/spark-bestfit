@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.4.0 (2025-12-24)
+
+### Features
+
+- Add discrete distribution fitting with 16 distributions
+  ([#22](https://github.com/dwsmith1983/spark-bestfit/pull/22),
+  [`56693f8`](https://github.com/dwsmith1983/spark-bestfit/commit/56693f83c1e202c98c9dd3cdcea72165eba7c367))
+
+
 ## v0.3.1 (2025-12-17)
 
 ### Performance Improvements

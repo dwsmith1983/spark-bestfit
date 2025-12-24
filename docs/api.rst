@@ -9,6 +9,14 @@ Core
 
 .. autodata:: spark_bestfit.core.DEFAULT_EXCLUDED_DISTRIBUTIONS
 
+.. autodata:: spark_bestfit.core.DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
+
+Discrete Fitting
+----------------
+
+.. automodule:: spark_bestfit.discrete_fitting
+   :members:
+
 Results
 -------
 

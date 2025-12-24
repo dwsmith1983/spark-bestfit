@@ -485,6 +485,7 @@ class DistributionFitter:
             save_format=save_format,
         )
 
+      
     def plot_pp(
         self,
         result: DistributionFitResult,
