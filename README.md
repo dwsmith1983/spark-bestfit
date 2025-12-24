@@ -14,9 +14,10 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 ## Features
 
 - **Parallel Processing**: Fits distributions in parallel using Spark
-- **~100 Distributions**: Access to nearly all scipy.stats continuous distributions
+- **~100 Continuous Distributions**: Access to nearly all scipy.stats continuous distributions
+- **16 Discrete Distributions**: Fit count data with Poisson, negative binomial, geometric, and more
 - **Histogram-Based Fitting**: Efficient fitting using histogram representation
-- **Multiple Metrics**: Compare fits using K-S statistic (default), SSE, AIC, and BIC
+- **Multiple Metrics**: Compare fits using K-S statistic, SSE, AIC, and BIC
 - **Statistical Validation**: Kolmogorov-Smirnov test with p-values for goodness-of-fit
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
@@ -26,6 +27,14 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 
 ```bash
 pip install spark-bestfit
+```
+
+This installs spark-bestfit without PySpark. You are responsible for providing a compatible Spark environment (see Compatibility Matrix below).
+
+**With PySpark included** (for users without a managed Spark environment):
+
+```bash
+pip install spark-bestfit[spark]
 ```
 
 ## Quick Start
@@ -60,7 +69,7 @@ fitter.plot(best, df, "value", title="Best Fit Distribution")
 | Spark Version | Python Versions | NumPy | Pandas | PyArrow |
 |---------------|-----------------|-------|--------|---------|
 | **3.5.x** | 3.11, 3.12 | 1.24+ (< 2.0) | 1.5+ | 12.0 - 16.x |
-| **4.0.x** | 3.12, 3.13 | 2.0+ | 2.2+ | 17.0+ |
+| **4.x** | 3.12, 3.13 | 2.0+ | 2.2+ | 17.0+ |
 
 > **Note**: Spark 3.5.x does not support NumPy 2.0. If using Spark 3.5 with Python 3.12, ensure `setuptools` is installed (provides `distutils`).
 
@@ -151,6 +160,43 @@ fitter.plot_pp(
     save_path="output/pp_plot.png",
 )
 ```
+
+### Discrete Distributions
+
+For count data (integers), use `DiscreteDistributionFitter`:
+
+```python
+from spark_bestfit import DiscreteDistributionFitter
+import numpy as np
+
+# Generate count data
+data = np.random.poisson(lam=7, size=10_000)
+df = spark.createDataFrame([(int(x),) for x in data], ["counts"])
+
+# Fit discrete distributions
+fitter = DiscreteDistributionFitter(spark)
+results = fitter.fit(df, column="counts")
+
+# Get best fit - use AIC for model selection (recommended for discrete)
+best = results.best(n=1, metric="aic")[0]
+print(f"Best: {best.distribution} (AIC={best.aic:.2f})")
+
+# Plot fitted PMF
+fitter.plot(best, df, "counts", title="Best Discrete Fit")
+```
+
+**Metric Selection for Discrete Distributions:**
+
+| Metric | Use Case |
+|--------|----------|
+| `aic` | **Recommended** - Proper model selection criterion with complexity penalty |
+| `bic` | Similar to AIC but stronger penalty for complex models |
+| `ks_statistic` | Valid for ranking fits, but p-values are not reliable for discrete data |
+| `sse` | Simple comparison metric |
+
+> **Note**: The K-S test assumes continuous distributions. For discrete data, the K-S statistic
+> can still rank fits, but p-values are conservative and should not be used for hypothesis testing.
+> Use AIC/BIC for proper model selection.
 
 ### Excluding Distributions
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spark-bestfit"
-version = "0.3.1"
+version = "0.4.0"
 description = "Modern Spark distribution fitting library with efficient parallel processing"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -40,6 +40,12 @@ Repository = "https://github.com/dwsmith1983/spark-bestfit"
 Issues = "https://github.com/dwsmith1983/spark-bestfit/issues"
 
 [project.optional-dependencies]
+# Runtime optional: PySpark (for users without a managed Spark environment)
+spark = [
+    "pyspark>=3.5.0,<5.0.0",
+    "pyarrow>=12.0.0,<19.0.0",
+]
+
 dev = [
     "pyspark>=3.5.0,<5.0.0",
     "pyarrow>=12.0.0,<19.0.0",
