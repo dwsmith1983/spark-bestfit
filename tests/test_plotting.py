@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq
 from spark_bestfit.results import DistributionFitResult
-
+from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq, plot_pp
 
 @pytest.fixture
 def sample_histogram():
@@ -315,10 +315,15 @@ class TestPlotSaving:
     def test_save_qq_plot(self, result_with_ks, sample_data, tmp_path):
         """Test saving Q-Q plot to file."""
         save_path = str(tmp_path / "qq_plot.png")
-
         fig, ax = plot_qq(result_with_ks, sample_data, save_path=save_path)
-
         assert (tmp_path / "qq_plot.png").exists()
+        plt.close(fig)
+
+    def test_save_pp_plot(self, result_with_ks, sample_data, tmp_path):
+        """Test saving P-P plot to file."""
+        save_path = str(tmp_path / "pp_plot.png")
+        fig, ax = plot_pp(result_with_ks, sample_data, save_path=save_path)
+        assert (tmp_path / "pp_plot.png").exists()
         plt.close(fig)
 
 
@@ -440,6 +445,50 @@ class TestPlotQQ:
 
         assert fig.get_figwidth() == 8
         assert fig.get_figheight() == 8
+        plt.close(fig)
+
+
+class TestPlotPP:
+    """Tests for plot_pp function."""
+
+    def test_basic_pp_plot(self, result_with_ks, sample_data):
+        """Test basic P-P plot creates valid figure with expected elements."""
+        fig, ax = plot_pp(result_with_ks, sample_data)
+
+        # Verify figure and axes are valid matplotlib objects
+        assert fig is not None
+        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Verify plot has scatter points and reference line
+        assert len(ax.collections) >= 1  # Scatter plot
+        assert len(ax.lines) >= 1  # Reference line
+
+        # Verify legend exists
+        assert ax.get_legend() is not None
+        plt.close(fig)
+
+    def test_pp_plot_with_title(self, result_with_ks, sample_data):
+        """Test P-P plot with custom title."""
+        fig, ax = plot_pp(result_with_ks, sample_data, title="Test P-P Plot")
+        assert "Test P-P Plot" in ax.get_title()
+        plt.close(fig)
+
+    def test_pp_plot_shows_ks_and_pvalue(self, result_with_ks, sample_data):
+        """Test P-P plot shows both KS statistic and p-value (consistency fix)."""
+        # This specifically tests the fix Dustin requested
+        fig, ax = plot_pp(result_with_ks, sample_data)
+        title = ax.get_title()
+        assert "KS=" in title
+        assert "p=" in title
+        plt.close(fig)
+
+    def test_pp_plot_limits(self, result_with_ks, sample_data):
+        """Test P-P plot axes are limited to [0, 1]."""
+        fig, ax = plot_pp(result_with_ks, sample_data)
+        assert ax.get_xlim() == (0.0, 1.0)
+        assert ax.get_ylim() == (0.0, 1.0)
         plt.close(fig)
 
 
