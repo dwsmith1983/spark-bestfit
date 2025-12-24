@@ -416,8 +416,8 @@ def plot_pp(
     """
     Create a P-P (probability-probability) plot for goodness-of-fit assessment.
 
-    A P-P plot compares the empirical cumulative distribution function (CDF) of 
-    the sample data against the theoretical CDF of the fitted distribution. 
+    A P-P plot compares the empirical cumulative distribution function (CDF) of
+    the sample data against the theoretical CDF of the fitted distribution.
     It is particularly useful for assessing fit in the center of the distribution.
 
     Args:
@@ -480,7 +480,9 @@ def plot_pp(
     )
 
     # 6. Add reference line (y = x from 0 to 1)
-    ax.plot([0, 1], [0, 1], color=line_color, linestyle=line_style, linewidth=line_width, label="Reference (y=x)", zorder=1)
+    ax.plot(
+        [0, 1], [0, 1], color=line_color, linestyle=line_style, linewidth=line_width, label="Reference (y=x)", zorder=1
+    )
 
     # 7. Set aspect and limits (probabilities are always 0 to 1)
     ax.set_xlim([0, 1])
@@ -492,9 +494,18 @@ def plot_pp(
     param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
     param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
     dist_title = f"{result.distribution}({param_str})"
-    
+
     # Add K-S or SSE metric
-    metrics_str = f"KS={result.ks_statistic:.6f}" if result.ks_statistic else f"SSE={result.sse:.6f}"
+    # Add K-S statistic if available
+    if result.ks_statistic is not None:
+        metrics_str = f"KS={result.ks_statistic:.6f}"
+        if result.pvalue is not None:
+            metrics_str += f", p={result.pvalue:.4f}"
+    else:
+        # Fallback to SSE if KS is not available
+        metrics_str = f"SSE={result.sse:.6f}"
+
+    # Combine title, distribution info, and metrics
     full_title = f"{title}\n{dist_title}\n{metrics_str}" if title else f"{dist_title}\n{metrics_str}"
 
     ax.set_title(full_title, fontsize=title_fontsize, pad=15)
@@ -510,7 +521,6 @@ def plot_pp(
 
     return fig, ax
 
-    
 
 def plot_discrete_distribution(
     result: "DistributionFitResult",

@@ -13,7 +13,7 @@ from spark_bestfit.discrete_fitting import (
     create_discrete_fitting_udf,
     create_discrete_sample_data,
 )
-from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
+from spark_bestfit.distributions import DistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, create_fitting_udf
 from spark_bestfit.histogram import HistogramComputer
 from spark_bestfit.results import DistributionFitResult, FitResults
@@ -512,9 +512,9 @@ class DistributionFitter:
         """
         Create a P-P plot to assess goodness-of-fit.
 
-        A P-P (probability-probability) plot compares the empirical CDF of the 
+        A P-P (probability-probability) plot compares the empirical CDF of the
         sample data against the theoretical CDF of the fitted distribution.
-        Points falling close to the reference line indicate a good fit, 
+        Points falling close to the reference line indicate a good fit,
         particularly in the center of the distribution.
 
         Args:
@@ -578,7 +578,7 @@ class DistributionFitter:
 
 
 # Re-export for convenience
-DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS: Tuple[str, ...] = tuple(DiscreteDistributionRegistry.DEFAULT_EXCLUSIONS)
+DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS: Tuple[str, ...] = tuple(DistributionRegistry.DEFAULT_EXCLUSIONS)
 
 
 class DiscreteDistributionFitter:
@@ -636,7 +636,7 @@ class DiscreteDistributionFitter:
             excluded_distributions if excluded_distributions is not None else DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
         )
         self.random_seed = random_seed
-        self._registry = DiscreteDistributionRegistry()
+        self._registry = DistributionRegistry()  # have delete Discrete to DiscreteDistributionRegistry
 
     def fit(
         self,
