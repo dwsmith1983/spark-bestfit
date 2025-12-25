@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.7.1 (2025-12-25)
+
+### Bug Fixes
+
+- Add IQR-based outlier filtering to bootstrap confidence intervals
+  ([#30](https://github.com/dwsmith1983/spark-bestfit/pull/30),
+  [`6f1d582`](https://github.com/dwsmith1983/spark-bestfit/commit/6f1d58276c38cdc4ee8bdf9206ea5ccb78180ea4))
+
+
 ## v0.7.0 (2025-12-25)
 
 ### Features
