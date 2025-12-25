@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.6.0 (2025-12-25)
+
+### Features
+
+- Add Anderson-Darling goodness-of-fit test
+  ([#27](https://github.com/dwsmith1983/spark-bestfit/pull/27),
+  [`ba63f25`](https://github.com/dwsmith1983/spark-bestfit/commit/ba63f251e0239513a29d144cdff124e1371017d6))
+
+
 ## v0.5.0 (2025-12-25)
 
 ### Bug Fixes
