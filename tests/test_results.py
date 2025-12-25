@@ -461,3 +461,152 @@ class TestDistributionFitResultEdgeCases:
 
         with pytest.raises(AttributeError):
             result.get_scipy_dist()
+
+
+class TestGetParamNames:
+    """Tests for get_param_names method."""
+
+    def test_normal_distribution_param_names(self, normal_result):
+        """Test parameter names for normal distribution."""
+        names = normal_result.get_param_names()
+        assert names == ["loc", "scale"]
+
+    def test_gamma_distribution_param_names(self, gamma_result):
+        """Test parameter names for gamma distribution."""
+        names = gamma_result.get_param_names()
+        assert names == ["a", "loc", "scale"]
+
+    def test_beta_distribution_param_names(self):
+        """Test parameter names for beta distribution."""
+        result = DistributionFitResult(
+            distribution="beta",
+            parameters=[2.0, 5.0, 0.0, 1.0],
+            sse=0.01,
+        )
+        names = result.get_param_names()
+        assert names == ["a", "b", "loc", "scale"]
+
+    def test_discrete_distribution_param_names(self):
+        """Test parameter names for discrete distribution (poisson)."""
+        result = DistributionFitResult(
+            distribution="poisson",
+            parameters=[5.0],
+            sse=0.01,
+        )
+        names = result.get_param_names()
+        assert names == ["mu"]
+
+    def test_discrete_binomial_param_names(self):
+        """Test parameter names for binomial distribution."""
+        result = DistributionFitResult(
+            distribution="binom",
+            parameters=[10.0, 0.3],
+            sse=0.01,
+        )
+        names = result.get_param_names()
+        assert names == ["n", "p"]
+
+
+class TestConfidenceIntervals:
+    """Tests for confidence_intervals method."""
+
+    def test_continuous_ci_computation(self, spark_session):
+        """Test CI computation for continuous distribution."""
+        # Create sample normal data
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=1000)
+        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+
+        # Create a result for this data
+        result = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+        )
+
+        # Compute CI
+        ci = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=100, random_seed=42
+        )
+
+        # Should have correct parameter names
+        assert "loc" in ci
+        assert "scale" in ci
+
+        # CIs should be valid tuples
+        for param, (lower, upper) in ci.items():
+            assert lower < upper
+
+    def test_discrete_ci_computation(self, spark_session):
+        """Test CI computation for discrete distribution."""
+        # Create sample Poisson data
+        np.random.seed(42)
+        data = np.random.poisson(lam=7, size=500)
+        df = spark_session.createDataFrame([(int(x),) for x in data], ["count"])
+
+        # Create a result for this data
+        result = DistributionFitResult(
+            distribution="poisson",
+            parameters=[7.0],
+            sse=0.005,
+        )
+
+        # Compute CI
+        ci = result.confidence_intervals(
+            df, column="count", alpha=0.05, n_bootstrap=100, random_seed=42
+        )
+
+        # Should have correct parameter name
+        assert "mu" in ci
+
+        # CI should be valid
+        lower, upper = ci["mu"]
+        assert lower < upper
+        assert lower < 7.0 < upper  # True value should be in CI
+
+    def test_ci_reproducibility(self, spark_session):
+        """Test that CI is reproducible with same seed."""
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=500)
+        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+
+        result = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+        )
+
+        ci1 = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=50, random_seed=123
+        )
+        ci2 = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=50, random_seed=123
+        )
+
+        assert ci1["loc"] == ci2["loc"]
+        assert ci1["scale"] == ci2["scale"]
+
+    def test_ci_sampling_with_large_data(self, spark_session):
+        """Test that CI correctly samples large datasets."""
+        np.random.seed(42)
+        # Create large dataset (more than max_samples=10000)
+        data = np.random.normal(loc=50, scale=10, size=50000)
+        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+
+        result = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+        )
+
+        # Should not error even with large data
+        ci = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=50,
+            max_samples=5000, random_seed=42
+        )
+
+        # Should have valid CI
+        assert "loc" in ci
+        assert "scale" in ci
+        for param, (lower, upper) in ci.items():
+            assert lower < upper

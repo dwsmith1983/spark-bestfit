@@ -1,13 +1,16 @@
 """Results handling for fitted distributions."""
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import pyspark.sql.functions as F
 import scipy.stats as st
 from pyspark.sql import DataFrame
+
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame as SparkDataFrame
 
 
 @dataclass
@@ -134,6 +137,111 @@ class DistributionFitResult:
         dist = self.get_scipy_dist()
         # Parameters are all positional: (shape params..., loc, scale)
         return dist.ppf(q, *self.parameters)
+
+    def get_param_names(self) -> List[str]:
+        """Get parameter names for this distribution.
+
+        Returns:
+            List of parameter names in order matching self.parameters
+
+        Example:
+            >>> result = fitter.fit(df, 'value').best(n=1)[0]
+            >>> print(result.distribution)
+            'gamma'
+            >>> print(result.get_param_names())
+            ['a', 'loc', 'scale']
+            >>> print(dict(zip(result.get_param_names(), result.parameters)))
+            {'a': 2.5, 'loc': 0.0, 'scale': 3.2}
+        """
+        from spark_bestfit.distributions import DiscreteDistributionRegistry
+        from spark_bestfit.fitting import get_continuous_param_names
+
+        # Check if this is a discrete distribution
+        registry = DiscreteDistributionRegistry()
+        if self.distribution in registry.get_distributions():
+            config = registry.get_param_config(self.distribution)
+            return config["param_names"]
+        else:
+            # Continuous distribution
+            return get_continuous_param_names(self.distribution)
+
+    def confidence_intervals(
+        self,
+        df: "SparkDataFrame",
+        column: str,
+        alpha: float = 0.05,
+        n_bootstrap: int = 1000,
+        max_samples: int = 10000,
+        random_seed: Optional[int] = None,
+    ) -> Dict[str, Tuple[float, float]]:
+        """Compute bootstrap confidence intervals for fitted parameters.
+
+        Uses the percentile bootstrap method: resample data with replacement,
+        refit the distribution, and compute confidence intervals from the
+        empirical distribution of fitted parameters.
+
+        Args:
+            df: Spark DataFrame containing the data
+            column: Column name containing the data
+            alpha: Significance level (default 0.05 for 95% CI)
+            n_bootstrap: Number of bootstrap samples (default 1000)
+            max_samples: Maximum rows to collect from DataFrame (default 10000)
+            random_seed: Random seed for reproducibility
+
+        Returns:
+            Dictionary mapping parameter names to (lower, upper) bounds
+
+        Example:
+            >>> result = fitter.fit(df, 'value').best(n=1)[0]
+            >>> ci = result.confidence_intervals(df, 'value', alpha=0.05, random_seed=42)
+            >>> print(result.distribution)
+            'gamma'
+            >>> for param, (lower, upper) in ci.items():
+            ...     print(f"  {param}: [{lower:.4f}, {upper:.4f}]")
+            a: [2.35, 2.65]
+            loc: [-0.12, 0.08]
+            scale: [3.05, 3.35]
+
+        Note:
+            Bootstrap computation can be slow for large n_bootstrap values.
+            The default 1000 iterations provides reasonable precision.
+        """
+        from spark_bestfit.discrete_fitting import bootstrap_discrete_confidence_intervals
+        from spark_bestfit.distributions import DiscreteDistributionRegistry
+        from spark_bestfit.fitting import bootstrap_confidence_intervals
+
+        # Sample data from DataFrame
+        total_rows = df.count()
+        if total_rows <= max_samples:
+            # Collect all rows
+            data = np.array(df.select(column).toPandas()[column].values)
+        else:
+            # Sample rows
+            fraction = max_samples / total_rows
+            if random_seed is not None:
+                sampled_df = df.sample(withReplacement=False, fraction=fraction, seed=random_seed)
+            else:
+                sampled_df = df.sample(withReplacement=False, fraction=fraction)
+            data = np.array(sampled_df.select(column).toPandas()[column].values)
+
+        # Check if this is a discrete distribution
+        registry = DiscreteDistributionRegistry()
+        if self.distribution in registry.get_distributions():
+            return bootstrap_discrete_confidence_intervals(
+                dist_name=self.distribution,
+                data=data.astype(int),
+                alpha=alpha,
+                n_bootstrap=n_bootstrap,
+                random_seed=random_seed,
+            )
+        else:
+            return bootstrap_confidence_intervals(
+                dist_name=self.distribution,
+                data=data,
+                alpha=alpha,
+                n_bootstrap=n_bootstrap,
+                random_seed=random_seed,
+            )
 
     def __repr__(self) -> str:
         """String representation of the result."""

@@ -155,6 +155,43 @@ Working with Results
    print(f"K-S: {best.ks_statistic}, p-value: {best.pvalue}")
    print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
 
+Parameter Confidence Intervals
+------------------------------
+
+Compute bootstrap confidence intervals for fitted distribution parameters:
+
+.. code-block:: python
+
+   # Get the best fit
+   best = results.best(n=1)[0]
+
+   # Compute 95% confidence intervals
+   ci = best.confidence_intervals(
+       df,
+       column="value",
+       alpha=0.05,              # 95% CI (default)
+       n_bootstrap=1000,        # Number of bootstrap samples
+       random_seed=42,          # For reproducibility
+   )
+
+   # Display results
+   print(f"Distribution: {best.distribution}")
+   print(f"Parameters: {best.get_param_names()}")
+   for param, (lower, upper) in ci.items():
+       print(f"  {param}: [{lower:.4f}, {upper:.4f}]")
+
+   # Example output for gamma distribution:
+   # Distribution: gamma
+   # Parameters: ['a', 'loc', 'scale']
+   #   a: [1.92, 2.15]
+   #   loc: [-0.05, 0.12]
+   #   scale: [0.98, 1.03]
+
+.. note::
+   The ``confidence_intervals()`` method automatically samples large DataFrames (default
+   max 10,000 rows) to avoid driver memory issues. Bootstrap computation can take a few
+   seconds depending on ``n_bootstrap``.
+
 Custom Plotting
 ---------------
 
