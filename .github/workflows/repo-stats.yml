@@ -1,0 +1,19 @@
+name: Repo Stats
+
+on:
+  schedule:
+    # Run daily at noon Bangkok time (12:00 ICT = 05:00 UTC)
+    - cron: "0 5 * * *"
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  repo-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run github-repo-stats
+        uses: jgehrcke/github-repo-stats@v1
+        with:
+          ghtoken: ${{ secrets.REPO_STATS_TOKEN }}
+          repository: ${{ github.repository }}
