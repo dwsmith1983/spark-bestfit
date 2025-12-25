@@ -1,13 +1,15 @@
 """Core distribution fitting engine for Spark."""
 
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Callable
 
 import numpy as np
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import NumericType
 
+from spark_bestfit.distributions import DistributionRegistry
+from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, create_fitting_udf, fit_single_distribution
 from spark_bestfit.discrete_fitting import (
     compute_discrete_histogram,
     create_discrete_fitting_udf,
@@ -92,6 +94,7 @@ class DistributionFitter:
         max_sample_size: int = 1_000_000,
         sample_threshold: int = 10_000_000,
         num_partitions: Optional[int] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> FitResults:
         """Fit distributions to data column.
 
@@ -107,6 +110,7 @@ class DistributionFitter:
             max_sample_size: Maximum rows to sample when auto-determining
             sample_threshold: Row count above which sampling is applied
             num_partitions: Spark partitions (None = auto-determine)
+            progress_callback: Optional callable, called as progress_callback(current, total, dist_name) after each distribution is fitted.
 
         Returns:
             FitResults object with fitted distributions
@@ -116,8 +120,12 @@ class DistributionFitter:
             TypeError: If column is not numeric
 
         Example:
-            >>> results = fitter.fit(df, 'value')
-            >>> results = fitter.fit(df, 'value', bins=100, support_at_zero=True)
+            >>> def progress(current, total, dist):
+            ...     print(f"Fitted {current}/{total}: {dist}")
+            >>> results = fitter.fit(df, 'value', progress_callback=progress)
+
+        Warning:
+            If you use progress_callback, fitting is performed sequentially in the driver for progress reporting, which is much slower than Spark's parallel mode. This is only recommended for debugging or small numbers of distributions.
         """
         # Input validation
         self._validate_inputs(df, column, max_distributions, bins, sample_fraction)
@@ -161,24 +169,39 @@ class DistributionFitter:
         logger.info(f"Fitting {len(distributions)} distributions...")
 
         try:
-            # Create DataFrame of distributions
-            dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
+            # If no progress callback, use original fast Spark path
+            if progress_callback is None:
+                dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
+                n_partitions = num_partitions or self._calculate_partitions(len(distributions))
+                dist_df = dist_df.repartition(n_partitions)
+                fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc)
+                results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
+                results_df = results_df.filter(F.col("sse") < float(np.inf))
+                results_df = results_df.cache()
+                num_results = results_df.count()
+                logger.info(f"Successfully fit {num_results}/{len(distributions)} distributions")
+                return FitResults(results_df)
 
-            # Determine partitioning
-            n_partitions = num_partitions or self._calculate_partitions(len(distributions))
-            dist_df = dist_df.repartition(n_partitions)
-
-            # Apply fitting UDF
-            fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc)
-            results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
-
-            # Filter failed fits and cache
+            # Progress callback: fit sequentially in driver for progress reporting
+            y_hist, x_hist = histogram_bc.value
+            data_sample = data_sample_bc.value
+            results = []
+            total = len(distributions)
+            for idx, dist_name in enumerate(distributions, 1):
+                result = fit_single_distribution(
+                    dist_name=dist_name,
+                    data_sample=data_sample,
+                    x_hist=x_hist,
+                    y_hist=y_hist,
+                )
+                results.append(result)
+                progress_callback(idx, total, dist_name)
+            # Convert to Spark DataFrame for compatibility
+            results_df = self.spark.createDataFrame(results)
             results_df = results_df.filter(F.col("sse") < float(np.inf))
             results_df = results_df.cache()
-
             num_results = results_df.count()
-            logger.info(f"Successfully fit {num_results}/{len(distributions)} distributions")
-
+            logger.info(f"Successfully fit {num_results}/{total} distributions (progress tracked)")
             return FitResults(results_df)
 
         finally:

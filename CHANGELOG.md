@@ -1,3 +1,8 @@
+# vNEXT
+
+## Added
+- Progress tracking for long-running fits: `DistributionFitter.fit` now accepts an optional `progress_callback` argument, called after each distribution is fitted. This enables real-time progress indication for large or slow fitting jobs. No breaking changes.
+
 # CHANGELOG
 
 <!-- version list -->
