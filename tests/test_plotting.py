@@ -153,8 +153,13 @@ class TestPlotComparison:
 
         fig, ax = plot_comparison(results, y_hist, x_hist)
 
-        assert fig is not None
-        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Should have histogram bars and 3 PDF lines (one per distribution)
+        assert len(ax.patches) > 0, "Should have histogram bars"
+        assert len(ax.lines) >= 3, "Should have one line per distribution"
+
         plt.close(fig)
 
     def test_comparison_single_distribution(self, normal_result, sample_histogram):
@@ -193,7 +198,10 @@ class TestPlotComparison:
 
         fig, ax = plot_comparison([normal_result, gamma_result], y_hist, x_hist, show_histogram=False)
 
-        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        assert len(ax.patches) == 0, "Should have no histogram bars when show_histogram=False"
+        assert len(ax.lines) >= 2, "Should still have PDF lines"
+
         plt.close(fig)
 
     def test_comparison_legend_entries(self, normal_result, gamma_result, expon_result, sample_histogram):
@@ -371,7 +379,13 @@ class TestPlotQQ:
 
         fig, ax = plot_qq(result_with_ks, small_data)
 
-        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        assert len(ax.collections) >= 1, "Should have scatter plot even with small data"
+        assert len(ax.lines) >= 1, "Should have reference line"
+        # With 5 data points, scatter should have 5 points
+        scatter_data = ax.collections[0].get_offsets()
+        assert len(scatter_data) == 5, "Should plot all 5 data points"
+
         plt.close(fig)
 
     def test_qq_plot_equal_aspect(self, result_with_ks, sample_data):
@@ -396,15 +410,28 @@ class TestPlotPP:
 
     def test_basic_pp_plot(self, result_with_ks, sample_data):
         """Test basic P-P plot creates valid figure with expected elements."""
-        fig, ax = plot_pp(
-            result_with_ks,
-            sample_data
-        )
+        fig, ax = plot_pp(result_with_ks, sample_data)
 
-        assert fig is not None
+        # Verify figure and axes are valid matplotlib objects
+        assert isinstance(fig, plt.Figure)
         assert isinstance(ax, plt.Axes)
-        assert len(ax.collections) >= 1
-        assert len(ax.lines) >= 1
+
+        # Verify plot has scatter points and reference line
+        assert len(ax.collections) >= 1, "Should have scatter plot"
+        assert len(ax.lines) >= 1, "Should have reference line"
+
+        # Verify P-P specific bounds (probabilities are always 0 to 1)
+        assert ax.get_xlim() == (0, 1), "X-axis should be [0, 1] for probabilities"
+        assert ax.get_ylim() == (0, 1), "Y-axis should be [0, 1] for probabilities"
+
+        # Verify scatter data is within probability bounds
+        scatter_data = ax.collections[0].get_offsets()
+        assert np.all(scatter_data >= 0) and np.all(scatter_data <= 1), "All points should be in [0, 1]"
+
+        # Verify legend exists
+        legend = ax.get_legend()
+        assert legend is not None
+
         plt.close(fig)
 
     def test_pp_plot_with_title(self, result_with_ks, sample_data):
@@ -491,12 +518,18 @@ class TestPlotPP:
         """Test P-P plot edge case with very small data."""
         small_data = np.array([1.2, 2.3, 3.4, 4.5, 5.6])
 
-        fig, ax = plot_pp(
-            result_with_ks,
-            small_data
-        )
+        fig, ax = plot_pp(result_with_ks, small_data)
 
-        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        assert len(ax.collections) >= 1, "Should have scatter plot even with small data"
+        assert len(ax.lines) >= 1, "Should have reference line"
+        # With 5 data points, scatter should have 5 points
+        scatter_data = ax.collections[0].get_offsets()
+        assert len(scatter_data) == 5, "Should plot all 5 data points"
+        # P-P bounds should still be [0, 1]
+        assert ax.get_xlim() == (0, 1)
+        assert ax.get_ylim() == (0, 1)
+
         plt.close(fig)
 
     def test_pp_plot_equal_aspect(self, result_with_ks, sample_data):
@@ -518,6 +551,35 @@ class TestPlotPP:
         )
 
         assert fig.get_figwidth() == 12
+        plt.close(fig)
+
+    def test_pp_plot_data_with_ties(self, result_with_ks):
+        """Test P-P plot handles duplicate values correctly."""
+        # Data with ties (duplicate values)
+        data_with_ties = np.array([50, 50, 50, 45, 55, 55, 60])
+
+        fig, ax = plot_pp(result_with_ks, data_with_ties)
+
+        assert isinstance(fig, plt.Figure)
+        scatter_data = ax.collections[0].get_offsets()
+        assert len(scatter_data) == 7, "Should plot all points including duplicates"
+        # All probabilities should still be in [0, 1]
+        assert np.all(scatter_data >= 0) and np.all(scatter_data <= 1)
+
+        plt.close(fig)
+
+    def test_pp_plot_single_point(self, result_with_ks):
+        """Test P-P plot handles single data point edge case."""
+        single_point = np.array([50.0])
+
+        fig, ax = plot_pp(result_with_ks, single_point)
+
+        assert isinstance(fig, plt.Figure)
+        scatter_data = ax.collections[0].get_offsets()
+        assert len(scatter_data) == 1, "Should plot the single point"
+        assert ax.get_xlim() == (0, 1), "Bounds should still be [0, 1]"
+        assert ax.get_ylim() == (0, 1)
+
         plt.close(fig)
 
 
