@@ -117,16 +117,16 @@ class TestFitResults:
     def sample_results_df(self, spark_session):
         """Create a sample results DataFrame."""
         data = [
-            # distribution, parameters, sse, aic, bic, ks_statistic, pvalue
-            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.90),
-            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.95),
-            ("expon", [0.0, 5.0], 0.008, 1600.0, 1615.0, 0.035, 0.75),
-            ("lognorm", [1.0, 0.0, 2.0], 0.010, 1650.0, 1680.0, 0.040, 0.65),
-            ("weibull_min", [1.5, 0.0, 3.0], 0.004, 1450.0, 1480.0, 0.022, 0.92),
+            # distribution, parameters, sse, aic, bic, ks_statistic, pvalue, ad_statistic, ad_pvalue
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.90, 0.35, 0.15),
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.95, 0.40, None),
+            ("expon", [0.0, 5.0], 0.008, 1600.0, 1615.0, 0.035, 0.75, 0.30, 0.20),
+            ("lognorm", [1.0, 0.0, 2.0], 0.010, 1650.0, 1680.0, 0.040, 0.65, 0.60, None),
+            ("weibull_min", [1.5, 0.0, 3.0], 0.004, 1450.0, 1480.0, 0.022, 0.92, 0.45, None),
         ]
 
         return spark_session.createDataFrame(
-            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"]
+            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"]
         )
 
     def test_initialization(self, sample_results_df):
@@ -144,14 +144,18 @@ class TestFitResults:
         assert "distribution" in df_pandas.columns
         assert "sse" in df_pandas.columns
 
-    @pytest.mark.parametrize("metric", ["sse", "aic", "bic", "ks_statistic"])
+    @pytest.mark.parametrize("metric", ["sse", "aic", "bic", "ks_statistic", "ad_statistic"])
     def test_best_by_metric(self, sample_results_df, metric):
         """Test getting best distributions by various metrics."""
         results = FitResults(sample_results_df)
         best = results.best(n=1, metric=metric)
 
         assert len(best) == 1
-        assert best[0].distribution == "gamma"  # gamma has lowest SSE, AIC, BIC, and ks_statistic
+        # Different best distribution depending on metric
+        if metric == "ad_statistic":
+            assert best[0].distribution == "expon"  # expon has lowest A-D (0.30)
+        else:
+            assert best[0].distribution == "gamma"  # gamma has lowest SSE, AIC, BIC, and ks_statistic
 
     def test_best_top_n(self, sample_results_df):
         """Test getting top N distributions."""
@@ -194,6 +198,41 @@ class TestFitResults:
         assert top_3[1].distribution == "weibull_min"
         assert top_3[2].distribution == "norm"
 
+    def test_best_by_ad_statistic(self, sample_results_df):
+        """Test getting best distribution by A-D statistic."""
+        results = FitResults(sample_results_df)
+        top_3 = results.best(n=3, metric="ad_statistic")
+
+        assert len(top_3) == 3
+
+        # Should be sorted by ad_statistic (ascending)
+        assert top_3[0].ad_statistic <= top_3[1].ad_statistic <= top_3[2].ad_statistic
+
+        # expon (0.30), norm (0.35), gamma (0.40)
+        assert top_3[0].distribution == "expon"
+        assert top_3[1].distribution == "norm"
+        assert top_3[2].distribution == "gamma"
+
+    def test_best_returns_ad_fields(self, sample_results_df):
+        """Test that best() returns results with ad_statistic and ad_pvalue fields."""
+        results = FitResults(sample_results_df)
+        best = results.best(n=1, metric="ad_statistic")[0]
+
+        # Should have A-D fields populated
+        assert best.ad_statistic is not None
+        assert best.ad_statistic == 0.30  # expon's ad_statistic
+        assert best.ad_pvalue == 0.20  # expon's ad_pvalue
+
+    def test_best_returns_none_ad_pvalue_for_unsupported(self, sample_results_df):
+        """Test that best() returns None for ad_pvalue when not available."""
+        results = FitResults(sample_results_df)
+        # Get gamma which doesn't have A-D p-value
+        best_gamma = results.best(n=5, metric="sse")
+        gamma_result = [r for r in best_gamma if r.distribution == "gamma"][0]
+
+        assert gamma_result.ad_statistic == 0.40
+        assert gamma_result.ad_pvalue is None
+
     def test_best_invalid_metric(self, sample_results_df):
         """Test that invalid metric raises error."""
         results = FitResults(sample_results_df)
@@ -205,6 +244,7 @@ class TestFitResults:
         ({"sse_threshold": 0.006}, "sse", 3),
         ({"aic_threshold": 1500}, "aic", 2),
         ({"ks_threshold": 0.03}, "ks_statistic", 3),  # gamma, weibull_min, norm
+        ({"ad_threshold": 0.40}, "ad_statistic", 2),  # expon (0.30), norm (0.35)
     ])
     def test_filter_by_threshold(self, sample_results_df, threshold_kwarg, threshold_val, expected_count):
         """Test filtering by various threshold types."""
@@ -248,6 +288,9 @@ class TestFitResults:
         assert "max_ks" in summary.columns
         assert "min_pvalue" in summary.columns
         assert "max_pvalue" in summary.columns
+        assert "min_ad" in summary.columns
+        assert "mean_ad" in summary.columns
+        assert "max_ad" in summary.columns
         assert "total_distributions" in summary.columns
 
         # Check values
@@ -255,6 +298,8 @@ class TestFitResults:
         assert summary["max_sse"].iloc[0] == 0.010
         assert summary["min_ks"].iloc[0] == 0.020  # gamma
         assert summary["max_ks"].iloc[0] == 0.040  # lognorm
+        assert summary["min_ad"].iloc[0] == 0.30  # expon
+        assert summary["max_ad"].iloc[0] == 0.60  # lognorm
         assert summary["total_distributions"].iloc[0] == 5
 
     def test_count(self, sample_results_df):
@@ -286,6 +331,8 @@ class TestFitResults:
                 StructField("bic", FloatType(), True),
                 StructField("ks_statistic", FloatType(), True),
                 StructField("pvalue", FloatType(), True),
+                StructField("ad_statistic", FloatType(), True),
+                StructField("ad_pvalue", FloatType(), True),
             ]
         )
         empty_df = spark_session.createDataFrame([], schema)
@@ -374,11 +421,16 @@ class TestDistributionFitResultEdgeCases:
             bic=1520.0,
             ks_statistic=0.05,
             pvalue=0.85,
+            ad_statistic=0.40,
+            ad_pvalue=None,  # gamma doesn't support A-D p-value
         )
 
         d = result.to_dict()
 
-        assert set(d.keys()) == {"distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"}
+        assert set(d.keys()) == {
+            "distribution", "parameters", "sse", "aic", "bic",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"
+        }
         assert d["distribution"] == "gamma"
         assert d["parameters"] == [2.0, 0.0, 5.0]
         assert d["sse"] == 0.003
@@ -386,6 +438,8 @@ class TestDistributionFitResultEdgeCases:
         assert d["bic"] == 1520.0
         assert d["ks_statistic"] == 0.05
         assert d["pvalue"] == 0.85
+        assert d["ad_statistic"] == 0.40
+        assert d["ad_pvalue"] is None
 
     def test_get_scipy_dist_various_distributions(self):
         """Test get_scipy_dist works for various distributions."""

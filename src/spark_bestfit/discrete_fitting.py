@@ -14,6 +14,8 @@ from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, Str
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 
 # Output schema for discrete fitting results
+# Note: ad_statistic and ad_pvalue are included for schema compatibility with FitResults
+# but are always None for discrete distributions (A-D test is for continuous distributions)
 DISCRETE_FIT_RESULT_SCHEMA = StructType(
     [
         StructField("distribution", StringType(), True),
@@ -23,6 +25,8 @@ DISCRETE_FIT_RESULT_SCHEMA = StructType(
         StructField("bic", FloatType(), True),
         StructField("ks_statistic", FloatType(), True),
         StructField("pvalue", FloatType(), True),
+        StructField("ad_statistic", FloatType(), True),
+        StructField("ad_pvalue", FloatType(), True),
     ]
 )
 
@@ -346,6 +350,8 @@ def fit_single_discrete_distribution(
                 "bic": float(bic),
                 "ks_statistic": float(ks_stat),
                 "pvalue": float(pvalue),
+                "ad_statistic": None,  # A-D not computed for discrete distributions
+                "ad_pvalue": None,
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
@@ -369,6 +375,8 @@ def _failed_discrete_fit_result(dist_name: str) -> Dict[str, Any]:
         "bic": float(np.inf),
         "ks_statistic": float(np.inf),
         "pvalue": 0.0,
+        "ad_statistic": None,  # A-D not computed for discrete distributions
+        "ad_pvalue": None,
     }
 
 

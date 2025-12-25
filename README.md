@@ -17,8 +17,8 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **~100 Continuous Distributions**: Access to nearly all scipy.stats continuous distributions
 - **16 Discrete Distributions**: Fit count data with Poisson, negative binomial, geometric, and more
 - **Histogram-Based Fitting**: Efficient fitting using histogram representation
-- **Multiple Metrics**: Compare fits using K-S statistic, SSE, AIC, and BIC
-- **Statistical Validation**: Kolmogorov-Smirnov test with p-values for goodness-of-fit
+- **Multiple Metrics**: Compare fits using K-S statistic, A-D statistic, SSE, AIC, and BIC
+- **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
@@ -101,10 +101,12 @@ top_5 = results.best(n=5)
 # Get best by other metrics
 best_sse = results.best(n=1, metric="sse")[0]
 best_aic = results.best(n=1, metric="aic")[0]
+best_ad = results.best(n=1, metric="ad_statistic")[0]
 
 # Filter by goodness-of-fit
 good_fits = results.filter(ks_threshold=0.05)        # K-S statistic < 0.05
 significant = results.filter(pvalue_threshold=0.05)  # p-value > 0.05
+good_ad = results.filter(ad_threshold=1.0)           # A-D statistic < 1.0
 
 # Convert to pandas for analysis
 df_pandas = results.df.toPandas()
@@ -113,7 +115,15 @@ df_pandas = results.df.toPandas()
 samples = best.sample(size=10000)  # Generate samples
 pdf_values = best.pdf(x_array)     # Evaluate PDF
 cdf_values = best.cdf(x_array)     # Evaluate CDF
+
+# Access all goodness-of-fit metrics
+print(f"K-S: {best.ks_statistic}, p-value: {best.pvalue}")
+print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
 ```
+
+> **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
+> logistic, gumbel_r, gumbel_l) where scipy has critical value tables. For other distributions,
+> `ad_pvalue` will be `None` but `ad_statistic` is still valid for ranking fits.
 
 ### Custom Plotting
 
@@ -192,10 +202,12 @@ fitter.plot(best, df, "counts", title="Best Discrete Fit")
 | `aic` | **Recommended** - Proper model selection criterion with complexity penalty |
 | `bic` | Similar to AIC but stronger penalty for complex models |
 | `ks_statistic` | Valid for ranking fits, but p-values are not reliable for discrete data |
+| `ad_statistic` | Valid for ranking fits (not computed for discrete distributions) |
 | `sse` | Simple comparison metric |
 
-> **Note**: The K-S test assumes continuous distributions. For discrete data, the K-S statistic
-> can still rank fits, but p-values are conservative and should not be used for hypothesis testing.
+> **Note**: The K-S and A-D tests assume continuous distributions. For discrete data, the K-S
+> statistic can still rank fits, but p-values are conservative and should not be used for
+> hypothesis testing. A-D statistics are not computed for discrete distributions.
 > Use AIC/BIC for proper model selection.
 
 ### Excluding Distributions

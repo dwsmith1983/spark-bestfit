@@ -14,6 +14,16 @@ from scipy.stats import rv_continuous
 # Constant for fitting sample size
 FITTING_SAMPLE_SIZE: int = 10_000  # Most scipy distributions fit well with 10k samples
 
+# Distributions that support Anderson-Darling p-value computation via scipy
+# Maps our distribution names to scipy.anderson's dist parameter
+AD_PVALUE_DISTRIBUTIONS: Dict[str, str] = {
+    "norm": "norm",
+    "expon": "expon",
+    "logistic": "logistic",
+    "gumbel_r": "gumbel",
+    "gumbel_l": "gumbel_l",
+}
+
 # Define output schema for Pandas UDF
 # Note: Pandas infers all columns as nullable, so we match that here
 FIT_RESULT_SCHEMA = StructType(
@@ -25,6 +35,8 @@ FIT_RESULT_SCHEMA = StructType(
         StructField("bic", FloatType(), True),
         StructField("ks_statistic", FloatType(), True),
         StructField("pvalue", FloatType(), True),
+        StructField("ad_statistic", FloatType(), True),
+        StructField("ad_pvalue", FloatType(), True),
     ]
 )
 
@@ -138,6 +150,12 @@ def fit_single_distribution(
             # Note: p-values are approximate when parameters are estimated from data
             ks_stat, pvalue = compute_ks_statistic(dist, params, data_sample)
 
+            # Compute Anderson-Darling statistic (for all distributions)
+            ad_stat = compute_ad_statistic(dist, params, data_sample)
+
+            # Compute Anderson-Darling p-value (only for supported distributions)
+            ad_pvalue = compute_ad_pvalue(dist_name, data_sample)
+
             # Log any warnings that were caught (for debugging)
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
@@ -152,6 +170,8 @@ def fit_single_distribution(
                 "bic": float(bic),
                 "ks_statistic": float(ks_stat),
                 "pvalue": float(pvalue),
+                "ad_statistic": float(ad_stat),
+                "ad_pvalue": ad_pvalue,
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
@@ -175,6 +195,8 @@ def _failed_fit_result(dist_name: str) -> Dict[str, Any]:
         "bic": float(np.inf),
         "ks_statistic": float(np.inf),
         "pvalue": 0.0,
+        "ad_statistic": float(np.inf),
+        "ad_pvalue": None,
     }
 
 
@@ -279,6 +301,111 @@ def compute_ks_statistic(dist: rv_continuous, params: Tuple[float, ...], data: n
 
     except (ValueError, RuntimeError, FloatingPointError):
         return np.inf, 0.0
+
+
+def compute_ad_statistic(dist: rv_continuous, params: Tuple[float, ...], data: np.ndarray) -> float:
+    """Compute Anderson-Darling statistic.
+
+    The A-D statistic measures how well a distribution fits data, with more
+    weight on the tails than the K-S test. Lower values indicate better fit.
+
+    Formula:
+        A² = -n - (1/n) Σᵢ₌₁ⁿ (2i-1)[ln F(Xᵢ) + ln(1-F(Xₙ₊₁₋ᵢ))]
+
+    where F is the CDF of the fitted distribution and Xᵢ are the sorted data.
+
+    Args:
+        dist: scipy.stats distribution object
+        params: Fitted distribution parameters
+        data: Original data sample
+
+    Returns:
+        Anderson-Darling statistic (A²)
+    """
+    try:
+        n = len(data)
+        if n < 2:
+            return np.inf
+
+        # Sort data
+        sorted_data = np.sort(data)
+
+        # Compute CDF values at sorted data points
+        cdf_values = dist.cdf(sorted_data, *params)
+
+        # Clamp CDF values to avoid log(0) or log(negative)
+        cdf_values = np.clip(cdf_values, 1e-10, 1 - 1e-10)
+
+        # Compute A-D statistic using the formula
+        # A² = -n - (1/n) Σᵢ₌₁ⁿ (2i-1)[ln F(Xᵢ) + ln(1-F(Xₙ₊₁₋ᵢ))]
+        i = np.arange(1, n + 1)
+        term1 = np.log(cdf_values)
+        term2 = np.log(1 - cdf_values[::-1])  # Reversed for X_{n+1-i}
+        ad_stat = -n - (1 / n) * np.sum((2 * i - 1) * (term1 + term2))
+
+        if not np.isfinite(ad_stat):
+            return np.inf
+
+        return float(ad_stat)
+
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.inf
+
+
+def compute_ad_pvalue(dist_name: str, data: np.ndarray) -> float | None:
+    """Compute Anderson-Darling p-value for supported distributions.
+
+    P-values are only available for distributions where scipy has critical
+    value tables: norm, expon, logistic, gumbel_r, gumbel_l.
+
+    Note:
+        scipy.stats.anderson uses standardized data (zero mean, unit variance)
+        for the test, which is the standard approach for A-D testing.
+
+    Args:
+        dist_name: Name of scipy.stats distribution
+        data: Original data sample
+
+    Returns:
+        P-value if the distribution is supported, None otherwise
+    """
+    if dist_name not in AD_PVALUE_DISTRIBUTIONS:
+        return None
+
+    try:
+        scipy_dist_name = AD_PVALUE_DISTRIBUTIONS[dist_name]
+        result = st.anderson(data, dist=scipy_dist_name)
+
+        # scipy.anderson returns statistic and critical_values/significance_level
+        # We need to interpolate to get an approximate p-value
+        statistic = result.statistic
+        critical_values = result.critical_values
+        significance_levels = result.significance_level  # [15, 10, 5, 2.5, 1] percent
+
+        # If statistic is smaller than smallest critical value, p > 0.15
+        if statistic < critical_values[0]:
+            return 0.25  # Conservative estimate
+
+        # If statistic is larger than largest critical value, p < 0.01
+        if statistic > critical_values[-1]:
+            return 0.005  # Conservative estimate
+
+        # Interpolate between critical values
+        # significance_levels are in percent: [15, 10, 5, 2.5, 1]
+        sig_levels_decimal = np.array(significance_levels) / 100.0
+
+        # Find where our statistic falls and interpolate
+        for i in range(len(critical_values) - 1):
+            if critical_values[i] <= statistic <= critical_values[i + 1]:
+                # Linear interpolation in log space for better accuracy
+                frac = (statistic - critical_values[i]) / (critical_values[i + 1] - critical_values[i])
+                pvalue = sig_levels_decimal[i] - frac * (sig_levels_decimal[i] - sig_levels_decimal[i + 1])
+                return float(pvalue)
+
+        return None
+
+    except (ValueError, RuntimeError, FloatingPointError):
+        return None
 
 
 def create_sample_data(

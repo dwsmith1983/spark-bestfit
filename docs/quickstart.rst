@@ -105,10 +105,12 @@ Working with Results
    # Get best by other metrics
    best_sse = results.best(n=1, metric="sse")[0]
    best_aic = results.best(n=1, metric="aic")[0]
+   best_ad = results.best(n=1, metric="ad_statistic")[0]
 
    # Filter by goodness-of-fit
    good_fits = results.filter(ks_threshold=0.05)        # K-S statistic < 0.05
    significant = results.filter(pvalue_threshold=0.05)  # p-value > 0.05
+   good_ad = results.filter(ad_threshold=1.0)           # A-D statistic < 1.0
 
    # Convert to pandas for analysis
    df_pandas = results.df.toPandas()
@@ -117,6 +119,10 @@ Working with Results
    samples = best.sample(size=10000)  # Generate samples
    pdf_values = best.pdf(x_array)     # Evaluate PDF
    cdf_values = best.cdf(x_array)     # Evaluate CDF
+
+   # Access all goodness-of-fit metrics
+   print(f"K-S: {best.ks_statistic}, p-value: {best.pvalue}")
+   print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
 
 Custom Plotting
 ---------------
@@ -221,13 +227,36 @@ Metric Selection for Discrete
      - Similar to AIC but stronger penalty for complex models
    * - ``ks_statistic``
      - Valid for ranking fits, but p-values are not reliable for discrete data
+   * - ``ad_statistic``
+     - Valid for ranking fits (not computed for discrete distributions)
    * - ``sse``
      - Simple comparison metric
 
 .. note::
-   The K-S test assumes continuous distributions. For discrete data, the K-S statistic
-   can still rank fits, but p-values are conservative and should not be used for
-   hypothesis testing. Use AIC/BIC for proper model selection.
+   The K-S and A-D tests assume continuous distributions. For discrete data, the K-S
+   statistic can still rank fits, but p-values are conservative and should not be used
+   for hypothesis testing. A-D statistics are not computed for discrete distributions.
+   Use AIC/BIC for proper model selection.
+
+Anderson-Darling Test
+---------------------
+
+The Anderson-Darling (A-D) test provides an alternative to the Kolmogorov-Smirnov test with
+more weight on the tails of the distribution. Lower A-D statistics indicate better fits.
+
+.. code-block:: python
+
+   # Get best by A-D statistic
+   best_ad = results.best(n=1, metric="ad_statistic")[0]
+   print(f"Best: {best_ad.distribution} (A-D={best_ad.ad_statistic:.4f})")
+
+   # Filter by A-D threshold
+   good_fits = results.filter(ad_threshold=1.0)
+
+.. note::
+   A-D p-values are only available for 5 distributions (norm, expon, logistic, gumbel_r,
+   gumbel_l) where scipy has critical value tables. For other distributions, ``ad_pvalue``
+   will be ``None`` but ``ad_statistic`` is still valid for ranking fits.
 
 Excluding Distributions
 -----------------------
