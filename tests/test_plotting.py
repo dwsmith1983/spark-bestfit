@@ -234,6 +234,54 @@ class TestPlotComparison:
         assert fig is not None
         plt.close(fig)
 
+    def test_comparison_custom_axis_labels(self, normal_result, gamma_result, sample_histogram):
+        """Test comparison with custom axis labels."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_comparison(
+            [normal_result, gamma_result],
+            y_hist,
+            x_hist,
+            xlabel="Custom X Label",
+            ylabel="Custom Y Label",
+        )
+
+        assert ax.get_xlabel() == "Custom X Label"
+        assert ax.get_ylabel() == "Custom Y Label"
+        plt.close(fig)
+
+    def test_comparison_custom_figsize(self, normal_result, sample_histogram):
+        """Test comparison with custom figure size."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_comparison(
+            [normal_result],
+            y_hist,
+            x_hist,
+            figsize=(16, 12),
+        )
+
+        width, height = fig.get_size_inches()
+        assert width == 16
+        assert height == 12
+        plt.close(fig)
+
+    def test_comparison_save_pdf_format(self, normal_result, gamma_result, sample_histogram, tmp_path):
+        """Test saving comparison plot as PDF."""
+        y_hist, x_hist = sample_histogram
+        save_path = str(tmp_path / "comparison.pdf")
+
+        fig, ax = plot_comparison(
+            [normal_result, gamma_result],
+            y_hist,
+            x_hist,
+            save_path=save_path,
+            save_format="pdf",
+        )
+
+        assert (tmp_path / "comparison.pdf").exists()
+        plt.close(fig)
+
 
 class TestPlotSaving:
     """Tests for plot saving functionality."""
