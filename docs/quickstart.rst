@@ -160,6 +160,27 @@ sample quantiles against theoretical quantiles. Points close to the diagonal ind
        save_path="output/qq_plot.png",
    )
 
+
+P-P Plots
+---------
+
+P-P (probability-probability) plots compare the empirical cumulative distribution function (CDF)
+of the sample data against the theoretical CDF of the fitted distribution. They are
+particularly useful for assessing the fit in the center of the distribution.
+
+.. code-block:: python
+
+   # P-P plot for goodness-of-fit assessment
+   fitter.plot_pp(
+       best,
+       df,
+       "value",
+       max_points=1000,           # Sample size for plotting
+       figsize=(10, 10),
+       title="P-P Plot",
+       save_path="output/pp_plot.png",
+   )
+
 Discrete Distributions
 ----------------------
 

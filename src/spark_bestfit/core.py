@@ -485,6 +485,97 @@ class DistributionFitter:
             save_format=save_format,
         )
 
+    def plot_pp(
+        self,
+        result: DistributionFitResult,
+        df: DataFrame,
+        column: str,
+        max_points: int = 1000,
+        title: str = "",
+        xlabel: str = "Theoretical Probabilities",
+        ylabel: str = "Sample Probabilities",
+        figsize: Tuple[int, int] = (10, 10),
+        dpi: int = 100,
+        marker: str = "o",
+        marker_size: int = 30,
+        marker_alpha: float = 0.6,
+        marker_color: str = "steelblue",
+        line_color: str = "red",
+        line_style: str = "--",
+        line_width: float = 1.5,
+        title_fontsize: int = 14,
+        label_fontsize: int = 12,
+        grid_alpha: float = 0.3,
+        save_path: Optional[str] = None,
+        save_format: str = "png",
+    ):
+        """
+        Create a P-P plot to assess goodness-of-fit.
+
+        A P-P (probability-probability) plot compares the empirical CDF of the
+        sample data against the theoretical CDF of the fitted distribution.
+        Points falling close to the reference line indicate a good fit,
+        particularly in the center of the distribution.
+
+        Args:
+            result: DistributionFitResult to plot
+            df: DataFrame with data
+            column: Column name
+            max_points: Maximum data points to sample for plotting
+            title: Plot title
+            xlabel: X-axis label
+            ylabel: Y-axis label
+            figsize: Figure size (width, height)
+            dpi: Dots per inch for saved figures
+            marker: Marker style for data points
+            marker_size: Size of markers
+            marker_alpha: Marker transparency (0-1)
+            marker_color: Color of markers
+            line_color: Color of reference line
+            line_style: Style of reference line
+            line_width: Width of reference line
+            title_fontsize: Title font size
+            label_fontsize: Axis label font size
+            grid_alpha: Grid transparency (0-1)
+            save_path: Path to save figure (optional)
+            save_format: Save format (png, pdf, svg)
+
+        Returns:
+            Tuple of (figure, axis) from matplotlib
+
+        Example:
+            >>> best = results.best(n=1)[0]
+            >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
+        """
+        from spark_bestfit.plotting import plot_pp
+
+        # Sample data for P-P plot without requiring count()
+        # orderBy(rand()) + limit() avoids expensive count() operation
+        sample_df = df.select(column).orderBy(F.rand(seed=self.random_seed)).limit(max_points)
+        data = sample_df.toPandas()[column].values
+
+        return plot_pp(
+            result=result,
+            data=data,
+            title=title,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            figsize=figsize,
+            dpi=dpi,
+            marker=marker,
+            marker_size=marker_size,
+            marker_alpha=marker_alpha,
+            marker_color=marker_color,
+            line_color=line_color,
+            line_style=line_style,
+            line_width=line_width,
+            title_fontsize=title_fontsize,
+            label_fontsize=label_fontsize,
+            grid_alpha=grid_alpha,
+            save_path=save_path,
+            save_format=save_format,
+        )
+
 
 # Re-export for convenience
 DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS: Tuple[str, ...] = tuple(DiscreteDistributionRegistry.DEFAULT_EXCLUSIONS)

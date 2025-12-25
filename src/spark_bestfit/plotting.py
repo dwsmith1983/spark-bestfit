@@ -392,6 +392,137 @@ def plot_qq(
     return fig, ax
 
 
+def plot_pp(
+    result: "DistributionFitResult",
+    data: np.ndarray,
+    title: str = "",
+    xlabel: str = "Theoretical Probabilities",
+    ylabel: str = "Sample Probabilities",
+    figsize: Tuple[int, int] = (10, 10),
+    dpi: int = 100,
+    marker: str = "o",
+    marker_size: int = 30,
+    marker_alpha: float = 0.6,
+    marker_color: str = "steelblue",
+    line_color: str = "red",
+    line_style: str = "--",
+    line_width: float = 1.5,
+    title_fontsize: int = 14,
+    label_fontsize: int = 12,
+    grid_alpha: float = 0.3,
+    save_path: Optional[str] = None,
+    save_format: str = "png",
+) -> Tuple[Figure, Axes]:
+    """
+    Create a P-P (probability-probability) plot for goodness-of-fit assessment.
+
+    A P-P plot compares the empirical cumulative distribution function (CDF) of
+    the sample data against the theoretical CDF of the fitted distribution.
+    It is particularly useful for assessing fit in the center of the distribution.
+
+    Args:
+        result: Fitted distribution result
+        data: Sample data array (1D numpy array)
+        title: Plot title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+        figsize: Figure size (width, height)
+        dpi: Dots per inch for saved figures
+        marker: Marker style for data points
+        marker_size: Size of markers
+        marker_alpha: Marker transparency (0-1)
+        marker_color: Color of markers
+        line_color: Color of reference line
+        line_style: Style of reference line
+        line_width: Width of reference line
+        title_fontsize: Title font size
+        label_fontsize: Axis label font size
+        grid_alpha: Grid transparency (0-1)
+        save_path: Optional path to save figure
+        save_format: Save format (png, pdf, svg)
+
+    Returns:
+        Tuple of (figure, axis)
+
+    Example:
+        >>> from spark_bestfit import DistributionFitter
+        >>> fitter = DistributionFitter(spark)
+        >>> results = fitter.fit(df, 'value')
+        >>> best = results.best(n=1)[0]
+        >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
+    """
+    # 1. Sort the data
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
+
+    # 2. Calculate empirical probabilities (y-axis) using Blom's formula
+    empirical_probs = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
+
+    # 3. Calculate theoretical probabilities (x-axis) using the fitted CDF
+    # This is the main difference from plot_qq!
+    theoretical_probs = result.cdf(sorted_data)
+
+    # 4. Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # 5. Plot data points
+    ax.scatter(
+        theoretical_probs,
+        empirical_probs,
+        s=marker_size,
+        alpha=marker_alpha,
+        c=marker_color,
+        marker=marker,
+        edgecolors="white",
+        linewidth=0.5,
+        label="Data",
+        zorder=2,
+    )
+
+    # 6. Add reference line (y = x from 0 to 1)
+    ax.plot(
+        [0, 1], [0, 1], color=line_color, linestyle=line_style, linewidth=line_width, label="Reference (y=x)", zorder=1
+    )
+
+    # 7. Set aspect and limits (probabilities are always 0 to 1)
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+    ax.set_aspect("equal", adjustable="box")
+
+    # 8. Title and labels
+    dist = getattr(st, result.distribution)
+    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
+    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
+    dist_title = f"{result.distribution}({param_str})"
+
+    # Add K-S or SSE metric
+    # Add K-S statistic if available
+    if result.ks_statistic is not None:
+        metrics_str = f"KS={result.ks_statistic:.6f}"
+        if result.pvalue is not None:
+            metrics_str += f", p={result.pvalue:.4f}"
+    else:
+        # Fallback to SSE if KS is not available
+        metrics_str = f"SSE={result.sse:.6f}"
+
+    # Combine title, distribution info, and metrics
+    full_title = f"{title}\n{dist_title}\n{metrics_str}" if title else f"{dist_title}\n{metrics_str}"
+
+    ax.set_title(full_title, fontsize=title_fontsize, pad=15)
+    ax.set_xlabel(xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=label_fontsize)
+    ax.legend(fontsize=10, loc="upper left", framealpha=0.9)
+    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
+
+    return fig, ax
+
+
 def plot_discrete_distribution(
     result: "DistributionFitResult",
     data: np.ndarray,
