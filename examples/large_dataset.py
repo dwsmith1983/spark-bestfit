@@ -109,6 +109,9 @@ for size in data_sizes:
     print(f"\nBest distribution: {best.distribution}")
     print(f"K-S statistic: {best.ks_statistic:.6f}")
     print(f"p-value: {best.pvalue:.4f}")
+    print(f"A-D statistic: {best.ad_statistic:.6f}")
+    ad_pval = f"{best.ad_pvalue:.4f}" if best.ad_pvalue else "N/A"
+    print(f"A-D p-value: {ad_pval}")
     print(f"Parameters: {[f'{p:.4f}' for p in best.parameters]}")
 
     # Clean up

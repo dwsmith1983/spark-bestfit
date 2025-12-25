@@ -5,7 +5,10 @@ import pytest
 import scipy.stats as st
 
 from spark_bestfit.fitting import (
+    AD_PVALUE_DISTRIBUTIONS,
     FITTING_SAMPLE_SIZE,
+    compute_ad_pvalue,
+    compute_ad_statistic,
     compute_information_criteria,
     compute_ks_statistic,
     compute_pdf_range,
@@ -264,7 +267,10 @@ class TestFitSingleDistributionEdgeCases:
 
         result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
 
-        required_keys = {"distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue"}
+        required_keys = {
+            "distribution", "parameters", "sse", "aic", "bic",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"
+        }
         assert set(result.keys()) == required_keys
 
 class TestEvaluatePDFEdgeCases:
@@ -645,3 +651,192 @@ class TestFitSingleDistributionWithKS:
         # Should have K-S sentinel values
         assert result["ks_statistic"] == np.inf
         assert result["pvalue"] == 0.0
+
+
+class TestComputeAdStatistic:
+    """Tests for Anderson-Darling statistic computation."""
+
+    def test_ad_statistic_good_fit(self, normal_data):
+        """Test A-D statistic for good fit (correct distribution)."""
+        dist = st.norm
+        params = dist.fit(normal_data)
+
+        ad_stat = compute_ad_statistic(dist, params, normal_data)
+
+        assert np.isfinite(ad_stat)
+        # A-D statistic for good fit should be relatively small
+        assert 0 < ad_stat < 5.0
+
+    def test_ad_statistic_poor_fit(self, normal_data):
+        """Test A-D statistic for poor fit (wrong distribution)."""
+        # Fit exponential to normal data - should be a poor fit
+        dist = st.expon
+        params = dist.fit(normal_data)
+
+        ad_stat = compute_ad_statistic(dist, params, normal_data)
+
+        assert np.isfinite(ad_stat)
+        # A-D statistic should be larger for poor fit
+        assert ad_stat > 5.0
+
+    def test_ad_statistic_various_distributions(self):
+        """Test A-D statistic works with various scipy distributions."""
+        np.random.seed(42)
+
+        test_cases = [
+            (st.norm, st.norm.rvs(size=1000)),
+            (st.expon, st.expon.rvs(size=1000)),
+            (st.gamma, st.gamma.rvs(a=2, size=1000)),
+            (st.uniform, st.uniform.rvs(size=1000)),
+        ]
+
+        for dist, data in test_cases:
+            params = dist.fit(data)
+            ad_stat = compute_ad_statistic(dist, params, data)
+
+            assert np.isfinite(ad_stat), f"A-D stat not finite for {dist.name}"
+            assert ad_stat >= 0, f"A-D stat negative for {dist.name}"
+
+    def test_ad_statistic_small_sample(self):
+        """Test A-D statistic with small sample size."""
+        dist = st.norm
+        params = (0, 1)
+        small_data = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+
+        ad_stat = compute_ad_statistic(dist, params, small_data)
+
+        # Should still return value for small samples
+        assert np.isfinite(ad_stat) or ad_stat == np.inf
+
+    def test_ad_statistic_single_point(self):
+        """Test A-D statistic with single data point returns inf."""
+        dist = st.norm
+        params = (0, 1)
+        data = np.array([1.0])
+
+        ad_stat = compute_ad_statistic(dist, params, data)
+
+        assert ad_stat == np.inf
+
+    def test_ad_statistic_handles_boundary_cdf(self):
+        """Test A-D statistic handles CDF values at boundaries (0 or 1)."""
+        # Use data that would produce extreme CDF values
+        dist = st.norm
+        params = (0, 1)
+        # Data far in the tail
+        data = np.array([-10, -5, 0, 5, 10])
+
+        ad_stat = compute_ad_statistic(dist, params, data)
+
+        # Should return finite value due to clamping
+        assert np.isfinite(ad_stat)
+
+
+class TestComputeAdPvalue:
+    """Tests for Anderson-Darling p-value computation."""
+
+    def test_ad_pvalue_supported_distributions(self, normal_data):
+        """Test A-D p-value for supported distributions."""
+        for dist_name in AD_PVALUE_DISTRIBUTIONS.keys():
+            ad_pvalue = compute_ad_pvalue(dist_name, normal_data)
+
+            # Should return a valid p-value
+            assert ad_pvalue is not None, f"p-value is None for {dist_name}"
+            assert 0 < ad_pvalue <= 1.0, f"p-value out of range for {dist_name}"
+
+    def test_ad_pvalue_unsupported_distribution(self, normal_data):
+        """Test A-D p-value returns None for unsupported distributions."""
+        unsupported = ["gamma", "beta", "chi2", "uniform", "weibull_min"]
+
+        for dist_name in unsupported:
+            ad_pvalue = compute_ad_pvalue(dist_name, normal_data)
+            assert ad_pvalue is None, f"p-value should be None for {dist_name}"
+
+    def test_ad_pvalue_good_fit_high_pvalue(self):
+        """Test A-D p-value is high for good fit."""
+        np.random.seed(42)
+        # Generate normal data and test with normal distribution
+        normal_data = st.norm.rvs(size=1000)
+
+        ad_pvalue = compute_ad_pvalue("norm", normal_data)
+
+        # Good fit should have p-value > 0.05
+        assert ad_pvalue is not None
+        assert ad_pvalue > 0.05
+
+    def test_ad_pvalue_poor_fit_low_pvalue(self):
+        """Test A-D p-value is low for poor fit."""
+        np.random.seed(42)
+        # Generate uniform data and test with normal distribution
+        uniform_data = st.uniform.rvs(size=1000)
+
+        ad_pvalue = compute_ad_pvalue("norm", uniform_data)
+
+        # Poor fit should have low p-value
+        assert ad_pvalue is not None
+        assert ad_pvalue < 0.05
+
+    def test_ad_pvalue_norm_distribution(self):
+        """Test A-D p-value specifically for normal distribution."""
+        np.random.seed(42)
+        data = st.norm.rvs(loc=0, scale=1, size=1000)
+
+        ad_pvalue = compute_ad_pvalue("norm", data)
+
+        assert ad_pvalue is not None
+        assert isinstance(ad_pvalue, float)
+
+    def test_ad_pvalue_expon_distribution(self):
+        """Test A-D p-value specifically for exponential distribution."""
+        np.random.seed(42)
+        data = st.expon.rvs(size=1000)
+
+        ad_pvalue = compute_ad_pvalue("expon", data)
+
+        assert ad_pvalue is not None
+        assert isinstance(ad_pvalue, float)
+
+
+class TestFitSingleDistributionWithAD:
+    """Tests for fit_single_distribution including A-D fields."""
+
+    def test_fit_returns_ad_fields(self, normal_data):
+        """Test that fit_single_distribution returns A-D fields."""
+        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
+        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+
+        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+
+        # Should have A-D fields
+        assert "ad_statistic" in result
+        assert "ad_pvalue" in result
+
+        # A-D statistic should be valid
+        assert np.isfinite(result["ad_statistic"])
+        # p-value should exist for norm (supported distribution)
+        assert result["ad_pvalue"] is not None
+        assert 0 < result["ad_pvalue"] <= 1.0
+
+    def test_fit_unsupported_returns_ad_statistic_no_pvalue(self, normal_data):
+        """Test that unsupported distributions have A-D statistic but no p-value."""
+        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
+        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+
+        # gamma is not in AD_PVALUE_DISTRIBUTIONS
+        result = fit_single_distribution("gamma", normal_data, x_hist, y_hist)
+
+        # Should have A-D statistic
+        assert np.isfinite(result["ad_statistic"])
+        # But no p-value
+        assert result["ad_pvalue"] is None
+
+    def test_failed_fit_returns_ad_sentinel_values(self, normal_data):
+        """Test that failed fits return sentinel values for A-D fields."""
+        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
+        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+
+        result = fit_single_distribution("invalid_dist", normal_data, x_hist, y_hist)
+
+        # Should have A-D sentinel values
+        assert result["ad_statistic"] == np.inf
+        assert result["ad_pvalue"] is None

@@ -173,6 +173,42 @@ def result_with_ks():
 
 
 @pytest.fixture
+def result_with_ad():
+    """Create a result with Anderson-Darling statistic and p-value."""
+    from spark_bestfit.results import DistributionFitResult
+
+    return DistributionFitResult(
+        distribution="norm",
+        parameters=[50.0, 10.0],
+        sse=0.005,
+        aic=1500.0,
+        bic=1520.0,
+        ks_statistic=0.015,
+        pvalue=0.85,
+        ad_statistic=0.35,
+        ad_pvalue=0.15,
+    )
+
+
+@pytest.fixture
+def result_with_ad_no_pvalue():
+    """Create a result with A-D statistic but no p-value (unsupported distribution)."""
+    from spark_bestfit.results import DistributionFitResult
+
+    return DistributionFitResult(
+        distribution="gamma",
+        parameters=[2.0, 0.0, 2.0],
+        sse=0.003,
+        aic=1400.0,
+        bic=1430.0,
+        ks_statistic=0.020,
+        pvalue=0.90,
+        ad_statistic=0.50,
+        ad_pvalue=None,  # gamma doesn't support A-D p-value
+    )
+
+
+@pytest.fixture
 def sample_histogram():
     """Create sample histogram data."""
     np.random.seed(42)

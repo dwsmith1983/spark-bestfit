@@ -22,12 +22,19 @@ class DistributionFitResult:
         bic: Bayesian Information Criterion (lower is better)
         ks_statistic: Kolmogorov-Smirnov statistic (lower is better)
         pvalue: P-value from KS test (higher indicates better fit)
+        ad_statistic: Anderson-Darling statistic (lower is better)
+        ad_pvalue: P-value from A-D test (only for norm, expon, logistic, gumbel_r, gumbel_l)
 
     Note:
         The p-value from the KS test is approximate when parameters are
         estimated from the same data being tested. It tends to be conservative
         (larger than it should be). Use it for rough guidance, not strict
         hypothesis testing. The ks_statistic is valid for ranking fits.
+
+        The ad_pvalue is only available for 5 distributions (norm, expon,
+        logistic, gumbel_r, gumbel_l) where scipy has critical value tables.
+        For other distributions, ad_pvalue will be None but ad_statistic
+        is still valid for ranking fits.
     """
 
     distribution: str
@@ -37,6 +44,8 @@ class DistributionFitResult:
     bic: Optional[float] = None
     ks_statistic: Optional[float] = None
     pvalue: Optional[float] = None
+    ad_statistic: Optional[float] = None
+    ad_pvalue: Optional[float] = None
 
     def to_dict(self) -> dict:
         """Convert result to dictionary.
@@ -52,6 +61,8 @@ class DistributionFitResult:
             "bic": self.bic,
             "ks_statistic": self.ks_statistic,
             "pvalue": self.pvalue,
+            "ad_statistic": self.ad_statistic,
+            "ad_pvalue": self.ad_pvalue,
         }
 
     def get_scipy_dist(self):
@@ -131,10 +142,13 @@ class DistributionFitResult:
         bic_str = f"{self.bic:.2f}" if self.bic is not None else "None"
         ks_str = f"{self.ks_statistic:.6f}" if self.ks_statistic is not None else "None"
         pval_str = f"{self.pvalue:.4f}" if self.pvalue is not None else "None"
+        ad_str = f"{self.ad_statistic:.6f}" if self.ad_statistic is not None else "None"
+        ad_pval_str = f"{self.ad_pvalue:.4f}" if self.ad_pvalue is not None else "None"
         return (
             f"DistributionFitResult(distribution='{self.distribution}', "
             f"sse={self.sse:.6f}, aic={aic_str}, bic={bic_str}, "
             f"ks_statistic={ks_str}, pvalue={pval_str}, "
+            f"ad_statistic={ad_str}, ad_pvalue={ad_pval_str}, "
             f"parameters=[{param_str}])"
         )
 
@@ -180,7 +194,7 @@ class FitResults:
 
         Args:
             n: Number of results to return
-            metric: Metric to sort by ('ks_statistic', 'sse', 'aic', or 'bic').
+            metric: Metric to sort by ('ks_statistic', 'sse', 'aic', 'bic', or 'ad_statistic').
                 Defaults to 'ks_statistic' (Kolmogorov-Smirnov statistic).
 
         Returns:
@@ -193,8 +207,10 @@ class FitResults:
             >>> top_5 = results.best(n=5, metric='aic')
             >>> # Get best by SSE
             >>> best_sse = results.best(n=1, metric='sse')[0]
+            >>> # Get best by Anderson-Darling statistic
+            >>> best_ad = results.best(n=1, metric='ad_statistic')[0]
         """
-        valid_metrics = {"sse", "aic", "bic", "ks_statistic"}
+        valid_metrics = {"sse", "aic", "bic", "ks_statistic", "ad_statistic"}
         if metric not in valid_metrics:
             raise ValueError(f"metric must be one of {valid_metrics}")
 
@@ -209,6 +225,8 @@ class FitResults:
                 bic=row["bic"],
                 ks_statistic=row["ks_statistic"],
                 pvalue=row["pvalue"],
+                ad_statistic=row["ad_statistic"],
+                ad_pvalue=row["ad_pvalue"],
             )
             for row in top_n
         ]
@@ -220,6 +238,7 @@ class FitResults:
         bic_threshold: Optional[float] = None,
         ks_threshold: Optional[float] = None,
         pvalue_threshold: Optional[float] = None,
+        ad_threshold: Optional[float] = None,
     ) -> "FitResults":
         """Filter results by metric thresholds.
 
@@ -229,6 +248,7 @@ class FitResults:
             bic_threshold: Maximum BIC to include
             ks_threshold: Maximum K-S statistic to include
             pvalue_threshold: Minimum p-value to include (higher = better fit)
+            ad_threshold: Maximum A-D statistic to include
 
         Returns:
             New FitResults with filtered data
@@ -240,6 +260,8 @@ class FitResults:
             >>> low_aic = results.filter(aic_threshold=1000)
             >>> # Get fits with p-value > 0.05
             >>> significant = results.filter(pvalue_threshold=0.05)
+            >>> # Get fits with A-D statistic < 1.0
+            >>> good_ad = results.filter(ad_threshold=1.0)
         """
         filtered = self._df
 
@@ -253,6 +275,8 @@ class FitResults:
             filtered = filtered.filter(F.col("ks_statistic") < ks_threshold)
         if pvalue_threshold is not None:
             filtered = filtered.filter(F.col("pvalue") > pvalue_threshold)
+        if ad_threshold is not None:
+            filtered = filtered.filter(F.col("ad_statistic") < ad_threshold)
 
         return FitResults(filtered.cache())
 
@@ -264,8 +288,8 @@ class FitResults:
 
         Example:
             >>> results.summary()
-                   min_sse  mean_sse  max_sse  min_ks  mean_ks  max_ks  count
-            0      0.001     0.15      2.34    0.02    0.08     0.25     95
+                   min_sse  mean_sse  max_sse  min_ks  mean_ks  max_ks  min_ad  mean_ad  max_ad  count
+            0      0.001     0.15      2.34    0.02    0.08     0.25    0.10    0.50     2.0      95
         """
         summary = self._df.select(
             F.min("sse").alias("min_sse"),
@@ -280,6 +304,9 @@ class FitResults:
             F.min("pvalue").alias("min_pvalue"),
             F.mean("pvalue").alias("mean_pvalue"),
             F.max("pvalue").alias("max_pvalue"),
+            F.min("ad_statistic").alias("min_ad"),
+            F.mean("ad_statistic").alias("mean_ad"),
+            F.max("ad_statistic").alias("max_ad"),
             F.count("*").alias("total_distributions"),
         ).toPandas()
 
