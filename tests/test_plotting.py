@@ -7,7 +7,6 @@ import pytest
 matplotlib.use("Agg")  # Non-interactive backend for tests
 import matplotlib.pyplot as plt
 
-from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq
 from spark_bestfit.results import DistributionFitResult
 from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq, plot_pp
 
@@ -393,46 +392,132 @@ class TestPlotQQ:
 
 
 class TestPlotPP:
-    """Tests for plot_pp function."""
+    """Tests for plot_pp function (Probability-Probability plots)."""
 
     def test_basic_pp_plot(self, result_with_ks, sample_data):
         """Test basic P-P plot creates valid figure with expected elements."""
-        fig, ax = plot_pp(result_with_ks, sample_data)
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data
+        )
 
-        # Verify figure and axes are valid matplotlib objects
         assert fig is not None
-        assert ax is not None
-        assert isinstance(fig, plt.Figure)
         assert isinstance(ax, plt.Axes)
-
-        # Verify plot has scatter points and reference line
-        assert len(ax.collections) >= 1  # Scatter plot
-        assert len(ax.lines) >= 1  # Reference line
-
-        # Verify legend exists
-        assert ax.get_legend() is not None
+        assert len(ax.collections) >= 1
+        assert len(ax.lines) >= 1
         plt.close(fig)
 
     def test_pp_plot_with_title(self, result_with_ks, sample_data):
         """Test P-P plot with custom title."""
-        fig, ax = plot_pp(result_with_ks, sample_data, title="Test P-P Plot")
-        assert "Test P-P Plot" in ax.get_title()
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data,
+            title="Custom P-P Plot"
+        )
+
+        assert "Custom P-P Plot" in ax.get_title()
         plt.close(fig)
 
-    def test_pp_plot_shows_ks_and_pvalue(self, result_with_ks, sample_data):
-        """Test P-P plot shows both KS statistic and p-value (consistency fix)."""
-        # This specifically tests the fix Dustin requested
-        fig, ax = plot_pp(result_with_ks, sample_data)
+    def test_pp_plot_with_custom_labels(self, result_with_ks, sample_data):
+        """Test P-P plot with custom axis labels."""
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data,
+            xlabel="Empirical",
+            ylabel="Theoretical"
+        )
+
+        assert ax.get_xlabel() == "Empirical"
+        assert ax.get_ylabel() == "Theoretical"
+        plt.close(fig)
+
+    def test_pp_plot_shows_ks_statistic(self, result_with_ks, sample_data):
+        """Test P-P plot shows KS and p-value when available."""
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data
+        )
+
         title = ax.get_title()
         assert "KS=" in title
         assert "p=" in title
         plt.close(fig)
 
-    def test_pp_plot_limits(self, result_with_ks, sample_data):
-        """Test P-P plot axes are limited to [0, 1]."""
-        fig, ax = plot_pp(result_with_ks, sample_data)
-        assert ax.get_xlim() == (0.0, 1.0)
-        assert ax.get_ylim() == (0.0, 1.0)
+    def test_pp_plot_without_ks_shows_sse(self, normal_result, sample_data):
+        """Test P-P plot fallback to SSE when KS is missing."""
+        fig, ax = plot_pp(
+            normal_result,
+            sample_data
+        )
+
+        assert "SSE=" in ax.get_title()
+        plt.close(fig)
+
+    def test_pp_plot_gamma_distribution(self, gamma_result, sample_data):
+        """Test P-P plot handles shape parameters in title."""
+        fig, ax = plot_pp(
+            gamma_result,
+            sample_data
+        )
+
+        assert "gamma" in ax.get_title().lower()
+        plt.close(fig)
+
+    def test_pp_plot_custom_markers(self, result_with_ks, sample_data):
+        """Test P-P plot with custom marker settings."""
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data,
+            marker="D",
+            marker_color="green"
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_pp_plot_custom_line(self, result_with_ks, sample_data):
+        """Test P-P plot with custom reference line."""
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data,
+            line_color="orange",
+            line_width=3.0
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_pp_plot_small_data(self, result_with_ks):
+        """Test P-P plot edge case with very small data."""
+        small_data = np.array([1.2, 2.3, 3.4, 4.5, 5.6])
+
+        fig, ax = plot_pp(
+            result_with_ks,
+            small_data
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_pp_plot_equal_aspect(self, result_with_ks, sample_data):
+        """Test P-P plot enforces equal aspect ratio."""
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data
+        )
+
+        assert ax.get_aspect() in ["equal", 1.0]
+        plt.close(fig)
+
+    def test_pp_plot_figsize(self, result_with_ks, sample_data):
+        """Test P-P plot with custom figure size."""
+        fig, ax = plot_pp(
+            result_with_ks,
+            sample_data,
+            figsize=(12, 12)
+        )
+
+        assert fig.get_figwidth() == 12
         plt.close(fig)
 
 

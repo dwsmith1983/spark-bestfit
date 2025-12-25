@@ -518,6 +518,7 @@ def plot_pp(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
 
     return fig, ax
 
