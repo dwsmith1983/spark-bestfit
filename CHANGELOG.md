@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.7.0 (2025-12-25)
+
+### Features
+
+- Add bootstrap confidence intervals for fitted parameters (#11)
+  ([#29](https://github.com/dwsmith1983/spark-bestfit/pull/29),
+  [`a7ff425`](https://github.com/dwsmith1983/spark-bestfit/commit/a7ff425cc7f384272f2c8ad266a9e8a98cfc60ea))
+
+
 ## v0.6.0 (2025-12-25)
 
 ### Features
