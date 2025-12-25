@@ -543,6 +543,15 @@ def bootstrap_discrete_confidence_intervals(
     # Convert to array for percentile computation
     bootstrap_array = np.array(bootstrap_params)
 
+    # Remove outlier bootstrap estimates using IQR filtering per parameter
+    # This prevents extreme outliers from blowing up the CI bounds
+    bootstrap_array = _filter_bootstrap_outliers(bootstrap_array)
+
+    if len(bootstrap_array) < 10:
+        raise ValueError(
+            "Too few bootstrap samples remain after outlier filtering. " "Data may be unsuitable for this distribution."
+        )
+
     # Compute percentile confidence intervals
     lower_pct = (alpha / 2) * 100
     upper_pct = (1 - alpha / 2) * 100
@@ -554,3 +563,37 @@ def bootstrap_discrete_confidence_intervals(
         result[name] = (lower, upper)
 
     return result
+
+
+def _filter_bootstrap_outliers(bootstrap_array: np.ndarray, k: float = 3.0) -> np.ndarray:
+    """Filter bootstrap samples with outlier parameter values using IQR.
+
+    For each parameter, identifies outliers as values beyond Q1 - k*IQR or
+    Q3 + k*IQR. Removes entire bootstrap samples (rows) where ANY parameter
+    is an outlier.
+
+    Args:
+        bootstrap_array: Array of shape (n_bootstrap, n_params)
+        k: IQR multiplier for outlier detection (default 3.0 = far outliers)
+
+    Returns:
+        Filtered array with outlier rows removed
+    """
+    n_params = bootstrap_array.shape[1]
+    mask = np.ones(len(bootstrap_array), dtype=bool)
+
+    for i in range(n_params):
+        col = bootstrap_array[:, i]
+        q1 = np.percentile(col, 25)
+        q3 = np.percentile(col, 75)
+        iqr = q3 - q1
+
+        # Avoid division by zero for constant parameters
+        if iqr == 0:
+            continue
+
+        lower_bound = q1 - k * iqr
+        upper_bound = q3 + k * iqr
+        mask &= (col >= lower_bound) & (col <= upper_bound)
+
+    return bootstrap_array[mask]
