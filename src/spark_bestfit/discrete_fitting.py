@@ -1,7 +1,7 @@
 """Discrete distribution fitting using MLE optimization and Pandas UDFs."""
 
 import warnings
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -452,3 +452,105 @@ def create_discrete_sample_data(
     rng = np.random.RandomState(random_seed)
     indices = rng.choice(len(data_full), size=sample_size, replace=False)
     return data_full[indices].astype(int)
+
+
+def get_discrete_param_names(dist_name: str) -> List[str]:
+    """Get parameter names for a discrete scipy distribution.
+
+    Args:
+        dist_name: Name of scipy.stats discrete distribution
+
+    Returns:
+        List of parameter names
+
+    Example:
+        >>> get_discrete_param_names("poisson")
+        ['mu']
+        >>> get_discrete_param_names("binom")
+        ['n', 'p']
+        >>> get_discrete_param_names("nbinom")
+        ['n', 'p']
+    """
+    registry = DiscreteDistributionRegistry()
+    config = registry.get_param_config(dist_name)
+    return config["param_names"]
+
+
+def bootstrap_discrete_confidence_intervals(
+    dist_name: str,
+    data: np.ndarray,
+    alpha: float = 0.05,
+    n_bootstrap: int = 1000,
+    random_seed: Optional[int] = None,
+) -> Dict[str, Tuple[float, float]]:
+    """Compute bootstrap confidence intervals for discrete distribution parameters.
+
+    Uses the percentile bootstrap method: resample data with replacement,
+    refit the distribution using MLE, and compute confidence intervals from
+    the empirical distribution of fitted parameters.
+
+    Args:
+        dist_name: Name of scipy.stats discrete distribution
+        data: Integer data array used for fitting
+        alpha: Significance level (default 0.05 for 95% CI)
+        n_bootstrap: Number of bootstrap samples (default 1000)
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        Dictionary mapping parameter names to (lower, upper) bounds
+
+    Example:
+        >>> data = np.random.poisson(lam=7, size=1000)
+        >>> ci = bootstrap_discrete_confidence_intervals("poisson", data, alpha=0.05)
+        >>> print(ci)
+        {'mu': (6.75, 7.25)}
+
+    Note:
+        Bootstrap fitting may fail for some resamples. Failed fits are skipped.
+    """
+    rng = np.random.default_rng(random_seed)
+    data = data.astype(int)
+    n = len(data)
+
+    # Get parameter configuration
+    registry = DiscreteDistributionRegistry()
+    config = registry.get_param_config(dist_name)
+    param_names = config["param_names"]
+
+    # Collect bootstrap parameter estimates
+    bootstrap_params: List[Tuple[float, ...]] = []
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        sample = rng.choice(data, size=n, replace=True)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                initial = config["initial"](sample)
+                bounds = config["bounds"](sample)
+                params, _ = fit_discrete_mle(dist_name, sample, initial, bounds)
+                # Skip if any parameter is non-finite
+                if all(np.isfinite(p) for p in params):
+                    bootstrap_params.append(tuple(params))
+        except (ValueError, RuntimeError, FloatingPointError):
+            continue  # Skip failed fits
+
+    if len(bootstrap_params) < 10:
+        raise ValueError(
+            f"Too few successful bootstrap fits ({len(bootstrap_params)}/{n_bootstrap}). "
+            "Data may be unsuitable for this distribution."
+        )
+
+    # Convert to array for percentile computation
+    bootstrap_array = np.array(bootstrap_params)
+
+    # Compute percentile confidence intervals
+    lower_pct = (alpha / 2) * 100
+    upper_pct = (1 - alpha / 2) * 100
+
+    result: Dict[str, Tuple[float, float]] = {}
+    for i, name in enumerate(param_names):
+        lower = float(np.percentile(bootstrap_array[:, i], lower_pct))
+        upper = float(np.percentile(bootstrap_array[:, i], upper_pct))
+        result[name] = (lower, upper)
+
+    return result

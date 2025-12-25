@@ -4,12 +4,14 @@ import numpy as np
 import pytest
 
 from spark_bestfit.discrete_fitting import (
+    bootstrap_discrete_confidence_intervals,
     compute_discrete_histogram,
     compute_discrete_information_criteria,
     compute_discrete_ks_statistic,
     compute_discrete_sse,
     fit_discrete_mle,
     fit_single_discrete_distribution,
+    get_discrete_param_names,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 
@@ -354,3 +356,113 @@ class TestEdgeCasesAndErrorPaths:
         # SSE should be finite (sum of squared empirical PMF since fitted PMF ≈ 0)
         assert np.isfinite(sse)
         assert sse > 0
+
+
+class TestGetDiscreteParamNames:
+    """Tests for get_discrete_param_names function."""
+
+    def test_poisson_param_names(self):
+        """Test parameter names for Poisson distribution."""
+        names = get_discrete_param_names("poisson")
+        assert names == ["mu"]
+
+    def test_binomial_param_names(self):
+        """Test parameter names for binomial distribution."""
+        names = get_discrete_param_names("binom")
+        assert names == ["n", "p"]
+
+    def test_nbinom_param_names(self):
+        """Test parameter names for negative binomial distribution."""
+        names = get_discrete_param_names("nbinom")
+        assert names == ["n", "p"]
+
+    def test_geometric_param_names(self):
+        """Test parameter names for geometric distribution."""
+        names = get_discrete_param_names("geom")
+        assert names == ["p"]
+
+
+class TestBootstrapDiscreteConfidenceIntervals:
+    """Tests for bootstrap_discrete_confidence_intervals function."""
+
+    def test_basic_ci_computation_poisson(self):
+        """Test that CI is computed correctly for Poisson distribution."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=7, size=1000)
+
+        ci = bootstrap_discrete_confidence_intervals(
+            "poisson", data, alpha=0.05, n_bootstrap=100, random_seed=42
+        )
+
+        # Should have correct parameter name
+        assert "mu" in ci
+
+        # CI should be a tuple of (lower, upper)
+        assert isinstance(ci["mu"], tuple)
+        assert len(ci["mu"]) == 2
+        assert ci["mu"][0] < ci["mu"][1]  # lower < upper
+
+        # True lambda=7 should be within the CI
+        assert ci["mu"][0] < 7.0 < ci["mu"][1]
+
+    def test_ci_for_binomial(self):
+        """Test CI computation for binomial distribution."""
+        np.random.seed(42)
+        data = np.random.binomial(n=10, p=0.3, size=500)
+
+        ci = bootstrap_discrete_confidence_intervals(
+            "binom", data, alpha=0.05, n_bootstrap=100, random_seed=42
+        )
+
+        # Binomial has n and p parameters
+        assert "n" in ci
+        assert "p" in ci
+
+        # All CIs should be valid
+        for param, (lower, upper) in ci.items():
+            assert lower < upper
+
+    def test_reproducibility_with_seed(self):
+        """Test that same seed produces same results."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=5, size=500)
+
+        ci1 = bootstrap_discrete_confidence_intervals(
+            "poisson", data, alpha=0.05, n_bootstrap=50, random_seed=123
+        )
+        ci2 = bootstrap_discrete_confidence_intervals(
+            "poisson", data, alpha=0.05, n_bootstrap=50, random_seed=123
+        )
+
+        assert ci1["mu"] == ci2["mu"]
+
+    def test_different_alpha_values(self):
+        """Test that smaller alpha gives wider CI."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=5, size=1000)
+
+        ci_95 = bootstrap_discrete_confidence_intervals(
+            "poisson", data, alpha=0.05, n_bootstrap=200, random_seed=42
+        )
+        ci_99 = bootstrap_discrete_confidence_intervals(
+            "poisson", data, alpha=0.01, n_bootstrap=200, random_seed=42
+        )
+
+        # 99% CI should be wider than 95% CI
+        width_95 = ci_95["mu"][1] - ci_95["mu"][0]
+        width_99 = ci_99["mu"][1] - ci_99["mu"][0]
+        assert width_99 >= width_95
+
+    def test_small_sample_works(self):
+        """Test CI computation works with small sample."""
+        # Small sample - should still compute CI
+        small_data = np.array([1, 2, 3, 4, 5, 3, 2, 4, 3, 2])
+
+        ci = bootstrap_discrete_confidence_intervals(
+            "poisson", small_data, alpha=0.05, n_bootstrap=50, random_seed=42
+        )
+
+        # Should return valid CI
+        assert "mu" in ci
+        lower, upper = ci["mu"]
+        assert lower < upper

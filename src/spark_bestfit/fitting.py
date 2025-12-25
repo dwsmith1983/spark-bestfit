@@ -1,7 +1,7 @@
 """Distribution fitting using Pandas UDFs for efficient parallel processing."""
 
 import warnings
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -406,6 +406,109 @@ def compute_ad_pvalue(dist_name: str, data: np.ndarray) -> float | None:
 
     except (ValueError, RuntimeError, FloatingPointError):
         return None
+
+
+def get_continuous_param_names(dist_name: str) -> List[str]:
+    """Get parameter names for a continuous scipy distribution.
+
+    Args:
+        dist_name: Name of scipy.stats distribution
+
+    Returns:
+        List of parameter names in order: [shape_params..., "loc", "scale"]
+
+    Example:
+        >>> get_continuous_param_names("norm")
+        ['loc', 'scale']
+        >>> get_continuous_param_names("gamma")
+        ['a', 'loc', 'scale']
+        >>> get_continuous_param_names("beta")
+        ['a', 'b', 'loc', 'scale']
+    """
+    dist = getattr(st, dist_name)
+    shapes = dist.shapes
+    if shapes:
+        shape_names = [s.strip() for s in shapes.split(",")]
+    else:
+        shape_names = []
+    return shape_names + ["loc", "scale"]
+
+
+def bootstrap_confidence_intervals(
+    dist_name: str,
+    data: np.ndarray,
+    alpha: float = 0.05,
+    n_bootstrap: int = 1000,
+    random_seed: Optional[int] = None,
+) -> Dict[str, Tuple[float, float]]:
+    """Compute bootstrap confidence intervals for distribution parameters.
+
+    Uses the percentile bootstrap method: resample data with replacement,
+    refit the distribution, and compute confidence intervals from the
+    empirical distribution of fitted parameters.
+
+    Args:
+        dist_name: Name of scipy.stats distribution
+        data: Data array used for fitting
+        alpha: Significance level (default 0.05 for 95% CI)
+        n_bootstrap: Number of bootstrap samples (default 1000)
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        Dictionary mapping parameter names to (lower, upper) bounds
+
+    Example:
+        >>> data = np.random.normal(loc=10, scale=2, size=1000)
+        >>> ci = bootstrap_confidence_intervals("norm", data, alpha=0.05)
+        >>> print(ci)
+        {'loc': (9.85, 10.15), 'scale': (1.92, 2.08)}
+
+    Note:
+        Bootstrap fitting may fail for some resamples (e.g., if resampled
+        data doesn't have enough variation). Failed fits are skipped.
+    """
+    rng = np.random.default_rng(random_seed)
+    dist = getattr(st, dist_name)
+    n = len(data)
+
+    # Collect bootstrap parameter estimates
+    bootstrap_params: List[Tuple[float, ...]] = []
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        sample = rng.choice(data, size=n, replace=True)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                params = dist.fit(sample)
+                # Skip if any parameter is non-finite
+                if all(np.isfinite(p) for p in params):
+                    bootstrap_params.append(params)
+        except (ValueError, RuntimeError, FloatingPointError):
+            continue  # Skip failed fits
+
+    if len(bootstrap_params) < 10:
+        raise ValueError(
+            f"Too few successful bootstrap fits ({len(bootstrap_params)}/{n_bootstrap}). "
+            "Data may be unsuitable for this distribution."
+        )
+
+    # Convert to array for percentile computation
+    bootstrap_array = np.array(bootstrap_params)
+
+    # Compute percentile confidence intervals
+    lower_pct = (alpha / 2) * 100
+    upper_pct = (1 - alpha / 2) * 100
+
+    # Get parameter names
+    param_names = get_continuous_param_names(dist_name)
+
+    result: Dict[str, Tuple[float, float]] = {}
+    for i, name in enumerate(param_names):
+        lower = float(np.percentile(bootstrap_array[:, i], lower_pct))
+        upper = float(np.percentile(bootstrap_array[:, i], upper_pct))
+        result[name] = (lower, upper)
+
+    return result
 
 
 def create_sample_data(

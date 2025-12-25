@@ -19,6 +19,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Histogram-Based Fitting**: Efficient fitting using histogram representation
 - **Multiple Metrics**: Compare fits using K-S statistic, A-D statistic, SSE, AIC, and BIC
 - **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
+- **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
@@ -124,6 +125,18 @@ print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
 > **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
 > logistic, gumbel_r, gumbel_l) where scipy has critical value tables. For other distributions,
 > `ad_pvalue` will be `None` but `ad_statistic` is still valid for ranking fits.
+
+### Parameter Confidence Intervals
+
+```python
+# Compute 95% bootstrap confidence intervals
+ci = best.confidence_intervals(df, column="value", alpha=0.05, n_bootstrap=1000, random_seed=42)
+
+# Display with parameter names
+print(f"Distribution: {best.distribution}")
+for param, (lower, upper) in ci.items():
+    print(f"  {param}: [{lower:.4f}, {upper:.4f}]")
+```
 
 ### Custom Plotting
 

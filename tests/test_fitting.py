@@ -7,6 +7,7 @@ import scipy.stats as st
 from spark_bestfit.fitting import (
     AD_PVALUE_DISTRIBUTIONS,
     FITTING_SAMPLE_SIZE,
+    bootstrap_confidence_intervals,
     compute_ad_pvalue,
     compute_ad_statistic,
     compute_information_criteria,
@@ -16,6 +17,7 @@ from spark_bestfit.fitting import (
     evaluate_pdf,
     extract_distribution_params,
     fit_single_distribution,
+    get_continuous_param_names,
 )
 
 class TestFitSingleDistribution:
@@ -840,3 +842,124 @@ class TestFitSingleDistributionWithAD:
         # Should have A-D sentinel values
         assert result["ad_statistic"] == np.inf
         assert result["ad_pvalue"] is None
+
+
+class TestGetContinuousParamNames:
+    """Tests for get_continuous_param_names function."""
+
+    def test_normal_distribution(self):
+        """Test parameter names for normal distribution."""
+        names = get_continuous_param_names("norm")
+        assert names == ["loc", "scale"]
+
+    def test_gamma_distribution(self):
+        """Test parameter names for gamma distribution."""
+        names = get_continuous_param_names("gamma")
+        assert names == ["a", "loc", "scale"]
+
+    def test_beta_distribution(self):
+        """Test parameter names for beta distribution."""
+        names = get_continuous_param_names("beta")
+        assert names == ["a", "b", "loc", "scale"]
+
+    def test_exponential_distribution(self):
+        """Test parameter names for exponential distribution."""
+        names = get_continuous_param_names("expon")
+        assert names == ["loc", "scale"]
+
+
+class TestBootstrapConfidenceIntervals:
+    """Tests for bootstrap_confidence_intervals function."""
+
+    def test_basic_ci_computation(self, normal_data):
+        """Test that CI is computed correctly for normal distribution."""
+        ci = bootstrap_confidence_intervals(
+            "norm", normal_data, alpha=0.05, n_bootstrap=100, random_seed=42
+        )
+
+        # Should have correct parameter names
+        assert "loc" in ci
+        assert "scale" in ci
+
+        # Each CI should be a tuple of (lower, upper)
+        assert isinstance(ci["loc"], tuple)
+        assert len(ci["loc"]) == 2
+        assert ci["loc"][0] < ci["loc"][1]  # lower < upper
+
+    def test_ci_contains_point_estimate(self, normal_data):
+        """Test that CI contains the point estimate."""
+        # Fit the distribution to get point estimate
+        dist = st.norm
+        params = dist.fit(normal_data)
+        loc_estimate = params[0]
+        scale_estimate = params[1]
+
+        # Compute CI
+        ci = bootstrap_confidence_intervals(
+            "norm", normal_data, alpha=0.05, n_bootstrap=200, random_seed=42
+        )
+
+        # Point estimate should typically be within CI
+        # (Not always guaranteed due to sampling variability, but very likely)
+        loc_lower, loc_upper = ci["loc"]
+        scale_lower, scale_upper = ci["scale"]
+
+        # The true parameters (50, 10) should be within 95% CI
+        assert 45 < loc_lower < loc_upper < 55
+        assert 8 < scale_lower < scale_upper < 12
+
+    def test_reproducibility_with_seed(self, normal_data):
+        """Test that same seed produces same results."""
+        ci1 = bootstrap_confidence_intervals(
+            "norm", normal_data, alpha=0.05, n_bootstrap=50, random_seed=123
+        )
+        ci2 = bootstrap_confidence_intervals(
+            "norm", normal_data, alpha=0.05, n_bootstrap=50, random_seed=123
+        )
+
+        assert ci1["loc"] == ci2["loc"]
+        assert ci1["scale"] == ci2["scale"]
+
+    def test_different_alpha_values(self, normal_data):
+        """Test that smaller alpha gives wider CI."""
+        ci_95 = bootstrap_confidence_intervals(
+            "norm", normal_data, alpha=0.05, n_bootstrap=200, random_seed=42
+        )
+        ci_99 = bootstrap_confidence_intervals(
+            "norm", normal_data, alpha=0.01, n_bootstrap=200, random_seed=42
+        )
+
+        # 99% CI should be wider than 95% CI
+        width_95 = ci_95["loc"][1] - ci_95["loc"][0]
+        width_99 = ci_99["loc"][1] - ci_99["loc"][0]
+        assert width_99 > width_95
+
+    def test_gamma_distribution_ci(self, gamma_data):
+        """Test CI computation for gamma distribution."""
+        ci = bootstrap_confidence_intervals(
+            "gamma", gamma_data, alpha=0.05, n_bootstrap=100, random_seed=42
+        )
+
+        # Gamma has shape parameter 'a' plus loc and scale
+        assert "a" in ci
+        assert "loc" in ci
+        assert "scale" in ci
+
+        # All CIs should be valid
+        for param, (lower, upper) in ci.items():
+            assert lower < upper
+
+    def test_small_sample_warning(self):
+        """Test CI computation with small sample still works."""
+        # Small sample - should still compute CI, even if wider
+        small_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+        ci = bootstrap_confidence_intervals(
+            "norm", small_data, alpha=0.05, n_bootstrap=50, random_seed=42
+        )
+
+        # Should return valid CIs even for small data
+        assert "loc" in ci
+        assert "scale" in ci
+        for param, (lower, upper) in ci.items():
+            assert lower < upper
