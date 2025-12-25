@@ -92,7 +92,38 @@ Pass parameters directly to ``fit()`` to customize behavior:
        enable_sampling=True,        # Enable adaptive sampling
        sample_fraction=0.3,         # Sample 30% of data
        max_distributions=50,        # Limit distributions to fit
+       num_partitions=16,           # Spark parallelism (None = auto)
    )
+
+Parallelism Control
+-------------------
+
+The ``num_partitions`` parameter controls how many Spark partitions are used for parallel
+distribution fitting. Each partition fits a subset of distributions independently.
+
+**Default behavior (num_partitions=None):**
+
+The library auto-calculates partitions using: ``min(num_distributions, 2 × defaultParallelism)``
+
+- ``num_distributions``: Number of distributions being fitted
+- ``defaultParallelism``: Spark's default parallelism (typically equals total executor cores)
+
+**When to override:**
+
+.. code-block:: python
+
+   # Large cluster with many executors - increase parallelism
+   results = fitter.fit(df, "value", num_partitions=64)
+
+   # Resource-constrained environment - reduce parallelism
+   results = fitter.fit(df, "value", num_partitions=4)
+
+   # Fitting few distributions - let auto-calculate handle it
+   results = fitter.fit(df, "value", max_distributions=10)  # num_partitions auto-set
+
+.. note::
+   Setting ``num_partitions`` higher than the number of distributions has no benefit,
+   as each distribution requires exactly one task.
 
 Working with Results
 --------------------

@@ -1,5 +1,7 @@
 """Tests for core distribution fitting module."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -263,6 +265,61 @@ class TestDistributionFitter:
         assert best1.distribution == best2.distribution
         # SSE might differ slightly due to sampling, but should be close
         assert np.isclose(best1.sse, best2.sse, rtol=0.1)
+
+
+class TestBroadcastCleanup:
+    """Tests for broadcast variable cleanup.
+
+    These tests verify that fit() properly cleans up broadcast variables by
+    patching Broadcast.unpersist at the class level to track calls.
+    """
+
+    def test_broadcast_cleanup_on_success(self, spark_session, small_dataset):
+        """Verify unpersist() is called on broadcast variables after successful fit."""
+        from pyspark import Broadcast
+
+        fitter = DistributionFitter(spark_session)
+
+        # Track unpersist calls at Broadcast class level
+        unpersist_calls = []
+        original_unpersist = Broadcast.unpersist
+
+        def tracked_unpersist(self, blocking=False):
+            unpersist_calls.append(self._jbroadcast.id())
+            return original_unpersist(self, blocking)
+
+        with patch.object(Broadcast, "unpersist", tracked_unpersist):
+            results = fitter.fit(small_dataset, column="value", max_distributions=3)
+            assert results.count() > 0
+
+        # Verify both broadcasts (histogram_bc and data_sample_bc) were unpersisted
+        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls, got {len(unpersist_calls)}"
+
+    def test_discrete_broadcast_cleanup_on_success(self, spark_session):
+        """Verify unpersist() is called for discrete fitter broadcasts."""
+        from pyspark import Broadcast
+
+        # Create discrete data
+        data = [(int(x),) for x in np.random.poisson(lam=5, size=1000)]
+        df = spark_session.createDataFrame(data, ["value"])
+
+        fitter = DiscreteDistributionFitter(spark_session)
+
+        # Track unpersist calls at Broadcast class level
+        unpersist_calls = []
+        original_unpersist = Broadcast.unpersist
+
+        def tracked_unpersist(self, blocking=False):
+            unpersist_calls.append(self._jbroadcast.id())
+            return original_unpersist(self, blocking)
+
+        with patch.object(Broadcast, "unpersist", tracked_unpersist):
+            results = fitter.fit(df, column="value", max_distributions=3)
+            assert results.count() > 0
+
+        # Verify both broadcasts were unpersisted
+        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls, got {len(unpersist_calls)}"
+
 
 class TestDistributionFitterPlotting:
     """Tests for plotting functionality."""
