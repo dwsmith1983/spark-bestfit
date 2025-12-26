@@ -147,20 +147,20 @@ class DistributionFitter:
         logger.info("Creating data sample for parameter fitting...")
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
-        logger.info(f"Data sample size: {len(data_sample)}")
-
-        # Get distributions to fit
-        distributions = self._registry.get_distributions(
-            support_at_zero=support_at_zero,
-            additional_exclusions=list(self.excluded_distributions),
-        )
-
-        if max_distributions is not None and max_distributions > 0:
-            distributions = distributions[:max_distributions]
-
-        logger.info(f"Fitting {len(distributions)} distributions...")
 
         try:
+            logger.info(f"Data sample size: {len(data_sample)}")
+
+            # Get distributions to fit
+            distributions = self._registry.get_distributions(
+                support_at_zero=support_at_zero,
+                additional_exclusions=list(self.excluded_distributions),
+            )
+
+            if max_distributions is not None and max_distributions > 0:
+                distributions = distributions[:max_distributions]
+
+            logger.info(f"Fitting {len(distributions)} distributions...")
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
 
@@ -704,17 +704,17 @@ class DiscreteDistributionFitter:
         histogram_bc = self.spark.sparkContext.broadcast((x_values, empirical_pmf))
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
-        # Get distributions to fit
-        distributions = self._registry.get_distributions(
-            additional_exclusions=list(self.excluded_distributions),
-        )
-
-        if max_distributions is not None and max_distributions > 0:
-            distributions = distributions[:max_distributions]
-
-        logger.info(f"Fitting {len(distributions)} discrete distributions...")
-
         try:
+            # Get distributions to fit
+            distributions = self._registry.get_distributions(
+                additional_exclusions=list(self.excluded_distributions),
+            )
+
+            if max_distributions is not None and max_distributions > 0:
+                distributions = distributions[:max_distributions]
+
+            logger.info(f"Fitting {len(distributions)} discrete distributions...")
+
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
 

@@ -320,6 +320,65 @@ class TestBroadcastCleanup:
         # Verify both broadcasts were unpersisted
         assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls, got {len(unpersist_calls)}"
 
+    def test_broadcast_cleanup_on_get_distributions_exception(self, spark_session, small_dataset):
+        """Verify broadcasts are cleaned up even when get_distributions() raises.
+
+        This tests the fix for a broadcast memory leak bug where broadcasts were
+        created before the try block, causing them to leak if an exception occurred
+        during get_distributions() or other pre-fitting operations.
+        """
+        from pyspark import Broadcast
+
+        fitter = DistributionFitter(spark_session)
+
+        unpersist_calls = []
+        original_unpersist = Broadcast.unpersist
+
+        def tracked_unpersist(self, blocking=False):
+            unpersist_calls.append(self._jbroadcast.id())
+            return original_unpersist(self, blocking)
+
+        with patch.object(Broadcast, "unpersist", tracked_unpersist):
+            with patch.object(
+                fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
+            ):
+                with pytest.raises(ValueError, match="Injected error"):
+                    fitter.fit(small_dataset, column="value", max_distributions=3)
+
+        # CRITICAL: Even on exception, broadcasts must be cleaned up
+        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls on exception, got {len(unpersist_calls)}"
+
+    def test_discrete_broadcast_cleanup_on_get_distributions_exception(self, spark_session):
+        """Verify discrete broadcasts are cleaned up even when get_distributions() raises.
+
+        This tests the fix for a broadcast memory leak bug where broadcasts were
+        created before the try block, causing them to leak if an exception occurred
+        during get_distributions() or other pre-fitting operations.
+        """
+        from pyspark import Broadcast
+
+        data = [(int(x),) for x in np.random.poisson(lam=5, size=1000)]
+        df = spark_session.createDataFrame(data, ["value"])
+
+        fitter = DiscreteDistributionFitter(spark_session)
+
+        unpersist_calls = []
+        original_unpersist = Broadcast.unpersist
+
+        def tracked_unpersist(self, blocking=False):
+            unpersist_calls.append(self._jbroadcast.id())
+            return original_unpersist(self, blocking)
+
+        with patch.object(Broadcast, "unpersist", tracked_unpersist):
+            with patch.object(
+                fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
+            ):
+                with pytest.raises(ValueError, match="Injected error"):
+                    fitter.fit(df, column="value", max_distributions=3)
+
+        # CRITICAL: Even on exception, broadcasts must be cleaned up
+        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls on exception, got {len(unpersist_calls)}"
+
 
 class TestDistributionFitterPlotting:
     """Tests for plotting functionality."""
