@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.7.2 (2025-12-26)
+
+### Bug Fixes
+
+- Broadcast cleanup bug and add failure mode tests
+  ([#31](https://github.com/dwsmith1983/spark-bestfit/pull/31),
+  [`b5b2a53`](https://github.com/dwsmith1983/spark-bestfit/commit/b5b2a538653bea6a51daacc1d8623c71527f9a79))
+
+
 ## v0.7.1 (2025-12-25)
 
 ### Bug Fixes
