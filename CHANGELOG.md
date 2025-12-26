@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.8.0 (2025-12-26)
+
+### Features
+
+- Add performance benchmarks and scaling documentation
+  ([#33](https://github.com/dwsmith1983/spark-bestfit/pull/33),
+  [`89dc763`](https://github.com/dwsmith1983/spark-bestfit/commit/89dc76337e30b4a980601db012b8d7898d1824cd))
+
+
 ## v0.7.2 (2025-12-26)
 
 ### Bug Fixes
