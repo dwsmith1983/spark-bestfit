@@ -17,6 +17,7 @@ to your data using Apache Spark's distributed computing power, with optimized Pa
    :caption: Contents:
 
    quickstart
+   performance
    api
 
 Indices and tables

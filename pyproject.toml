@@ -52,6 +52,7 @@ dev = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
+    "pytest-benchmark>=5.0.0",
     "ruff>=0.8.0",
     "black>=24.10.0",
     "isort>=5.13.0",
@@ -98,8 +99,11 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+# Exclude benchmarks from normal test runs (run with: pytest tests/benchmarks/)
+norecursedirs = ["tests/benchmarks"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "benchmark: performance benchmarks (run with: make benchmark)",
 ]
 
 [tool.coverage.run]
