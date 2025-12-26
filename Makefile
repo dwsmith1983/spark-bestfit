@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean
+.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-charts
 
 .DEFAULT_GOAL := help
 
@@ -52,3 +52,9 @@ docs-clean: ## Clean documentation build
 setup: install-dev ## Initial setup for development
 	@echo "Development environment setup complete"
 	@echo "Run 'make test' to verify everything works"
+
+benchmark: ## Run performance benchmarks (not run in CI)
+	PYTHONPATH=src pytest tests/benchmarks/ -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=latest --benchmark-save-data
+
+benchmark-charts: ## Generate scaling charts from benchmark results
+	python scripts/generate_scaling_charts.py
