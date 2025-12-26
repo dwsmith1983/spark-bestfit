@@ -1,7 +1,7 @@
 """Results handling for fitted distributions."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,6 +11,9 @@ from pyspark.sql import DataFrame
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame as SparkDataFrame
+
+# Type alias for valid metric names (for IDE autocomplete and type checking)
+MetricName = Literal["sse", "aic", "bic", "ks_statistic", "ad_statistic"]
 
 
 @dataclass
@@ -297,7 +300,7 @@ class FitResults:
         """
         return self._df
 
-    def best(self, n: int = 1, metric: str = "ks_statistic") -> List[DistributionFitResult]:
+    def best(self, n: int = 1, metric: MetricName = "ks_statistic") -> List[DistributionFitResult]:
         """Get top n distributions by specified metric.
 
         Args:

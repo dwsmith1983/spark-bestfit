@@ -31,7 +31,7 @@ from spark_bestfit.core import (
     DistributionFitter,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
-from spark_bestfit.results import DistributionFitResult, FitResults
+from spark_bestfit.results import DistributionFitResult, FitResults, MetricName
 from spark_bestfit.utils import get_spark_session
 
 __author__ = "Dustin Smith"
@@ -47,6 +47,8 @@ __all__ = [
     # Results
     "FitResults",
     "DistributionFitResult",
+    # Type aliases
+    "MetricName",
     # Distribution management
     "DistributionRegistry",
     "DiscreteDistributionRegistry",
