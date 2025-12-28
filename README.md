@@ -3,6 +3,7 @@
 [![CI](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml/badge.svg)](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/spark-bestfit)](https://pypi.org/project/spark-bestfit/)
 [![Documentation Status](https://readthedocs.org/projects/spark-bestfit/badge/?version=latest)](https://spark-bestfit.readthedocs.io/en/latest/)
+[![Production Ready](https://img.shields.io/badge/status-production--ready-brightgreen)](https://github.com/dwsmith1983/spark-bestfit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -23,6 +24,21 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
+
+## Scope & Limitations
+
+spark-bestfit is designed for **batch processing** of statistical distribution fitting on Spark DataFrames.
+
+**What it does well:**
+- Fit ~100 continuous and 16 discrete scipy.stats distributions in parallel
+- Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
+- Generate publication-ready visualizations (histograms, Q-Q plots, P-P plots)
+- Compute bootstrap confidence intervals for parameters
+
+**Known limitations:**
+- No real-time/streaming support (batch processing only)
+- No progress tracking for long-running fits (planned for 1.2.0)
+- Custom distribution support planned for 1.3.0
 
 ## Installation
 

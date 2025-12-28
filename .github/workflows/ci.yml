@@ -75,6 +75,39 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
 
+  security:
+    name: Security Scan
+    needs: pre-commit
+    runs-on: ubuntu-latest
+    # Skip for release-please PRs (version bump only, code already passed CI on main)
+    if: ${{ !startsWith(github.head_ref, 'release-please') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install pip-audit
+          pip install -e ".[spark]"
+      # pip-audit: Scan installed packages for known CVEs
+      # Uses PyPI Advisory Database (https://github.com/pypa/advisory-database)
+      - name: Security Scan (pip-audit)
+        continue-on-error: true
+        run: |
+          pip-audit --format=json --output=pip-audit-report.json || true
+          pip-audit --format=markdown --output=pip-audit-report.md || true
+          pip-audit
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-report
+          path: |
+            pip-audit-report.json
+            pip-audit-report.md
+          retention-days: 30
+
   docs:
     needs: pre-commit
     runs-on: ubuntu-latest
