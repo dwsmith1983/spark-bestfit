@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.0 (2025-12-28)
+
+### Features
+
+- 1.0.0 release preparation ([#37](https://github.com/dwsmith1983/spark-bestfit/pull/37),
+  [`47e662f`](https://github.com/dwsmith1983/spark-bestfit/commit/47e662f8e0bbeeb779e2e29073d159780184191e))
+
+
 ## v0.8.0 (2025-12-26)
 
 ### Features
