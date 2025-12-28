@@ -12,6 +12,24 @@ to your data using Apache Spark's distributed computing power, with optimized Pa
 - Apache Spark 3.5.x and 4.x
 - See :doc:`quickstart` for the full compatibility matrix
 
+Scope & Limitations
+-------------------
+
+spark-bestfit is designed for **batch processing** of statistical distribution fitting.
+
+**What it does well:**
+
+- Fit ~100 continuous and 16 discrete scipy.stats distributions in parallel
+- Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
+- Generate publication-ready visualizations (histograms, Q-Q plots, P-P plots)
+- Compute bootstrap confidence intervals for parameters
+
+**Known limitations:**
+
+- No real-time/streaming support (batch processing only)
+- No progress tracking for long-running fits (planned for 1.2.0)
+- Custom distribution support planned for 1.3.0
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
