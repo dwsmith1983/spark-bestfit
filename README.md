@@ -302,7 +302,7 @@ Full documentation is available at [spark-bestfit.readthedocs.io](https://spark-
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feat/amazing-feature`)

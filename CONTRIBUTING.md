@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to spark-bestfit!
 
+Please note that this project adheres to a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+
 ## Development Setup
 
 1. **Clone the repository**
