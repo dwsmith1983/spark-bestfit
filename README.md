@@ -15,6 +15,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 ## Features
 
 - **Parallel Processing**: Fits distributions in parallel using Spark
+- **Multi-Column Fitting**: Fit multiple columns efficiently in a single operation
 - **~100 Continuous Distributions**: Access to nearly all scipy.stats continuous distributions
 - **16 Discrete Distributions**: Fit count data with Poisson, negative binomial, geometric, and more
 - **Histogram-Based Fitting**: Efficient fitting using histogram representation
@@ -108,6 +109,46 @@ results = fitter.fit(
     max_distributions=50,        # Limit distributions to fit
 )
 ```
+
+### Multi-Column Fitting
+
+Fit multiple columns efficiently in a single operation:
+
+```python
+from spark_bestfit import DistributionFitter
+
+# Create DataFrame with multiple columns
+df = spark.createDataFrame([
+    (1.0, 10.0, 100.0),
+    (2.0, 20.0, 200.0),
+    # ...
+], ["col_a", "col_b", "col_c"])
+
+fitter = DistributionFitter(spark)
+
+# Fit all columns in one call - shares Spark overhead
+results = fitter.fit(df, columns=["col_a", "col_b", "col_c"])
+
+# Get results for a specific column
+col_a_results = results.for_column("col_a")
+best_a = col_a_results.best(n=1)[0]
+
+# Get best distribution per column
+best_per_col = results.best_per_column(n=1)
+for col_name, fits in best_per_col.items():
+    print(f"{col_name}: {fits[0].distribution} (KS={fits[0].ks_statistic:.4f})")
+
+# List all columns in results
+print(results.column_names)  # ['col_a', 'col_b', 'col_c']
+```
+
+Multi-column fitting is more efficient than fitting columns separately because it:
+- Performs a single `df.count()` call for all columns
+- Shares the data sample across all fitting operations
+- Minimizes Spark job overhead
+
+> **Benchmark:** Fitting 3 columns together is ~1.3× faster than 3 separate fits (4.8s vs 6.5s).
+> See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for details.
 
 ### Working with Results
 

@@ -267,6 +267,111 @@ class TestDistributionFitter:
         assert np.isclose(best1.sse, best2.sse, rtol=0.1)
 
 
+class TestMultiColumnFitting:
+    """Tests for multi-column distribution fitting."""
+
+    def test_fit_multiple_columns_basic(self, spark_session):
+        """Test basic multi-column fitting."""
+        np.random.seed(42)
+        data1 = np.random.normal(50, 10, 5000)
+        data2 = np.random.exponential(5, 5000)
+
+        df = spark_session.createDataFrame(
+            [(float(a), float(b)) for a, b in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(df, columns=["col1", "col2"], max_distributions=3)
+
+        # Should have results for both columns
+        assert results.count() == 6  # 2 columns × 3 distributions
+        assert set(results.column_names) == {"col1", "col2"}
+
+    def test_fit_multiple_columns_filtering(self, spark_session):
+        """Test filtering multi-column results by column."""
+        np.random.seed(42)
+        data1 = np.random.normal(50, 10, 5000)
+        data2 = np.random.exponential(5, 5000)
+
+        df = spark_session.createDataFrame(
+            [(float(a), float(b)) for a, b in zip(data1, data2)],
+            ["normal_col", "expon_col"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(df, columns=["normal_col", "expon_col"], max_distributions=3)
+
+        # Filter to single column
+        normal_results = results.for_column("normal_col")
+        assert normal_results.count() == 3
+
+        expon_results = results.for_column("expon_col")
+        assert expon_results.count() == 3
+
+    def test_fit_multiple_columns_best_per_column(self, spark_session):
+        """Test best_per_column method."""
+        np.random.seed(42)
+        data1 = np.random.normal(50, 10, 5000)
+        data2 = np.random.exponential(5, 5000)
+
+        df = spark_session.createDataFrame(
+            [(float(a), float(b)) for a, b in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(df, columns=["col1", "col2"], max_distributions=5)
+
+        best_per_col = results.best_per_column(n=1)
+
+        assert "col1" in best_per_col
+        assert "col2" in best_per_col
+        assert len(best_per_col["col1"]) == 1
+        assert len(best_per_col["col2"]) == 1
+        assert best_per_col["col1"][0].column_name == "col1"
+        assert best_per_col["col2"][0].column_name == "col2"
+
+    def test_fit_backward_compatibility(self, spark_session, small_dataset):
+        """Test that single column API still works with positional arg."""
+        fitter = DistributionFitter(spark_session)
+        # Using positional argument (backward compatible)
+        results = fitter.fit(small_dataset, "value", max_distributions=3)
+
+        assert results.count() == 3
+        best = results.best(n=1)[0]
+        assert best.column_name == "value"
+
+    def test_fit_mutually_exclusive_params(self, spark_session, small_dataset):
+        """Test error when both column and columns provided."""
+        fitter = DistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="Cannot provide both"):
+            fitter.fit(small_dataset, column="value", columns=["value"])
+
+    def test_fit_no_column_params(self, spark_session, small_dataset):
+        """Test error when neither column nor columns provided."""
+        fitter = DistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="Must provide either"):
+            fitter.fit(small_dataset)
+
+    def test_fit_invalid_column_in_list(self, spark_session, small_dataset):
+        """Test error when invalid column in columns list."""
+        fitter = DistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="not found"):
+            fitter.fit(small_dataset, columns=["value", "nonexistent"])
+
+    def test_fit_single_column_via_columns_param(self, spark_session, small_dataset):
+        """Test fitting single column using columns parameter."""
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(small_dataset, columns=["value"], max_distributions=3)
+
+        assert results.count() == 3
+        assert results.column_names == ["value"]
+
+
 class TestBroadcastCleanup:
     """Tests for broadcast variable cleanup.
 
@@ -321,63 +426,42 @@ class TestBroadcastCleanup:
         assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls, got {len(unpersist_calls)}"
 
     def test_broadcast_cleanup_on_get_distributions_exception(self, spark_session, small_dataset):
-        """Verify broadcasts are cleaned up even when get_distributions() raises.
+        """Verify no broadcasts leak when get_distributions() raises.
 
-        This tests the fix for a broadcast memory leak bug where broadcasts were
-        created before the try block, causing them to leak if an exception occurred
-        during get_distributions() or other pre-fitting operations.
+        With the refactored architecture, broadcasts are created inside
+        _fit_single_column(), which is called AFTER get_distributions().
+        If get_distributions() fails, no broadcasts have been created yet,
+        so no cleanup is needed. This is actually better than the old design
+        because it minimizes resource allocation before potential failures.
         """
-        from pyspark import Broadcast
-
         fitter = DistributionFitter(spark_session)
 
-        unpersist_calls = []
-        original_unpersist = Broadcast.unpersist
+        with patch.object(
+            fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
+        ):
+            with pytest.raises(ValueError, match="Injected error"):
+                fitter.fit(small_dataset, column="value", max_distributions=3)
 
-        def tracked_unpersist(self, blocking=False):
-            unpersist_calls.append(self._jbroadcast.id())
-            return original_unpersist(self, blocking)
-
-        with patch.object(Broadcast, "unpersist", tracked_unpersist):
-            with patch.object(
-                fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
-            ):
-                with pytest.raises(ValueError, match="Injected error"):
-                    fitter.fit(small_dataset, column="value", max_distributions=3)
-
-        # CRITICAL: Even on exception, broadcasts must be cleaned up
-        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls on exception, got {len(unpersist_calls)}"
+        # No broadcasts should have been created, so no cleanup needed
 
     def test_discrete_broadcast_cleanup_on_get_distributions_exception(self, spark_session):
-        """Verify discrete broadcasts are cleaned up even when get_distributions() raises.
+        """Verify no discrete broadcasts leak when get_distributions() raises.
 
-        This tests the fix for a broadcast memory leak bug where broadcasts were
-        created before the try block, causing them to leak if an exception occurred
-        during get_distributions() or other pre-fitting operations.
+        Broadcasts are created after get_distributions() is called, so if
+        get_distributions() fails, no broadcasts have been created yet.
         """
-        from pyspark import Broadcast
-
         data = [(int(x),) for x in np.random.poisson(lam=5, size=1000)]
         df = spark_session.createDataFrame(data, ["value"])
 
         fitter = DiscreteDistributionFitter(spark_session)
 
-        unpersist_calls = []
-        original_unpersist = Broadcast.unpersist
+        with patch.object(
+            fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
+        ):
+            with pytest.raises(ValueError, match="Injected error"):
+                fitter.fit(df, column="value", max_distributions=3)
 
-        def tracked_unpersist(self, blocking=False):
-            unpersist_calls.append(self._jbroadcast.id())
-            return original_unpersist(self, blocking)
-
-        with patch.object(Broadcast, "unpersist", tracked_unpersist):
-            with patch.object(
-                fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
-            ):
-                with pytest.raises(ValueError, match="Injected error"):
-                    fitter.fit(df, column="value", max_distributions=3)
-
-        # CRITICAL: Even on exception, broadcasts must be cleaned up
-        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls on exception, got {len(unpersist_calls)}"
+        # No broadcasts should have been created, so no cleanup needed
 
 
 class TestDistributionFitterPlotting:

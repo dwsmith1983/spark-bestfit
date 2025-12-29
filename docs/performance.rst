@@ -40,24 +40,34 @@ Time Complexity
    * - Operation
      - Complexity
      - Notes
-   * - Histogram computation
+   * - Data count/sample
      - O(N)
-     - Single Spark aggregation
+     - Single Spark aggregation (shared across columns)
+   * - Histogram computation
+     - O(N × C)
+     - One histogram per column
    * - Distribution fitting
-     - O(D × B)
-     - D = distributions, B = histogram bins
+     - O(C × D × B)
+     - D distributions × B bins × C columns
    * - Total fit time
-     - O(N) + O(D × B)
-     - Histogram dominates for large N
+     - O(N) + O(C × D × B)
+     - Data overhead shared, fitting scales with columns
 
 Where:
 
 - **N** = number of data rows
+- **C** = number of columns being fitted
 - **D** = number of distributions (~100 continuous, ~16 discrete)
 - **B** = histogram bins (default: 100)
 
-Since histogram computation is a single aggregation and D × B is fixed (~10,000 operations),
-**fit time scales sub-linearly with data size**.
+**Single-column:** O(N) + O(D × B) — histogram dominates for large N
+
+**Multi-column (together):** O(N) + O(C × D × B) — data overhead paid once
+
+**Multi-column (separate):** C × [O(N) + O(D × B)] — data overhead paid C times
+
+This is why ``columns=[...]`` is faster than C separate ``column=`` calls:
+the O(N) data operations are shared.
 
 .. image:: _static/scaling_dist_count.png
    :alt: Fit time vs distribution count
@@ -150,6 +160,38 @@ distributions are computationally expensive:
 
 The first ~50 distributions are fast (~35-75ms each). The remaining distributions
 include slow ones like ``levy_stable`` and ``studentized_range`` (~285ms each).
+
+Multi-Column Efficiency
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Fitting multiple columns in a single call is more efficient than fitting each
+column separately. The efficiency gains come from shared Spark overhead:
+
+- Single ``df.count()`` call for all columns
+- Shared data sampling across columns
+- Single broadcast setup per fit operation
+
+.. image:: _static/multi_column_efficiency.png
+   :alt: Multi-column fitting efficiency
+   :width: 100%
+
+**Recommendation**: When fitting the same distributions to multiple columns,
+always use ``columns=[...]`` instead of separate ``column=`` calls.
+
+.. code-block:: python
+
+    # Efficient: single call for all columns
+    results = fitter.fit(df, columns=["col1", "col2", "col3"])
+
+    # Less efficient: 3 separate calls
+    results1 = fitter.fit(df, column="col1")
+    results2 = fitter.fit(df, column="col2")
+    results3 = fitter.fit(df, column="col3")
+
+.. note::
+   Multi-column fitting scales well with data size. In benchmarks, fitting 3 columns
+   with 100K rows each took similar time to 10K rows (~4.4s vs ~4.8s), demonstrating
+   the sub-linear scaling benefits of the histogram-based approach.
 
 Tuning Recommendations
 ----------------------

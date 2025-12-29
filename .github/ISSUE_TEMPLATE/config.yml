@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://spark-bestfit.readthedocs.io/
+    about: Check the documentation for usage guides and API reference
+  - name: Discussions
+    url: https://github.com/dwsmith1983/spark-bestfit/discussions
+    about: Ask questions and discuss ideas

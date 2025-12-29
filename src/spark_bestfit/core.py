@@ -82,7 +82,8 @@ class DistributionFitter:
     def fit(
         self,
         df: DataFrame,
-        column: str,
+        column: Optional[str] = None,
+        columns: Optional[List[str]] = None,
         bins: Union[int, Tuple[float, ...]] = 50,
         use_rice_rule: bool = True,
         support_at_zero: bool = False,
@@ -93,11 +94,12 @@ class DistributionFitter:
         sample_threshold: int = 10_000_000,
         num_partitions: Optional[int] = None,
     ) -> FitResults:
-        """Fit distributions to data column.
+        """Fit distributions to data column(s).
 
         Args:
             df: Spark DataFrame containing data
-            column: Name of column to fit distributions to
+            column: Name of single column to fit distributions to
+            columns: List of column names for multi-column fitting
             bins: Number of histogram bins or tuple of bin edges
             use_rice_rule: Use Rice rule to auto-determine bin count
             support_at_zero: Only fit non-negative distributions
@@ -116,51 +118,116 @@ class DistributionFitter:
             TypeError: If column is not numeric
 
         Example:
-            >>> results = fitter.fit(df, 'value')
+            >>> # Single column
+            >>> results = fitter.fit(df, column='value')
             >>> results = fitter.fit(df, 'value', bins=100, support_at_zero=True)
+            >>>
+            >>> # Multi-column
+            >>> results = fitter.fit(df, columns=['col1', 'col2', 'col3'])
+            >>> best_col1 = results.for_column('col1').best(n=1)[0]
+            >>> best_per_col = results.best_per_column(n=1)
         """
-        # Input validation
-        self._validate_inputs(df, column, max_distributions, bins, sample_fraction)
+        # Validate column/columns parameters
+        if column is None and columns is None:
+            raise ValueError("Must provide either 'column' or 'columns' parameter")
+        if column is not None and columns is not None:
+            raise ValueError("Cannot provide both 'column' and 'columns' - use one or the other")
 
-        # Get row count
+        # Normalize to list of columns
+        target_columns = [column] if column is not None else columns
+
+        # Input validation for all columns
+        for col in target_columns:
+            self._validate_inputs(df, col, max_distributions, bins, sample_fraction)
+
+        # Get row count (single operation for all columns)
         row_count = df.count()
         if row_count == 0:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
 
-        # Sample if needed
+        # Sample if needed (single operation for all columns)
         df_sample = self._apply_sampling(
             df, row_count, enable_sampling, sample_fraction, max_sample_size, sample_threshold
         )
 
+        # Get distributions to fit (same for all columns)
+        distributions = self._registry.get_distributions(
+            support_at_zero=support_at_zero,
+            additional_exclusions=list(self.excluded_distributions),
+        )
+        if max_distributions is not None and max_distributions > 0:
+            distributions = distributions[:max_distributions]
+
+        # Fit each column and collect results
+        all_results_dfs = []
+        for col in target_columns:
+            logger.info(f"Fitting column '{col}'...")
+            results_df = self._fit_single_column(
+                df_sample=df_sample,
+                column=col,
+                row_count=row_count,
+                bins=bins,
+                use_rice_rule=use_rice_rule,
+                distributions=distributions,
+                num_partitions=num_partitions,
+            )
+            all_results_dfs.append(results_df)
+
+        # Union all results
+        if len(all_results_dfs) == 1:
+            combined_df = all_results_dfs[0]
+        else:
+            combined_df = all_results_dfs[0]
+            for df_part in all_results_dfs[1:]:
+                combined_df = combined_df.union(df_part)
+
+        combined_df = combined_df.cache()
+        total_results = combined_df.count()
+        logger.info(
+            f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
+        )
+
+        return FitResults(combined_df)
+
+    def _fit_single_column(
+        self,
+        df_sample: DataFrame,
+        column: str,
+        row_count: int,
+        bins: Union[int, Tuple[float, ...]],
+        use_rice_rule: bool,
+        distributions: List[str],
+        num_partitions: Optional[int],
+    ) -> DataFrame:
+        """Fit distributions to a single column (internal method).
+
+        Args:
+            df_sample: Sampled DataFrame
+            column: Column name
+            row_count: Original row count (for histogram computation)
+            bins: Number of histogram bins
+            use_rice_rule: Use Rice rule for bin count
+            distributions: List of distribution names to fit
+            num_partitions: Number of Spark partitions
+
+        Returns:
+            Spark DataFrame with fit results for this column
+        """
         # Compute histogram
-        logger.info("Computing histogram...")
         y_hist, x_hist = self._histogram_computer.compute_histogram(
             df_sample, column, bins=bins, use_rice_rule=use_rice_rule, approx_count=row_count
         )
-        logger.info(f"Histogram computed: {len(x_hist)} bins")
+        logger.info(f"  Histogram for '{column}': {len(x_hist)} bins")
 
         # Broadcast histogram
         histogram_bc = self.spark.sparkContext.broadcast((y_hist, x_hist))
 
         # Create fitting sample
-        logger.info("Creating data sample for parameter fitting...")
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
         try:
-            logger.info(f"Data sample size: {len(data_sample)}")
-
-            # Get distributions to fit
-            distributions = self._registry.get_distributions(
-                support_at_zero=support_at_zero,
-                additional_exclusions=list(self.excluded_distributions),
-            )
-
-            if max_distributions is not None and max_distributions > 0:
-                distributions = distributions[:max_distributions]
-
-            logger.info(f"Fitting {len(distributions)} distributions...")
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
 
@@ -169,17 +236,16 @@ class DistributionFitter:
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply fitting UDF
-            fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc)
+            fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc, column_name=column)
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
-            # Filter failed fits and cache
+            # Filter failed fits
             results_df = results_df.filter(F.col("sse") < float(np.inf))
-            results_df = results_df.cache()
 
             num_results = results_df.count()
-            logger.info(f"Successfully fit {num_results}/{len(distributions)} distributions")
+            logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")
 
-            return FitResults(results_df)
+            return results_df
 
         finally:
             histogram_bc.unpersist()
@@ -641,7 +707,8 @@ class DiscreteDistributionFitter:
     def fit(
         self,
         df: DataFrame,
-        column: str,
+        column: Optional[str] = None,
+        columns: Optional[List[str]] = None,
         max_distributions: Optional[int] = None,
         enable_sampling: bool = True,
         sample_fraction: Optional[float] = None,
@@ -649,11 +716,12 @@ class DiscreteDistributionFitter:
         sample_threshold: int = 10_000_000,
         num_partitions: Optional[int] = None,
     ) -> FitResults:
-        """Fit discrete distributions to integer data column.
+        """Fit discrete distributions to integer data column(s).
 
         Args:
             df: Spark DataFrame containing integer count data
-            column: Name of column to fit distributions to
+            column: Name of single column to fit distributions to
+            columns: List of column names for multi-column fitting
             max_distributions: Limit number of distributions (for testing)
             enable_sampling: Enable sampling for large datasets
             sample_fraction: Fraction to sample (None = auto-determine)
@@ -669,52 +737,111 @@ class DiscreteDistributionFitter:
             TypeError: If column is not numeric
 
         Example:
-            >>> results = fitter.fit(df, 'counts')
-            >>> best = results.best(n=1, metric='ks_statistic')
+            >>> # Single column
+            >>> results = fitter.fit(df, column='counts')
+            >>> best = results.best(n=1, metric='aic')
+            >>>
+            >>> # Multi-column
+            >>> results = fitter.fit(df, columns=['counts1', 'counts2'])
+            >>> best_per_col = results.best_per_column(n=1, metric='aic')
         """
-        # Input validation
-        self._validate_inputs(df, column, max_distributions, sample_fraction)
+        # Validate column/columns parameters
+        if column is None and columns is None:
+            raise ValueError("Must provide either 'column' or 'columns' parameter")
+        if column is not None and columns is not None:
+            raise ValueError("Cannot provide both 'column' and 'columns' - use one or the other")
 
-        # Get row count
+        # Normalize to list of columns
+        target_columns = [column] if column is not None else columns
+
+        # Input validation for all columns
+        for col in target_columns:
+            self._validate_inputs(df, col, max_distributions, sample_fraction)
+
+        # Get row count (single operation for all columns)
         row_count = df.count()
         if row_count == 0:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
 
-        # Sample if needed
+        # Sample if needed (single operation for all columns)
         df_sample = self._apply_sampling(
             df, row_count, enable_sampling, sample_fraction, max_sample_size, sample_threshold
         )
 
+        # Get distributions to fit (same for all columns)
+        distributions = self._registry.get_distributions(
+            additional_exclusions=list(self.excluded_distributions),
+        )
+        if max_distributions is not None and max_distributions > 0:
+            distributions = distributions[:max_distributions]
+
+        # Fit each column and collect results
+        all_results_dfs = []
+        for col in target_columns:
+            logger.info(f"Fitting discrete column '{col}'...")
+            results_df = self._fit_single_column(
+                df_sample=df_sample,
+                column=col,
+                row_count=row_count,
+                distributions=distributions,
+                num_partitions=num_partitions,
+            )
+            all_results_dfs.append(results_df)
+
+        # Union all results
+        if len(all_results_dfs) == 1:
+            combined_df = all_results_dfs[0]
+        else:
+            combined_df = all_results_dfs[0]
+            for df_part in all_results_dfs[1:]:
+                combined_df = combined_df.union(df_part)
+
+        combined_df = combined_df.cache()
+        total_results = combined_df.count()
+        logger.info(
+            f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
+        )
+
+        return FitResults(combined_df)
+
+    def _fit_single_column(
+        self,
+        df_sample: DataFrame,
+        column: str,
+        row_count: int,
+        distributions: List[str],
+        num_partitions: Optional[int],
+    ) -> DataFrame:
+        """Fit discrete distributions to a single column (internal method).
+
+        Args:
+            df_sample: Sampled DataFrame
+            column: Column name
+            row_count: Original row count
+            distributions: List of distribution names to fit
+            num_partitions: Number of Spark partitions
+
+        Returns:
+            Spark DataFrame with fit results for this column
+        """
         # Create integer data sample for fitting
-        logger.info("Creating data sample for parameter fitting...")
         sample_size = min(FITTING_SAMPLE_SIZE, row_count)
         fraction = min(sample_size / row_count, 1.0)
         sample_df = df_sample.select(column).sample(fraction=fraction, seed=self.random_seed)
         data_sample = sample_df.toPandas()[column].values.astype(int)
         data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
-        logger.info(f"Data sample size: {len(data_sample)}")
+        logger.info(f"  Data sample for '{column}': {len(data_sample)} values")
 
         # Compute discrete histogram (PMF)
-        logger.info("Computing discrete histogram (PMF)...")
         x_values, empirical_pmf = compute_discrete_histogram(data_sample)
-        logger.info(f"Unique values: {len(x_values)} (range: {x_values.min()}-{x_values.max()})")
+        logger.info(f"  PMF for '{column}': {len(x_values)} unique values (range: {x_values.min()}-{x_values.max()})")
 
         # Broadcast histogram and data
         histogram_bc = self.spark.sparkContext.broadcast((x_values, empirical_pmf))
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
         try:
-            # Get distributions to fit
-            distributions = self._registry.get_distributions(
-                additional_exclusions=list(self.excluded_distributions),
-            )
-
-            if max_distributions is not None and max_distributions > 0:
-                distributions = distributions[:max_distributions]
-
-            logger.info(f"Fitting {len(distributions)} discrete distributions...")
-
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
 
@@ -723,17 +850,16 @@ class DiscreteDistributionFitter:
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply discrete fitting UDF
-            fitting_udf = create_discrete_fitting_udf(histogram_bc, data_sample_bc)
+            fitting_udf = create_discrete_fitting_udf(histogram_bc, data_sample_bc, column_name=column)
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
-            # Filter failed fits and cache
+            # Filter failed fits
             results_df = results_df.filter(F.col("sse") < float(np.inf))
-            results_df = results_df.cache()
 
             num_results = results_df.count()
-            logger.info(f"Successfully fit {num_results}/{len(distributions)} distributions")
+            logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")
 
-            return FitResults(results_df)
+            return results_df
 
         finally:
             histogram_bc.unpersist()

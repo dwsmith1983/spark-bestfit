@@ -270,7 +270,7 @@ class TestFitSingleDistributionEdgeCases:
         result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
 
         required_keys = {
-            "distribution", "parameters", "sse", "aic", "bic",
+            "column_name", "distribution", "parameters", "sse", "aic", "bic",
             "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"
         }
         assert set(result.keys()) == required_keys
