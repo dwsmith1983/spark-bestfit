@@ -20,6 +20,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 **What it does well:**
 
 - Fit ~100 continuous and 16 discrete scipy.stats distributions in parallel
+- Multi-column fitting: fit multiple columns efficiently in a single operation
 - Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
 - Generate publication-ready visualizations (histograms, Q-Q plots, P-P plots)
 - Compute bootstrap confidence intervals for parameters

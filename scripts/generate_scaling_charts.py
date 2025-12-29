@@ -45,6 +45,7 @@ def extract_scaling_data(results: dict) -> dict:
     data: dict[str, dict[str, list]] = {
         "data_size": {"sizes": [], "times": [], "stddevs": []},
         "dist_count": {"counts": [], "times": [], "stddevs": []},
+        "multi_column": {"labels": [], "times": [], "stddevs": []},
     }
 
     for benchmark in results.get("benchmarks", []):
@@ -87,6 +88,16 @@ def extract_scaling_data(results: dict) -> dict:
             data["dist_count"]["counts"].append(100)
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
+
+        # Parse multi-column efficiency benchmarks
+        if "3_columns_separately" in name and "discrete" not in name:
+            data["multi_column"]["labels"].append("3 Separate Fits")
+            data["multi_column"]["times"].append(mean_time)
+            data["multi_column"]["stddevs"].append(stddev)
+        elif "3_columns_together" in name and "100k" not in name and "discrete" not in name:
+            data["multi_column"]["labels"].append("1 Multi-Column Fit")
+            data["multi_column"]["times"].append(mean_time)
+            data["multi_column"]["stddevs"].append(stddev)
 
     return data
 
@@ -258,6 +269,70 @@ def generate_distribution_count_chart(data: dict, output_path: Path) -> None:
     print(f"Saved: {output_path}")
 
 
+def generate_multi_column_chart(data: dict, output_path: Path) -> None:
+    """Generate multi-column efficiency comparison chart."""
+    labels = data["multi_column"]["labels"]
+    times = np.array(data["multi_column"]["times"])
+    stddevs = np.array(data["multi_column"]["stddevs"])
+
+    if len(labels) < 2:
+        print("Not enough data points for multi-column chart")
+        return
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Bar colors
+    colors = ["#dc2626", "#16a34a"]  # Red for separate, green for together
+
+    # Create bars
+    x = np.arange(len(labels))
+    bars = ax.bar(x, times, yerr=stddevs, capsize=8, color=colors, edgecolor="black", linewidth=1.5)
+
+    # Add value labels on bars
+    for bar, time in zip(bars, times):
+        height = bar.get_height()
+        ax.annotate(
+            f"{time:.2f}s",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 5),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=12,
+            fontweight="bold",
+        )
+
+    # Calculate speedup
+    if len(times) >= 2:
+        speedup = times[0] / times[1]
+        savings_pct = (1 - times[1] / times[0]) * 100
+
+        ax.annotate(
+            f"{speedup:.1f}× faster\n({savings_pct:.0f}% time saved)",
+            xy=(0.5, max(times) * 0.5),
+            fontsize=14,
+            ha="center",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="wheat", alpha=0.8),
+        )
+
+    # Formatting
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=12)
+    ax.set_ylabel("Fit Time (seconds)", fontsize=12)
+    ax.set_title(
+        "Multi-Column Fitting Efficiency\n(3 columns, 10K rows each, 20 distributions)", fontsize=14, fontweight="bold"
+    )
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_path}")
+
+
 def generate_summary_table(data: dict, results: dict, output_path: Path) -> None:
     """Generate a markdown summary table of benchmark results."""
     # Extract machine info
@@ -316,6 +391,35 @@ def generate_summary_table(data: dict, results: dict, output_path: Path) -> None
     for count, time, std in sorted(zip(counts, times, stddevs)):
         lines.append(f"| {count} | {time:.3f}s | ±{std:.3f}s |")
 
+    # Multi-column efficiency section
+    if data["multi_column"]["labels"]:
+        lines.extend(
+            [
+                "",
+                "## Multi-Column Efficiency",
+                "",
+                "| Approach | Fit Time (mean) | Std Dev |",
+                "|----------|-----------------|---------|",
+            ]
+        )
+
+        mc_labels = data["multi_column"]["labels"]
+        mc_times = data["multi_column"]["times"]
+        mc_stddevs = data["multi_column"]["stddevs"]
+
+        for label, time, std in zip(mc_labels, mc_times, mc_stddevs):
+            lines.append(f"| {label} | {time:.3f}s | ±{std:.3f}s |")
+
+        if len(mc_times) >= 2:
+            speedup = mc_times[0] / mc_times[1]
+            savings_pct = (1 - mc_times[1] / mc_times[0]) * 100
+            lines.extend(
+                [
+                    "",
+                    f"**Speedup:** {speedup:.1f}× faster ({savings_pct:.0f}% time saved)",
+                ]
+            )
+
     lines.append("")
 
     with open(output_path, "w") as f:
@@ -353,6 +457,7 @@ def main():
 
     generate_data_size_chart(data, args.output_dir / "scaling_data_size.png")
     generate_distribution_count_chart(data, args.output_dir / "scaling_dist_count.png")
+    generate_multi_column_chart(data, args.output_dir / "multi_column_efficiency.png")
     generate_summary_table(data, results, args.output_dir / "benchmark_summary.md")
 
     print("\nCharts generated successfully!")

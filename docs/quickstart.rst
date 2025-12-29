@@ -125,6 +125,45 @@ The library auto-calculates partitions using: ``min(num_distributions, 2 × defa
    Setting ``num_partitions`` higher than the number of distributions has no benefit,
    as each distribution requires exactly one task.
 
+Multi-Column Fitting
+--------------------
+
+Fit multiple columns efficiently in a single operation:
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter
+
+   # Create DataFrame with multiple columns
+   df = spark.createDataFrame([
+       (1.0, 10.0, 100.0),
+       (2.0, 20.0, 200.0),
+       # ...
+   ], ["col_a", "col_b", "col_c"])
+
+   fitter = DistributionFitter(spark)
+
+   # Fit all columns in one call - shares Spark overhead
+   results = fitter.fit(df, columns=["col_a", "col_b", "col_c"])
+
+   # Get results for a specific column
+   col_a_results = results.for_column("col_a")
+   best_a = col_a_results.best(n=1)[0]
+
+   # Get best distribution per column
+   best_per_col = results.best_per_column(n=1)
+   for col_name, fits in best_per_col.items():
+       print(f"{col_name}: {fits[0].distribution} (KS={fits[0].ks_statistic:.4f})")
+
+   # List all columns in results
+   print(results.column_names)  # ['col_a', 'col_b', 'col_c']
+
+Multi-column fitting is more efficient than fitting columns separately because it:
+
+- Performs a single ``df.count()`` call for all columns
+- Shares the data sample across all fitting operations
+- Minimizes Spark job overhead
+
 Working with Results
 --------------------
 

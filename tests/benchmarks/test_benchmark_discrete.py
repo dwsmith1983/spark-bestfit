@@ -54,3 +54,42 @@ class TestDiscreteFitterScaling:
 
         result = benchmark(fit_all_discrete)
         assert result.count() > 0  # Verify fit completed
+
+
+class TestDiscreteMultiColumnEfficiency:
+    """Benchmark discrete multi-column fitting efficiency."""
+
+    def test_discrete_3_columns_separately(
+        self, benchmark, spark_session, discrete_df_multi_3col_10k
+    ):
+        """Benchmark fitting 3 discrete columns in 3 separate calls."""
+        fitter = DiscreteDistributionFitter(spark_session)
+        columns = ["col_poisson", "col_nbinom", "col_geom"]
+
+        def fit_separately():
+            all_results = []
+            for col in columns:
+                results = fitter.fit(discrete_df_multi_3col_10k, column=col, num_partitions=8)
+                _ = results.best(n=1, metric="aic")
+                all_results.append(results)
+            return all_results
+
+        results = benchmark(fit_separately)
+        assert len(results) == 3
+        assert all(r.count() > 0 for r in results)
+
+    def test_discrete_3_columns_together(
+        self, benchmark, spark_session, discrete_df_multi_3col_10k
+    ):
+        """Benchmark fitting 3 discrete columns in 1 multi-column call."""
+        fitter = DiscreteDistributionFitter(spark_session)
+        columns = ["col_poisson", "col_nbinom", "col_geom"]
+
+        def fit_together():
+            results = fitter.fit(discrete_df_multi_3col_10k, columns=columns, num_partitions=8)
+            _ = results.best_per_column(n=1, metric="aic")
+            return results
+
+        result = benchmark(fit_together)
+        assert result.count() > 0
+        assert len(result.column_names) == 3

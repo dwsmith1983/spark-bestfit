@@ -121,3 +121,43 @@ def discrete_data_10k():
 def discrete_df_10k(spark_session, discrete_data_10k):
     """Create 10K row DataFrame with discrete data."""
     return spark_session.createDataFrame([(int(x),) for x in discrete_data_10k], ["counts"])
+
+
+# Multi-column fixtures for efficiency benchmarks
+def generate_multi_column_data(size: int, seed: int = 42) -> list:
+    """Generate data for 3 columns with different distributions."""
+    np.random.seed(seed)
+    normal = np.random.normal(loc=50, scale=10, size=size)
+    exponential = np.random.exponential(scale=5, size=size)
+    gamma = np.random.gamma(shape=2.0, scale=2.0, size=size)
+    return [(float(n), float(e), float(g)) for n, e, g in zip(normal, exponential, gamma)]
+
+
+def generate_multi_column_discrete_data(size: int, seed: int = 42) -> list:
+    """Generate data for 3 discrete columns with different distributions."""
+    np.random.seed(seed)
+    poisson = np.random.poisson(lam=7, size=size)
+    nbinom = np.random.negative_binomial(n=5, p=0.4, size=size)
+    geom = np.random.geometric(p=0.25, size=size)
+    return [(int(p), int(n), int(g)) for p, n, g in zip(poisson, nbinom, geom)]
+
+
+@pytest.fixture
+def df_multi_3col_10k(spark_session):
+    """Create 10K row DataFrame with 3 continuous columns."""
+    data = generate_multi_column_data(10_000)
+    return spark_session.createDataFrame(data, ["col_normal", "col_exp", "col_gamma"])
+
+
+@pytest.fixture
+def df_multi_3col_100k(spark_session):
+    """Create 100K row DataFrame with 3 continuous columns."""
+    data = generate_multi_column_data(100_000)
+    return spark_session.createDataFrame(data, ["col_normal", "col_exp", "col_gamma"])
+
+
+@pytest.fixture
+def discrete_df_multi_3col_10k(spark_session):
+    """Create 10K row DataFrame with 3 discrete columns."""
+    data = generate_multi_column_discrete_data(10_000)
+    return spark_session.createDataFrame(data, ["col_poisson", "col_nbinom", "col_geom"])

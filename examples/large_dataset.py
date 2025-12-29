@@ -117,6 +117,60 @@ for size in data_sizes:
     # Clean up
     df.unpersist()
 
+# ============================================================================
+# Multi-Column Fitting Demo
+# ============================================================================
+print(f"\n{'=' * 80}")
+print("MULTI-COLUMN FITTING DEMO")
+print("=" * 80)
+
+print("\nGenerating multi-column dataset...")
+np.random.seed(42)
+size = 100_000
+
+# Create DataFrame with multiple columns (different distributions)
+df_multi = spark.createDataFrame(
+    [
+        (float(np.random.gamma(2.0, 2.0)), float(np.random.normal(50, 10)), float(np.random.exponential(5)))
+        for _ in range(size)
+    ],
+    ["gamma_col", "normal_col", "exponential_col"],
+)
+df_multi = df_multi.cache()
+df_multi.count()
+
+# Fit all columns in a single call
+print(f"\nFitting 3 columns simultaneously ({size:,} rows each)...")
+start_time = time.time()
+
+fitter = DistributionFitter(spark)
+results = fitter.fit(df_multi, columns=["gamma_col", "normal_col", "exponential_col"])
+
+elapsed = time.time() - start_time
+
+print(f"\n{'Multi-Column Results':^80}")
+print("-" * 80)
+print(f"Time elapsed: {elapsed:.2f} seconds")
+print(f"Columns fitted: {results.column_names}")
+
+# Get best distribution per column
+best_per_col = results.best_per_column(n=1)
+for col_name, fits in best_per_col.items():
+    best = fits[0]
+    print(f"\n{col_name}:")
+    print(f"  Best distribution: {best.distribution}")
+    print(f"  K-S statistic: {best.ks_statistic:.6f}")
+    print(f"  p-value: {best.pvalue:.4f}")
+
+# Demonstrate column filtering
+print("\nFiltering results for 'normal_col' only:")
+normal_results = results.for_column("normal_col")
+top_3 = normal_results.best(n=3)
+for i, fit in enumerate(top_3, 1):
+    print(f"  {i}. {fit.distribution} (KS={fit.ks_statistic:.4f})")
+
+df_multi.unpersist()
+
 print("\n" + "=" * 80)
 print("PERFORMANCE DEMO COMPLETED")
 print("=" * 80)
