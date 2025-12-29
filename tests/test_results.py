@@ -428,7 +428,7 @@ class TestDistributionFitResultEdgeCases:
         d = result.to_dict()
 
         assert set(d.keys()) == {
-            "distribution", "parameters", "sse", "aic", "bic",
+            "column_name", "distribution", "parameters", "sse", "aic", "bic",
             "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"
         }
         assert d["distribution"] == "gamma"

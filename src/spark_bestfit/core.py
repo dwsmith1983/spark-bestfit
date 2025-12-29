@@ -169,7 +169,7 @@ class DistributionFitter:
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply fitting UDF
-            fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc)
+            fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc, column_name=column)
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
             # Filter failed fits and cache
@@ -723,7 +723,7 @@ class DiscreteDistributionFitter:
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply discrete fitting UDF
-            fitting_udf = create_discrete_fitting_udf(histogram_bc, data_sample_bc)
+            fitting_udf = create_discrete_fitting_udf(histogram_bc, data_sample_bc, column_name=column)
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
             # Filter failed fits and cache

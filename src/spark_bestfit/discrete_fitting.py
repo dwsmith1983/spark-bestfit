@@ -18,6 +18,7 @@ from spark_bestfit.distributions import DiscreteDistributionRegistry
 # but are always None for discrete distributions (A-D test is for continuous distributions)
 DISCRETE_FIT_RESULT_SCHEMA = StructType(
     [
+        StructField("column_name", StringType(), True),  # Column being fitted
         StructField("distribution", StringType(), True),
         StructField("parameters", ArrayType(FloatType()), True),
         StructField("sse", FloatType(), True),
@@ -293,6 +294,7 @@ def fit_single_discrete_distribution(
     x_values: np.ndarray,
     empirical_pmf: np.ndarray,
     registry: DiscreteDistributionRegistry,
+    column_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fit a single discrete distribution and compute goodness-of-fit metrics.
 
@@ -302,9 +304,10 @@ def fit_single_discrete_distribution(
         x_values: Unique integer values in data
         empirical_pmf: Empirical PMF at each x value
         registry: DiscreteDistributionRegistry for parameter configs
+        column_name: Name of the column being fitted (for multi-column support)
 
     Returns:
-        Dictionary with keys: distribution, parameters, sse, aic, bic, ks_statistic, pvalue
+        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic, ks_statistic, pvalue
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -323,13 +326,13 @@ def fit_single_discrete_distribution(
 
             # Check for invalid parameters
             if any(not np.isfinite(p) for p in params):
-                return _failed_discrete_fit_result(dist_name)
+                return _failed_discrete_fit_result(dist_name, column_name)
 
             # Compute SSE using PMF
             sse = compute_discrete_sse(dist, tuple(params), x_values, empirical_pmf, dist_name)
 
             if not np.isfinite(sse):
-                return _failed_discrete_fit_result(dist_name)
+                return _failed_discrete_fit_result(dist_name, column_name)
 
             # Compute information criteria
             aic, bic = compute_discrete_information_criteria(dist, tuple(params), data_sample, dist_name)
@@ -340,9 +343,10 @@ def fit_single_discrete_distribution(
             # Check for convergence warnings
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
-                    return _failed_discrete_fit_result(dist_name)
+                    return _failed_discrete_fit_result(dist_name, column_name)
 
             return {
+                "column_name": column_name,
                 "distribution": dist_name,
                 "parameters": [float(p) for p in params],
                 "sse": float(sse),
@@ -355,19 +359,21 @@ def fit_single_discrete_distribution(
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_discrete_fit_result(dist_name)
+        return _failed_discrete_fit_result(dist_name, column_name)
 
 
-def _failed_discrete_fit_result(dist_name: str) -> Dict[str, Any]:
+def _failed_discrete_fit_result(dist_name: str, column_name: Optional[str] = None) -> Dict[str, Any]:
     """Return sentinel values for failed discrete fits.
 
     Args:
         dist_name: Name of the distribution that failed
+        column_name: Name of the column being fitted (for multi-column support)
 
     Returns:
         Dictionary with sentinel values indicating fit failure
     """
     return {
+        "column_name": column_name,
         "distribution": dist_name,
         "parameters": [float(np.nan)],
         "sse": float(np.inf),
@@ -383,12 +389,14 @@ def _failed_discrete_fit_result(dist_name: str) -> Dict[str, Any]:
 def create_discrete_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
+    column_name: Optional[str] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF for discrete distribution fitting.
 
     Args:
         histogram_broadcast: Broadcast variable containing (x_values, empirical_pmf)
         data_sample_broadcast: Broadcast variable containing integer data sample
+        column_name: Name of the column being fitted (for result tracking)
 
     Returns:
         Pandas UDF function for fitting discrete distributions
@@ -404,7 +412,7 @@ def create_discrete_fitting_udf(
             distribution_names: Series of scipy discrete distribution names
 
         Returns:
-            DataFrame with columns: distribution, parameters, sse, aic, bic, ks_statistic, pvalue
+            DataFrame with columns: column_name, distribution, parameters, sse, aic, bic, ks_statistic, pvalue
         """
         # Get broadcasted data
         x_values, empirical_pmf = histogram_broadcast.value
@@ -419,6 +427,7 @@ def create_discrete_fitting_udf(
                 x_values=x_values,
                 empirical_pmf=empirical_pmf,
                 registry=registry,
+                column_name=column_name,
             )
             results.append(result)
 

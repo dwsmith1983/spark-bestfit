@@ -24,6 +24,7 @@ class DistributionFitResult:
         distribution: Name of the scipy.stats distribution
         parameters: Fitted parameters (shape params + loc + scale)
         sse: Sum of Squared Errors
+        column_name: Name of the column that was fitted (for multi-column support)
         aic: Akaike Information Criterion (lower is better)
         bic: Bayesian Information Criterion (lower is better)
         ks_statistic: Kolmogorov-Smirnov statistic (lower is better)
@@ -46,6 +47,7 @@ class DistributionFitResult:
     distribution: str
     parameters: List[float]
     sse: float
+    column_name: Optional[str] = None
     aic: Optional[float] = None
     bic: Optional[float] = None
     ks_statistic: Optional[float] = None
@@ -60,6 +62,7 @@ class DistributionFitResult:
             Dictionary representation of the result
         """
         return {
+            "column_name": self.column_name,
             "distribution": self.distribution,
             "parameters": self.parameters,
             "sse": self.sse,
@@ -255,8 +258,9 @@ class DistributionFitResult:
         pval_str = f"{self.pvalue:.4f}" if self.pvalue is not None else "None"
         ad_str = f"{self.ad_statistic:.6f}" if self.ad_statistic is not None else "None"
         ad_pval_str = f"{self.ad_pvalue:.4f}" if self.ad_pvalue is not None else "None"
+        col_str = f"column_name='{self.column_name}', " if self.column_name else ""
         return (
-            f"DistributionFitResult(distribution='{self.distribution}', "
+            f"DistributionFitResult({col_str}distribution='{self.distribution}', "
             f"sse={self.sse:.6f}, aic={aic_str}, bic={bic_str}, "
             f"ks_statistic={ks_str}, pvalue={pval_str}, "
             f"ad_statistic={ad_str}, ad_pvalue={ad_pval_str}, "
@@ -332,6 +336,7 @@ class FitResults:
                 distribution=row["distribution"],
                 parameters=list(row["parameters"]),
                 sse=row["sse"],
+                column_name=row["column_name"] if "column_name" in row else None,
                 aic=row["aic"],
                 bic=row["bic"],
                 ks_statistic=row["ks_statistic"],
@@ -390,6 +395,64 @@ class FitResults:
             filtered = filtered.filter(F.col("ad_statistic") < ad_threshold)
 
         return FitResults(filtered.cache())
+
+    def for_column(self, column_name: str) -> "FitResults":
+        """Filter results to a single column.
+
+        Args:
+            column_name: Column to filter for
+
+        Returns:
+            New FitResults containing only results for the specified column
+
+        Example:
+            >>> results = fitter.fit(df, columns=["col1", "col2"])
+            >>> col1_results = results.for_column("col1")
+            >>> best = col1_results.best(n=1)[0]
+        """
+        filtered = self._df.filter(F.col("column_name") == column_name)
+        return FitResults(filtered.cache())
+
+    @property
+    def column_names(self) -> List[str]:
+        """Get list of unique column names in results.
+
+        Returns:
+            List of column names that have fit results
+
+        Example:
+            >>> results = fitter.fit(df, columns=["col1", "col2"])
+            >>> print(results.column_names)
+            ['col1', 'col2']
+        """
+        # Check if column_name column exists and has non-null values
+        if "column_name" not in self._df.columns:
+            return []
+        rows = self._df.select("column_name").distinct().filter(F.col("column_name").isNotNull()).collect()
+        return [row["column_name"] for row in rows]
+
+    def best_per_column(
+        self, n: int = 1, metric: MetricName = "ks_statistic"
+    ) -> Dict[str, List["DistributionFitResult"]]:
+        """Get top n distributions for each column.
+
+        Args:
+            n: Number of results per column
+            metric: Metric to sort by ('ks_statistic', 'sse', 'aic', 'bic', or 'ad_statistic')
+
+        Returns:
+            Dict mapping column_name -> List[DistributionFitResult]
+
+        Example:
+            >>> results = fitter.fit(df, columns=["col1", "col2", "col3"])
+            >>> best_per_col = results.best_per_column(n=1)
+            >>> for col, fits in best_per_col.items():
+            ...     print(f"{col}: {fits[0].distribution}")
+        """
+        result: Dict[str, List[DistributionFitResult]] = {}
+        for col in self.column_names:
+            result[col] = self.for_column(col).best(n=n, metric=metric)
+        return result
 
     def summary(self) -> pd.DataFrame:
         """Get summary statistics of fit quality.

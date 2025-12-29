@@ -28,6 +28,7 @@ AD_PVALUE_DISTRIBUTIONS: Dict[str, str] = {
 # Note: Pandas infers all columns as nullable, so we match that here
 FIT_RESULT_SCHEMA = StructType(
     [
+        StructField("column_name", StringType(), True),  # Column being fitted
         StructField("distribution", StringType(), True),
         StructField("parameters", ArrayType(FloatType()), True),
         StructField("sse", FloatType(), True),
@@ -44,6 +45,7 @@ FIT_RESULT_SCHEMA = StructType(
 def create_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
+    column_name: Optional[str] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -54,6 +56,7 @@ def create_fitting_udf(
     Args:
         histogram_broadcast: Broadcast variable containing (y_hist, x_hist)
         data_sample_broadcast: Broadcast variable containing data sample
+        column_name: Name of the column being fitted (for result tracking)
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -62,7 +65,7 @@ def create_fitting_udf(
         >>> # In DistributionFitter:
         >>> hist_bc = spark.sparkContext.broadcast((y_hist, x_hist))
         >>> data_bc = spark.sparkContext.broadcast(data_sample)
-        >>> fitting_udf = create_fitting_udf(hist_bc, data_bc)
+        >>> fitting_udf = create_fitting_udf(hist_bc, data_bc, column_name="value")
         >>> results = df.select(fitting_udf(col('distribution_name')))
     """
 
@@ -78,7 +81,7 @@ def create_fitting_udf(
             distribution_names: Series of scipy distribution names to fit
 
         Returns:
-            DataFrame with columns: distribution, parameters, sse, aic, bic
+            DataFrame with columns: column_name, distribution, parameters, sse, aic, bic
         """
         # Get broadcasted data (no serialization overhead!)
         y_hist, x_hist = histogram_broadcast.value
@@ -92,6 +95,7 @@ def create_fitting_udf(
                 data_sample=data_sample,
                 x_hist=x_hist,
                 y_hist=y_hist,
+                column_name=column_name,
             )
             results.append(result)
 
@@ -106,7 +110,11 @@ def create_fitting_udf(
 
 
 def fit_single_distribution(
-    dist_name: str, data_sample: np.ndarray, x_hist: np.ndarray, y_hist: np.ndarray
+    dist_name: str,
+    data_sample: np.ndarray,
+    x_hist: np.ndarray,
+    y_hist: np.ndarray,
+    column_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -115,9 +123,10 @@ def fit_single_distribution(
         data_sample: Sample of raw data for parameter fitting
         x_hist: Histogram bin centers
         y_hist: Histogram density values
+        column_name: Name of the column being fitted (for multi-column support)
 
     Returns:
-        Dictionary with keys: distribution, parameters, sse, aic, bic
+        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -131,7 +140,7 @@ def fit_single_distribution(
 
             # Check for NaN in parameters (convergence failure)
             if any(not np.isfinite(p) for p in params):
-                return _failed_fit_result(dist_name)
+                return _failed_fit_result(dist_name, column_name)
 
             # Evaluate PDF at histogram bin centers
             pdf_values = evaluate_pdf(dist, params, x_hist)
@@ -141,7 +150,7 @@ def fit_single_distribution(
 
             # Check for invalid SSE
             if not np.isfinite(sse):
-                return _failed_fit_result(dist_name)
+                return _failed_fit_result(dist_name, column_name)
 
             # Compute information criteria
             aic, bic = compute_information_criteria(dist, params, data_sample)
@@ -160,9 +169,10 @@ def fit_single_distribution(
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
                     # These indicate fitting issues - return failed result
-                    return _failed_fit_result(dist_name)
+                    return _failed_fit_result(dist_name, column_name)
 
             return {
+                "column_name": column_name,
                 "distribution": dist_name,
                 "parameters": [float(p) for p in params],
                 "sse": float(sse),
@@ -175,19 +185,21 @@ def fit_single_distribution(
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_fit_result(dist_name)
+        return _failed_fit_result(dist_name, column_name)
 
 
-def _failed_fit_result(dist_name: str) -> Dict[str, Any]:
+def _failed_fit_result(dist_name: str, column_name: Optional[str] = None) -> Dict[str, Any]:
     """Return sentinel values for failed fits.
 
     Args:
         dist_name: Name of the distribution that failed
+        column_name: Name of the column being fitted (for multi-column support)
 
     Returns:
         Dictionary with sentinel values indicating fit failure
     """
     return {
+        "column_name": column_name,
         "distribution": dist_name,
         "parameters": [float(np.nan)],
         "sse": float(np.inf),
