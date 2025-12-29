@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v1.1.0 (2025-12-29)
+
+### Features
+
+- Multi-column fitting in single call (#10)
+  ([#38](https://github.com/dwsmith1983/spark-bestfit/pull/38),
+  [`c58ebc6`](https://github.com/dwsmith1983/spark-bestfit/commit/c58ebc60ad27f6a658b4c1cc1518784377007ec2))
+
+- **core**: Add multi-column fitting support
+  ([#38](https://github.com/dwsmith1983/spark-bestfit/pull/38),
+  [`c58ebc6`](https://github.com/dwsmith1983/spark-bestfit/commit/c58ebc60ad27f6a658b4c1cc1518784377007ec2))
+
+- **docs**: Add multi-column fitting documentation and benchmarks
+  ([#38](https://github.com/dwsmith1983/spark-bestfit/pull/38),
+  [`c58ebc6`](https://github.com/dwsmith1983/spark-bestfit/commit/c58ebc60ad27f6a658b4c1cc1518784377007ec2))
+
+- **results**: Add column_name tracking for multi-column fitting
+  ([#38](https://github.com/dwsmith1983/spark-bestfit/pull/38),
+  [`c58ebc6`](https://github.com/dwsmith1983/spark-bestfit/commit/c58ebc60ad27f6a658b4c1cc1518784377007ec2))
+
+
 ## v1.0.0 (2025-12-28)
 
 ### Features
