@@ -1,7 +1,9 @@
 """Results handling for fitted distributions."""
 
+import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -11,6 +13,7 @@ from pyspark.sql import DataFrame
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame as SparkDataFrame
+    from pyspark.sql import SparkSession
 
 # Type alias for valid metric names (for IDE autocomplete and type checking)
 MetricName = Literal["sse", "aic", "bic", "ks_statistic", "ad_statistic"]
@@ -31,6 +34,9 @@ class DistributionFitResult:
         pvalue: P-value from KS test (higher indicates better fit)
         ad_statistic: Anderson-Darling statistic (lower is better)
         ad_pvalue: P-value from A-D test (only for norm, expon, logistic, gumbel_r, gumbel_l)
+        data_summary: Optional summary statistics of the original data (sample_size,
+            min, max, mean, std). Captured during fitting to aid debugging and
+            provenance tracking.
 
     Note:
         The p-value from the KS test is approximate when parameters are
@@ -54,6 +60,7 @@ class DistributionFitResult:
     pvalue: Optional[float] = None
     ad_statistic: Optional[float] = None
     ad_pvalue: Optional[float] = None
+    data_summary: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> dict:
         """Convert result to dictionary.
@@ -72,6 +79,7 @@ class DistributionFitResult:
             "pvalue": self.pvalue,
             "ad_statistic": self.ad_statistic,
             "ad_pvalue": self.ad_pvalue,
+            "data_summary": self.data_summary,
         }
 
     def get_scipy_dist(self):
@@ -99,6 +107,53 @@ class DistributionFitResult:
         dist = self.get_scipy_dist()
         # Parameters are all positional: (shape params..., loc, scale)
         return dist.rvs(*self.parameters, size=size, random_state=random_state)
+
+    def sample_spark(
+        self,
+        n: int,
+        spark: Optional["SparkSession"] = None,
+        num_partitions: Optional[int] = None,
+        random_seed: Optional[int] = None,
+        column_name: str = "sample",
+    ) -> DataFrame:
+        """Generate distributed samples from the fitted distribution using Spark.
+
+        Uses Spark's parallelism to generate samples across the cluster,
+        enabling efficient generation of millions of samples.
+
+        Args:
+            n: Total number of samples to generate
+            spark: SparkSession. If None, uses the active session.
+            num_partitions: Number of partitions to use. Defaults to spark default parallelism.
+            random_seed: Random seed for reproducibility. Each partition uses seed + partition_id.
+            column_name: Name for the output column (default: "sample")
+
+        Returns:
+            Spark DataFrame with single column containing samples
+
+        Example:
+            >>> result = fitter.fit(df, 'value').best(n=1)[0]
+            >>> samples_df = result.sample_spark(n=1_000_000, spark=spark)
+            >>> samples_df.show(5)
+            +-------------------+
+            |             sample|
+            +-------------------+
+            | 0.4691122931291924|
+            |-0.2828633018445851|
+            | 1.0093545783546243|
+            +-------------------+
+        """
+        from spark_bestfit.sampling import sample_spark
+
+        return sample_spark(
+            distribution=self.distribution,
+            parameters=self.parameters,
+            n=n,
+            spark=spark,
+            num_partitions=num_partitions,
+            random_seed=random_seed,
+            column_name=column_name,
+        )
 
     def pdf(self, x: np.ndarray) -> np.ndarray:
         """Evaluate probability density function at given points.
@@ -143,6 +198,84 @@ class DistributionFitResult:
         dist = self.get_scipy_dist()
         # Parameters are all positional: (shape params..., loc, scale)
         return dist.ppf(q, *self.parameters)
+
+    def save(
+        self,
+        path: Union[str, Path],
+        format: Optional[Literal["json", "pickle"]] = None,
+        indent: Optional[int] = 2,
+    ) -> None:
+        """Save fitted distribution to file.
+
+        Serializes the distribution parameters and metrics to JSON or pickle format.
+        JSON is recommended for human-readable, version-safe output. Pickle is
+        available for faster serialization when human-readability is not required.
+
+        Args:
+            path: File path. Format is detected from extension if not specified.
+            format: Output format - 'json' (human-readable) or 'pickle'.
+                If None, detected from file extension (.json, .pkl, .pickle).
+            indent: JSON indentation level (default 2). Use None for compact output.
+                Ignored for pickle format.
+
+        Raises:
+            SerializationError: If format cannot be determined or write fails.
+
+        Example:
+            >>> best = results.best(n=1)[0]
+            >>> best.save("model.json")
+            >>> best.save("model.pkl", format="pickle")
+            >>> best.save("compact.json", indent=None)
+        """
+        from spark_bestfit.serialization import detect_format, save_json, save_pickle, serialize_to_dict
+
+        path = Path(path)
+        file_format = format or detect_format(path)
+
+        if file_format == "json":
+            data = serialize_to_dict(self)
+            save_json(data, path, indent)
+        else:  # pickle
+            save_pickle(self, path)
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> "DistributionFitResult":
+        """Load fitted distribution from file.
+
+        Reconstructs a DistributionFitResult from a previously saved file.
+        The loaded result can be used for sampling, PDF/CDF evaluation, etc.
+
+        Args:
+            path: File path. Format is detected from extension (.json, .pkl, .pickle).
+
+        Returns:
+            Reconstructed DistributionFitResult
+
+        Raises:
+            SerializationError: If file format is invalid or distribution is unknown.
+            FileNotFoundError: If file does not exist.
+
+        Example:
+            >>> loaded = DistributionFitResult.load("model.json")
+            >>> samples = loaded.sample(n=1000)
+            >>> pdf_values = loaded.pdf(np.linspace(0, 100, 100))
+
+        Warning:
+            Only load pickle files from trusted sources.
+        """
+        from spark_bestfit.serialization import deserialize_from_dict, detect_format, load_json, load_pickle
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+
+        file_format = detect_format(path)
+
+        if file_format == "json":
+            data = load_json(path)
+            return deserialize_from_dict(data)
+        else:  # pickle
+            return load_pickle(path)
 
     def get_param_names(self) -> List[str]:
         """Get parameter names for this distribution.
@@ -304,13 +437,23 @@ class FitResults:
         """
         return self._df
 
-    def best(self, n: int = 1, metric: MetricName = "ks_statistic") -> List[DistributionFitResult]:
+    def best(
+        self,
+        n: int = 1,
+        metric: MetricName = "ks_statistic",
+        warn_if_poor: bool = False,
+        pvalue_threshold: float = 0.05,
+    ) -> List[DistributionFitResult]:
         """Get top n distributions by specified metric.
 
         Args:
             n: Number of results to return
             metric: Metric to sort by ('ks_statistic', 'sse', 'aic', 'bic', or 'ad_statistic').
                 Defaults to 'ks_statistic' (Kolmogorov-Smirnov statistic).
+            warn_if_poor: If True, emit a warning when the best fit has a p-value
+                below pvalue_threshold, indicating a potentially poor fit.
+            pvalue_threshold: P-value threshold for poor fit warning (default 0.05).
+                Only used when warn_if_poor=True.
 
         Returns:
             List of DistributionFitResult objects
@@ -324,6 +467,8 @@ class FitResults:
             >>> best_sse = results.best(n=1, metric='sse')[0]
             >>> # Get best by Anderson-Darling statistic
             >>> best_ad = results.best(n=1, metric='ad_statistic')[0]
+            >>> # Get best with warning if poor fit
+            >>> best = results.best(n=1, warn_if_poor=True)[0]
         """
         valid_metrics = {"sse", "aic", "bic", "ks_statistic", "ad_statistic"}
         if metric not in valid_metrics:
@@ -331,7 +476,7 @@ class FitResults:
 
         top_n = self._df.orderBy(metric).limit(n).collect()
 
-        return [
+        results = [
             DistributionFitResult(
                 distribution=row["distribution"],
                 parameters=list(row["parameters"]),
@@ -343,9 +488,24 @@ class FitResults:
                 pvalue=row["pvalue"],
                 ad_statistic=row["ad_statistic"],
                 ad_pvalue=row["ad_pvalue"],
+                data_summary=dict(row["data_summary"]) if "data_summary" in row and row["data_summary"] else None,
             )
             for row in top_n
         ]
+
+        # Emit warning if requested and best fit has poor p-value
+        if warn_if_poor and results:
+            best_result = results[0]
+            if best_result.pvalue is not None and best_result.pvalue < pvalue_threshold:
+                warnings.warn(
+                    f"Best fit '{best_result.distribution}' has p-value {best_result.pvalue:.4f} "
+                    f"< {pvalue_threshold}, indicating a potentially poor fit. "
+                    f"Consider using quality_report() for detailed diagnostics.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        return results
 
     def filter(
         self,
@@ -497,6 +657,100 @@ class FitResults:
     def __len__(self) -> int:
         """Get number of fitted distributions."""
         return self.count()
+
+    def quality_report(
+        self,
+        n: int = 5,
+        pvalue_threshold: float = 0.05,
+        ks_threshold: float = 0.10,
+        ad_threshold: float = 2.0,
+    ) -> Dict[str, Union[List[DistributionFitResult], Dict[str, float], List[str]]]:
+        """Generate a quality assessment report for the fitting results.
+
+        Provides a comprehensive view of fit quality including the top fits,
+        summary statistics, and any quality concerns.
+
+        Args:
+            n: Number of top distributions to include (default 5)
+            pvalue_threshold: Minimum p-value for acceptable fit (default 0.05)
+            ks_threshold: Maximum K-S statistic for acceptable fit (default 0.10)
+            ad_threshold: Maximum A-D statistic for acceptable fit (default 2.0)
+
+        Returns:
+            Dictionary with:
+                - 'top_fits': List of top n DistributionFitResult objects
+                - 'summary': Dict with summary statistics (min/max/mean for key metrics)
+                - 'warnings': List of warning messages about fit quality
+                - 'n_acceptable': Number of distributions meeting all thresholds
+
+        Example:
+            >>> report = results.quality_report()
+            >>> print(f"Top fit: {report['top_fits'][0].distribution}")
+            >>> print(f"Warnings: {report['warnings']}")
+            >>> if report['warnings']:
+            ...     print("Consider reviewing fit quality")
+        """
+        top_fits = self.best(n=n)
+        warnings_list: List[str] = []
+
+        # Get summary stats
+        summary_df = self.summary()
+        summary_dict = {
+            "min_ks": float(summary_df["min_ks"].iloc[0]) if summary_df["min_ks"].iloc[0] is not None else None,
+            "max_ks": float(summary_df["max_ks"].iloc[0]) if summary_df["max_ks"].iloc[0] is not None else None,
+            "mean_ks": float(summary_df["mean_ks"].iloc[0]) if summary_df["mean_ks"].iloc[0] is not None else None,
+            "min_pvalue": (
+                float(summary_df["min_pvalue"].iloc[0]) if summary_df["min_pvalue"].iloc[0] is not None else None
+            ),
+            "max_pvalue": (
+                float(summary_df["max_pvalue"].iloc[0]) if summary_df["max_pvalue"].iloc[0] is not None else None
+            ),
+            "mean_pvalue": (
+                float(summary_df["mean_pvalue"].iloc[0]) if summary_df["mean_pvalue"].iloc[0] is not None else None
+            ),
+            "min_ad": float(summary_df["min_ad"].iloc[0]) if summary_df["min_ad"].iloc[0] is not None else None,
+            "max_ad": float(summary_df["max_ad"].iloc[0]) if summary_df["max_ad"].iloc[0] is not None else None,
+            "total_distributions": int(summary_df["total_distributions"].iloc[0]),
+        }
+
+        # Count acceptable fits
+        acceptable_filter = self._df
+        acceptable_filter = acceptable_filter.filter(F.col("pvalue") >= pvalue_threshold)
+        acceptable_filter = acceptable_filter.filter(F.col("ks_statistic") <= ks_threshold)
+        # Only filter by A-D if values exist
+        if summary_dict["min_ad"] is not None:
+            acceptable_filter = acceptable_filter.filter(
+                (F.col("ad_statistic").isNull()) | (F.col("ad_statistic") <= ad_threshold)
+            )
+        n_acceptable = acceptable_filter.count()
+
+        # Generate warnings
+        if top_fits:
+            best = top_fits[0]
+            if best.pvalue is not None and best.pvalue < pvalue_threshold:
+                warnings_list.append(
+                    f"Best fit '{best.distribution}' has low p-value ({best.pvalue:.4f} < {pvalue_threshold})"
+                )
+            if best.ks_statistic is not None and best.ks_statistic > ks_threshold:
+                warnings_list.append(
+                    f"Best fit '{best.distribution}' has high K-S statistic ({best.ks_statistic:.4f} > {ks_threshold})"
+                )
+            if best.ad_statistic is not None and best.ad_statistic > ad_threshold:
+                warnings_list.append(
+                    f"Best fit '{best.distribution}' has high A-D statistic ({best.ad_statistic:.4f} > {ad_threshold})"
+                )
+
+        if n_acceptable == 0:
+            warnings_list.append("No distributions meet all quality thresholds")
+        elif n_acceptable < 3:
+            warnings_list.append(f"Only {n_acceptable} distribution(s) meet quality thresholds")
+
+        return {
+            "top_fits": top_fits,
+            "summary": summary_dict,
+            "warnings": warnings_list,
+            "n_acceptable": n_acceptable,
+        }
 
     def __repr__(self) -> str:
         """String representation of results."""

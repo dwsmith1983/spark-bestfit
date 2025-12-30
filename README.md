@@ -1,8 +1,8 @@
 # spark-bestfit
 
 [![CI](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml/badge.svg)](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/spark-bestfit)](https://pypi.org/project/spark-bestfit/)
 [![Documentation Status](https://readthedocs.org/projects/spark-bestfit/badge/?version=latest)](https://spark-bestfit.readthedocs.io/en/latest/)
+[![PyPI version](https://img.shields.io/pypi/v/spark-bestfit)](https://pypi.org/project/spark-bestfit/)
 [![Production Ready](https://img.shields.io/badge/status-production--ready-brightgreen)](https://github.com/dwsmith1983/spark-bestfit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -23,6 +23,10 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
 - **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
 - **Progress Tracking**: Monitor long-running fits with customizable callbacks
+- **Distributed Sampling**: Generate millions of samples using Spark's parallelism
+- **Gaussian Copula**: Correlated multi-column sampling at scale via Spark ML
+- **Fit Quality Warnings**: Automatic warnings for poor fits with detailed diagnostics
+- **Model Serialization**: Save and load fitted distributions to JSON or pickle
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
@@ -177,6 +181,14 @@ cdf_values = best.cdf(x_array)     # Evaluate CDF
 # Access all goodness-of-fit metrics
 print(f"K-S: {best.ks_statistic}, p-value: {best.pvalue}")
 print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
+
+# Get quality report for fit diagnostics
+report = results.quality_report()
+if report["warnings"]:
+    print(f"Warnings: {report['warnings']}")
+
+# Warn automatically for poor fits
+best = results.best(n=1, warn_if_poor=True)[0]
 ```
 
 > **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
@@ -235,6 +247,70 @@ print(f"Distribution: {best.distribution}")
 for param, (lower, upper) in ci.items():
     print(f"  {param}: [{lower:.4f}, {upper:.4f}]")
 ```
+
+### Distributed Sampling
+
+Generate large samples using Spark's distributed computing:
+
+```python
+# Generate 1 million samples distributed across the cluster
+samples_df = best.sample_spark(n=1_000_000, spark=spark)
+samples_df.show(5)
+
+# With reproducibility
+samples_df = best.sample_spark(n=1_000_000, spark=spark, random_seed=42)
+
+# Control partitioning
+samples_df = best.sample_spark(
+    n=1_000_000,
+    spark=spark,
+    num_partitions=16,
+    column_name="generated_values"
+)
+```
+
+> **Tip**: Use `sample_spark()` for very large samples (>10M) to leverage cluster parallelism.
+> For smaller samples, `sample(size=N)` returns a local NumPy array and is more efficient.
+> See [Distributed Sampling](https://spark-bestfit.readthedocs.io/en/latest/sampling.html) for benchmarks.
+
+### Gaussian Copula
+
+Generate correlated multi-column samples that preserve both marginal distributions and correlation structure:
+
+```python
+from spark_bestfit import DistributionFitter, GaussianCopula
+
+# Fit multiple columns
+fitter = DistributionFitter(spark)
+results = fitter.fit(df, columns=["price", "quantity", "revenue"])
+
+# Fit copula - correlation computed via Spark ML (scales to billions of rows)
+copula = GaussianCopula.fit(results, df)
+
+# Local sampling (small scale)
+samples = copula.sample(n=10_000)  # Returns Dict[str, np.ndarray]
+
+# Fast uniform sampling (skips marginal transforms, ~24% faster than statsmodels)
+uniform_samples = copula.sample(n=10_000_000, return_uniform=True)
+
+# Distributed sampling (large scale) - scales to 100M+ samples
+samples_df = copula.sample_spark(n=100_000_000)
+
+# Serialize for later use
+copula.save("copula.json")
+loaded = GaussianCopula.load("copula.json")
+```
+
+**When to use spark-bestfit copula** (vs statsmodels):
+
+| Scenario | statsmodels | spark-bestfit |
+|----------|-------------|---------------|
+| Data < 10M rows | Faster (use this) | Slower (Spark overhead) |
+| Data > 100M rows | Crashes (OOM) | **Works** (distributed) |
+| Data already in Spark | Requires `.toPandas()` | **Native** (no conversion) |
+| 100M+ samples needed | May OOM | **`sample_spark()`** distributed |
+
+> See [Gaussian Copula](https://spark-bestfit.readthedocs.io/en/latest/copula.html) for details.
 
 ### Custom Plotting
 
@@ -337,13 +413,34 @@ fitter = DistributionFitter(spark, excluded_distributions=exclusions)
 fitter = DistributionFitter(spark, excluded_distributions=())
 ```
 
+### Model Serialization
+
+Save fitted distributions to disk and reload them later for inference:
+
+```python
+from spark_bestfit import DistributionFitResult
+
+# Save the best fit to JSON (human-readable, recommended)
+best.save("model.json")
+
+# Or save to pickle (faster, binary)
+best.save("model.pkl", format="pickle")
+
+# Load and use later - no Spark needed for inference!
+loaded = DistributionFitResult.load("model.json")
+samples = loaded.sample(size=1000)
+percentile_95 = loaded.ppf(0.95)
+```
+
+> **Tip**: JSON format includes version metadata and is recommended for most use cases.
+> See [Serialization](https://spark-bestfit.readthedocs.io/en/latest/serialization.html) for details.
+
 ## Roadmap
 
 spark-bestfit enables downstream use cases (simulations, ML, analytics) by providing distribution fitting primitives.
 
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **1.3.0** | Downstream Enablement | Serialization/export, distributed sampling, copulas for correlation, fit quality warnings |
 | **1.4.0** | Bounded Distributions | Truncated distribution fitting for data with natural bounds |
 | **2.0.0** | Custom Distributions | User-defined distribution classes |
 | **2.1.0** | Multivariate | Optional multivariate distribution fitting (MVN, MVt) |

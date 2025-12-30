@@ -8,7 +8,7 @@ import pandas as pd
 import scipy.stats as st
 from pyspark import Broadcast
 from pyspark.sql.functions import pandas_udf
-from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, FloatType, MapType, StringType, StructField, StructType
 from scipy.stats import rv_continuous
 
 # Constant for fitting sample size
@@ -38,14 +38,38 @@ FIT_RESULT_SCHEMA = StructType(
         StructField("pvalue", FloatType(), True),
         StructField("ad_statistic", FloatType(), True),
         StructField("ad_pvalue", FloatType(), True),
+        # data_summary: summary statistics of the original data for provenance
+        StructField("data_summary", MapType(StringType(), FloatType()), True),
     ]
 )
+
+
+def compute_data_summary(data: np.ndarray) -> Dict[str, float]:
+    """Compute summary statistics of the original data.
+
+    These statistics provide lightweight provenance information for debugging
+    and understanding the context of fitted distributions.
+
+    Args:
+        data: Data array used for fitting
+
+    Returns:
+        Dictionary with keys: sample_size, min, max, mean, std
+    """
+    return {
+        "sample_size": float(len(data)),
+        "min": float(np.min(data)),
+        "max": float(np.max(data)),
+        "mean": float(np.mean(data)),
+        "std": float(np.std(data)),
+    }
 
 
 def create_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
     column_name: Optional[str] = None,
+    data_summary: Optional[Dict[str, float]] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -57,6 +81,7 @@ def create_fitting_udf(
         histogram_broadcast: Broadcast variable containing (y_hist, x_hist)
         data_sample_broadcast: Broadcast variable containing data sample
         column_name: Name of the column being fitted (for result tracking)
+        data_summary: Pre-computed summary statistics of the original data
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -65,7 +90,8 @@ def create_fitting_udf(
         >>> # In DistributionFitter:
         >>> hist_bc = spark.sparkContext.broadcast((y_hist, x_hist))
         >>> data_bc = spark.sparkContext.broadcast(data_sample)
-        >>> fitting_udf = create_fitting_udf(hist_bc, data_bc, column_name="value")
+        >>> summary = compute_data_summary(data_sample)
+        >>> fitting_udf = create_fitting_udf(hist_bc, data_bc, column_name="value", data_summary=summary)
         >>> results = df.select(fitting_udf(col('distribution_name')))
     """
 
@@ -81,7 +107,7 @@ def create_fitting_udf(
             distribution_names: Series of scipy distribution names to fit
 
         Returns:
-            DataFrame with columns: column_name, distribution, parameters, sse, aic, bic
+            DataFrame with columns: column_name, distribution, parameters, sse, aic, bic, data_summary
         """
         # Get broadcasted data (no serialization overhead!)
         y_hist, x_hist = histogram_broadcast.value
@@ -96,6 +122,7 @@ def create_fitting_udf(
                 x_hist=x_hist,
                 y_hist=y_hist,
                 column_name=column_name,
+                data_summary=data_summary,
             )
             results.append(result)
 
@@ -115,6 +142,7 @@ def fit_single_distribution(
     x_hist: np.ndarray,
     y_hist: np.ndarray,
     column_name: Optional[str] = None,
+    data_summary: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -124,9 +152,10 @@ def fit_single_distribution(
         x_hist: Histogram bin centers
         y_hist: Histogram density values
         column_name: Name of the column being fitted (for multi-column support)
+        data_summary: Pre-computed summary statistics of the original data
 
     Returns:
-        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic
+        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic, data_summary
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -140,7 +169,7 @@ def fit_single_distribution(
 
             # Check for NaN in parameters (convergence failure)
             if any(not np.isfinite(p) for p in params):
-                return _failed_fit_result(dist_name, column_name)
+                return _failed_fit_result(dist_name, column_name, data_summary)
 
             # Evaluate PDF at histogram bin centers
             pdf_values = evaluate_pdf(dist, params, x_hist)
@@ -150,7 +179,7 @@ def fit_single_distribution(
 
             # Check for invalid SSE
             if not np.isfinite(sse):
-                return _failed_fit_result(dist_name, column_name)
+                return _failed_fit_result(dist_name, column_name, data_summary)
 
             # Compute information criteria
             aic, bic = compute_information_criteria(dist, params, data_sample)
@@ -169,7 +198,7 @@ def fit_single_distribution(
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
                     # These indicate fitting issues - return failed result
-                    return _failed_fit_result(dist_name, column_name)
+                    return _failed_fit_result(dist_name, column_name, data_summary)
 
             return {
                 "column_name": column_name,
@@ -182,18 +211,24 @@ def fit_single_distribution(
                 "pvalue": float(pvalue),
                 "ad_statistic": float(ad_stat),
                 "ad_pvalue": ad_pvalue,
+                "data_summary": data_summary,
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_fit_result(dist_name, column_name)
+        return _failed_fit_result(dist_name, column_name, data_summary)
 
 
-def _failed_fit_result(dist_name: str, column_name: Optional[str] = None) -> Dict[str, Any]:
+def _failed_fit_result(
+    dist_name: str,
+    column_name: Optional[str] = None,
+    data_summary: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
     """Return sentinel values for failed fits.
 
     Args:
         dist_name: Name of the distribution that failed
         column_name: Name of the column being fitted (for multi-column support)
+        data_summary: Pre-computed summary statistics of the original data
 
     Returns:
         Dictionary with sentinel values indicating fit failure
@@ -209,6 +244,7 @@ def _failed_fit_result(dist_name: str, column_name: Optional[str] = None) -> Dic
         "pvalue": 0.0,
         "ad_statistic": float(np.inf),
         "ad_pvalue": None,
+        "data_summary": data_summary,
     }
 
 
