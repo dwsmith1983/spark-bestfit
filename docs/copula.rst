@@ -102,6 +102,79 @@ For small samples, ``sample()`` is faster due to Spark overhead:
     # Distributed sampling - efficient for large n
     samples_df = copula.sample_spark(n=100_000_000, random_seed=42)
 
+Fast Uniform Sampling
+---------------------
+
+Both ``sample()`` and ``sample_spark()`` support a ``return_uniform=True`` parameter
+that skips the marginal distribution transforms, returning uniform [0,1] samples instead.
+This matches the behavior of statsmodels and is significantly faster:
+
+.. code-block:: python
+
+    # Fast path - returns uniform samples without marginal transforms
+    uniform_samples = copula.sample(n=10_000_000, return_uniform=True)
+
+    # Full transform - slower but returns samples in fitted marginal distributions
+    marginal_samples = copula.sample(n=10_000_000)
+
+**When to use ``return_uniform=True``:**
+
+- You only need the correlation structure, not the exact marginal distributions
+- You're doing correlation analysis or downstream transforms
+- Performance is critical
+
+Performance Benchmarks
+----------------------
+
+Sampling performance comparison (3-column copula, local mode):
+
+.. list-table::
+   :header-rows: 1
+
+   * - N Samples
+     - statsmodels
+     - return_uniform
+     - with transform
+   * - 1,000,000
+     - 73 ms
+     - **56 ms**
+     - 1,547 ms
+   * - 10,000,000
+     - 725 ms
+     - **555 ms**
+     - 15,485 ms
+   * - 50,000,000
+     - 3,706 ms
+     - **2,820 ms**
+     - 77,820 ms
+
+**Key findings:**
+
+- ``return_uniform=True`` is ~24% faster than statsmodels (same output format)
+- Full marginal transforms add ~28× overhead due to scipy's PPF using iterative root-finding
+- Use ``return_uniform=True`` when you don't need the exact marginal distributions
+
+Correlation computation (pandas vs Spark ML):
+
+.. list-table::
+   :header-rows: 1
+
+   * - N Rows
+     - pandas (ms)
+     - Spark ML (ms)
+   * - 10,000
+     - 2
+     - 195
+   * - 100,000
+     - 19
+     - 458
+   * - 1,000,000
+     - 241
+     - 3,120
+
+Spark has overhead in local mode, but the value is **memory scale** - handling data
+that doesn't fit in pandas. For 100M+ rows, Spark is the only option.
+
 Serialization
 -------------
 
@@ -121,7 +194,7 @@ Save and load copulas for later use:
 
 The JSON format includes metadata for debugging:
 
-.. code-block:: json
+.. code-block:: javascript
 
     {
       "schema_version": "1.0",

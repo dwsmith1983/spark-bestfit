@@ -176,6 +176,60 @@ class TestGaussianCopulaSample:
             sampled_corr, simple_copula.correlation_matrix, decimal=1
         )
 
+    def test_sample_return_uniform(self, simple_copula):
+        """Test return_uniform=True returns uniform samples."""
+        samples = simple_copula.sample(n=10000, random_state=42, return_uniform=True)
+
+        for col in simple_copula.column_names:
+            arr = samples[col]
+            # Uniform samples should be in [0, 1]
+            assert np.all(arr >= 0.0)
+            assert np.all(arr <= 1.0)
+            # Should be roughly uniformly distributed
+            assert 0.4 < np.mean(arr) < 0.6  # Mean should be ~0.5
+
+    def test_sample_return_uniform_preserves_correlation(self, simple_copula):
+        """Test that uniform samples preserve correlation structure."""
+        samples = simple_copula.sample(n=5000, random_state=42, return_uniform=True)
+
+        sample_array = np.column_stack(
+            [samples[col] for col in simple_copula.column_names]
+        )
+
+        # Compute Spearman correlation (works for uniform data too)
+        from scipy.stats import spearmanr
+
+        sampled_corr = np.zeros((3, 3))
+        for i in range(3):
+            for j in range(3):
+                sampled_corr[i, j], _ = spearmanr(sample_array[:, i], sample_array[:, j])
+
+        # Should be close to original correlation matrix
+        np.testing.assert_array_almost_equal(
+            sampled_corr, simple_copula.correlation_matrix, decimal=1
+        )
+
+    def test_sample_return_uniform_is_faster(self, simple_copula):
+        """Test that return_uniform=True is faster than default."""
+        import time
+
+        # Warm up
+        simple_copula.sample(n=1000, random_state=42)
+        simple_copula.sample(n=1000, random_state=42, return_uniform=True)
+
+        # Time with marginal transform
+        start = time.time()
+        simple_copula.sample(n=100000, random_state=42)
+        time_with_transform = time.time() - start
+
+        # Time without marginal transform
+        start = time.time()
+        simple_copula.sample(n=100000, random_state=42, return_uniform=True)
+        time_uniform = time.time() - start
+
+        # Uniform should be significantly faster
+        assert time_uniform < time_with_transform
+
     def test_sample_marginal_distribution(self, simple_copula):
         """Test that marginals approximately match fitted distributions."""
         samples = simple_copula.sample(n=5000, random_state=42)
@@ -255,6 +309,21 @@ class TestGaussianCopulaSampleSpark:
             n=1000, spark=spark_session, num_partitions=4, random_seed=42
         )
         assert samples_df.count() == 1000
+
+    def test_sample_spark_return_uniform(self, simple_copula, spark_session):
+        """Test return_uniform=True in sample_spark()."""
+        samples_df = simple_copula.sample_spark(
+            n=1000, spark=spark_session, random_seed=42, return_uniform=True
+        )
+
+        pdf = samples_df.toPandas()
+        for col in simple_copula.column_names:
+            arr = pdf[col].values
+            # Uniform samples should be in [0, 1]
+            assert np.all(arr >= 0.0)
+            assert np.all(arr <= 1.0)
+            # Should be roughly uniformly distributed
+            assert 0.3 < np.mean(arr) < 0.7  # Mean should be ~0.5
 
 
 class TestGaussianCopulaSerialization:

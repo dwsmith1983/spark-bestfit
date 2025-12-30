@@ -290,6 +290,9 @@ copula = GaussianCopula.fit(results, df)
 # Local sampling (small scale)
 samples = copula.sample(n=10_000)  # Returns Dict[str, np.ndarray]
 
+# Fast uniform sampling (skips marginal transforms, ~24% faster than statsmodels)
+uniform_samples = copula.sample(n=10_000_000, return_uniform=True)
+
 # Distributed sampling (large scale) - scales to 100M+ samples
 samples_df = copula.sample_spark(n=100_000_000)
 

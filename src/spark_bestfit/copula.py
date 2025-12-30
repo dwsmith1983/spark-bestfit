@@ -175,10 +175,31 @@ class GaussianCopula:
 
         return corr_matrix
 
+    def _get_frozen_dist(self, col: str) -> st.rv_continuous:
+        """Get a frozen (pre-parameterized) scipy distribution for a column.
+
+        Frozen distributions are cached for performance - avoids recreating
+        distribution objects and re-parsing parameters on each call.
+
+        Args:
+            col: Column name
+
+        Returns:
+            Frozen scipy distribution with parameters bound
+        """
+        if not hasattr(self, "_frozen_dists"):
+            self._frozen_dists: Dict[str, st.rv_continuous] = {}
+        if col not in self._frozen_dists:
+            marginal = self.marginals[col]
+            dist = marginal.get_scipy_dist()
+            self._frozen_dists[col] = dist(*marginal.parameters)
+        return self._frozen_dists[col]
+
     def sample(
         self,
         n: int,
         random_state: Optional[int] = None,
+        return_uniform: bool = False,
     ) -> Dict[str, np.ndarray]:
         """Generate correlated samples locally.
 
@@ -191,6 +212,10 @@ class GaussianCopula:
         Args:
             n: Number of samples to generate
             random_state: Random seed for reproducibility
+            return_uniform: If True, return uniform [0,1] samples without
+                marginal transformation. This is faster and matches statsmodels
+                behavior. Default False returns samples transformed to the
+                fitted marginal distributions.
 
         Returns:
             Dict mapping column names to sample arrays
@@ -198,6 +223,9 @@ class GaussianCopula:
         Example:
             >>> samples = copula.sample(n=10000, random_state=42)
             >>> df = pd.DataFrame(samples)
+
+            >>> # For raw copula samples (faster, no marginal transform)
+            >>> uniform_samples = copula.sample(n=10000, return_uniform=True)
         """
         rng = np.random.default_rng(random_state)
 
@@ -209,16 +237,19 @@ class GaussianCopula:
             size=n,
         )
 
-        # Transform each column through the copula
+        # Transform normal -> uniform via standard normal CDF (vectorized for all columns)
+        uniform_samples = st.norm.cdf(mvn_samples)
+
+        # If user wants raw uniform samples, return early (fast path)
+        if return_uniform:
+            return {col: uniform_samples[:, i] for i, col in enumerate(self.column_names)}
+
+        # Transform uniform -> target marginal via inverse CDF (PPF)
+        # Uses frozen (cached) distributions for better performance
         result: Dict[str, np.ndarray] = {}
         for i, col in enumerate(self.column_names):
-            # Transform normal -> uniform via standard normal CDF
-            uniform_samples = st.norm.cdf(mvn_samples[:, i])
-
-            # Transform uniform -> target marginal via inverse CDF (PPF)
-            marginal = self.marginals[col]
-            dist = marginal.get_scipy_dist()
-            result[col] = dist.ppf(uniform_samples, *marginal.parameters)
+            frozen_dist = self._get_frozen_dist(col)
+            result[col] = frozen_dist.ppf(uniform_samples[:, i])
 
         return result
 
@@ -228,6 +259,7 @@ class GaussianCopula:
         spark: Optional[SparkSession] = None,
         num_partitions: Optional[int] = None,
         random_seed: Optional[int] = None,
+        return_uniform: bool = False,
     ) -> DataFrame:
         """Generate correlated samples using Spark distributed computing.
 
@@ -239,6 +271,9 @@ class GaussianCopula:
             spark: SparkSession. If None, uses the active session.
             num_partitions: Number of partitions. Defaults to Spark default parallelism.
             random_seed: Random seed for reproducibility
+            return_uniform: If True, return uniform [0,1] samples without
+                marginal transformation. This is faster. Default False returns
+                samples transformed to the fitted marginal distributions.
 
         Returns:
             Spark DataFrame with one column per marginal
@@ -294,13 +329,26 @@ class GaussianCopula:
             iterator: Iterator[pd.DataFrame],
         ) -> Iterator[pd.DataFrame]:
             """Generate correlated samples for each partition."""
+            # Pre-create frozen distributions once per worker (cached)
+            # Only needed if we're doing marginal transforms
+            frozen_dists: Dict[str, st.rv_continuous] = {}
+            if not return_uniform:
+                for col in column_names:
+                    m_info = marginal_data[col]
+                    dist = getattr(st, m_info["distribution"])
+                    frozen_dists[col] = dist(*m_info["parameters"])
+
+            # Pre-convert correlation matrix once
+            corr_np = np.array(corr_matrix)
+
             for pdf in iterator:
                 if len(pdf) == 0:
                     continue
 
-                for _, row in pdf.iterrows():
-                    n_samples = int(row["n_samples"])
-                    partition_id = int(row["partition_id"])
+                # Process all rows in the partition at once (vectorized, no iterrows)
+                for idx in range(len(pdf)):
+                    n_samples = int(pdf.iloc[idx]["n_samples"])
+                    partition_id = int(pdf.iloc[idx]["partition_id"])
 
                     # Create unique seed for this partition
                     if random_seed is not None:
@@ -309,24 +357,23 @@ class GaussianCopula:
                         rng = np.random.default_rng()
 
                     # Generate multivariate normal samples
-                    corr_np = np.array(corr_matrix)
                     mvn_samples = rng.multivariate_normal(
                         mean=np.zeros(len(column_names)),
                         cov=corr_np,
                         size=n_samples,
                     )
 
-                    # Transform through copula for each column
-                    result_data: Dict[str, np.ndarray] = {}
-                    for i, col in enumerate(column_names):
-                        # Normal -> Uniform
-                        uniform_samples = st.norm.cdf(mvn_samples[:, i])
+                    # Transform normal -> uniform (vectorized for all columns at once)
+                    uniform_samples = st.norm.cdf(mvn_samples)
 
-                        # Uniform -> Target marginal
-                        m_info = marginal_data[col]
-                        dist_name: str = m_info["distribution"]
-                        dist = getattr(st, dist_name)
-                        result_data[col] = dist.ppf(uniform_samples, *m_info["parameters"])
+                    # Fast path: return uniform samples without marginal transform
+                    if return_uniform:
+                        result_data = {col: uniform_samples[:, i] for i, col in enumerate(column_names)}
+                    else:
+                        # Transform through frozen distributions for each column
+                        result_data = {}
+                        for i, col in enumerate(column_names):
+                            result_data[col] = frozen_dists[col].ppf(uniform_samples[:, i])
 
                     yield pd.DataFrame(result_data)
 
