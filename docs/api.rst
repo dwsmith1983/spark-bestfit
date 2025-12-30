@@ -21,13 +21,19 @@ Results
 -------
 
 .. autoclass:: spark_bestfit.results.DistributionFitResult
-   :members: sample, pdf, cdf, ppf
+   :members: sample, sample_spark, pdf, cdf, ppf
    :show-inheritance:
    :no-index:
 
 .. autoclass:: spark_bestfit.results.FitResults
    :members:
    :show-inheritance:
+
+Sampling
+--------
+
+.. automodule:: spark_bestfit.sampling
+   :members:
 
 Distributions
 -------------

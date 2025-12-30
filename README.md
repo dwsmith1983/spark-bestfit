@@ -1,8 +1,8 @@
 # spark-bestfit
 
 [![CI](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml/badge.svg)](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/spark-bestfit)](https://pypi.org/project/spark-bestfit/)
 [![Documentation Status](https://readthedocs.org/projects/spark-bestfit/badge/?version=latest)](https://spark-bestfit.readthedocs.io/en/latest/)
+[![PyPI version](https://img.shields.io/pypi/v/spark-bestfit)](https://pypi.org/project/spark-bestfit/)
 [![Production Ready](https://img.shields.io/badge/status-production--ready-brightgreen)](https://github.com/dwsmith1983/spark-bestfit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -23,6 +23,8 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
 - **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
 - **Progress Tracking**: Monitor long-running fits with customizable callbacks
+- **Distributed Sampling**: Generate millions of samples using Spark's parallelism
+- **Fit Quality Warnings**: Automatic warnings for poor fits with detailed diagnostics
 - **Model Serialization**: Save and load fitted distributions to JSON or pickle
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
@@ -178,6 +180,14 @@ cdf_values = best.cdf(x_array)     # Evaluate CDF
 # Access all goodness-of-fit metrics
 print(f"K-S: {best.ks_statistic}, p-value: {best.pvalue}")
 print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
+
+# Get quality report for fit diagnostics
+report = results.quality_report()
+if report["warnings"]:
+    print(f"Warnings: {report['warnings']}")
+
+# Warn automatically for poor fits
+best = results.best(n=1, warn_if_poor=True)[0]
 ```
 
 > **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
@@ -236,6 +246,31 @@ print(f"Distribution: {best.distribution}")
 for param, (lower, upper) in ci.items():
     print(f"  {param}: [{lower:.4f}, {upper:.4f}]")
 ```
+
+### Distributed Sampling
+
+Generate large samples using Spark's distributed computing:
+
+```python
+# Generate 1 million samples distributed across the cluster
+samples_df = best.sample_spark(n=1_000_000, spark=spark)
+samples_df.show(5)
+
+# With reproducibility
+samples_df = best.sample_spark(n=1_000_000, spark=spark, random_seed=42)
+
+# Control partitioning
+samples_df = best.sample_spark(
+    n=1_000_000,
+    spark=spark,
+    num_partitions=16,
+    column_name="generated_values"
+)
+```
+
+> **Tip**: Use `sample_spark()` for very large samples (>10M) to leverage cluster parallelism.
+> For smaller samples, `sample(size=N)` returns a local NumPy array and is more efficient.
+> See [Distributed Sampling](https://spark-bestfit.readthedocs.io/en/latest/sampling.html) for benchmarks.
 
 ### Custom Plotting
 

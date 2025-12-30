@@ -1,5 +1,7 @@
 """Tests for results module."""
 
+import warnings
+
 import numpy as np
 import pytest
 import scipy.stats as st
@@ -610,3 +612,273 @@ class TestConfidenceIntervals:
         assert "scale" in ci
         for param, (lower, upper) in ci.items():
             assert lower < upper
+
+
+class TestWarnIfPoor:
+    """Tests for warn_if_poor parameter in best() method."""
+
+    @pytest.fixture
+    def results_with_poor_fit(self, spark_session):
+        """Create results where best fit has poor p-value."""
+        data = [
+            # distribution, parameters, sse, aic, bic, ks_statistic, pvalue, ad_statistic, ad_pvalue
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.02, 0.35, 0.15),  # poor p-value
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.01, 0.40, None),  # worse p-value
+        ]
+        return spark_session.createDataFrame(
+            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"]
+        )
+
+    @pytest.fixture
+    def results_with_good_fit(self, spark_session):
+        """Create results where best fit has good p-value."""
+        data = [
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.90, 0.35, 0.15),  # good p-value
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.85, 0.40, None),
+        ]
+        return spark_session.createDataFrame(
+            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"]
+        )
+
+    def test_warn_if_poor_emits_warning(self, results_with_poor_fit):
+        """Test that warning is emitted for poor fit."""
+        results = FitResults(results_with_poor_fit)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            best = results.best(n=1, warn_if_poor=True)
+
+            # Filter for UserWarning only (ignore ResourceWarning, etc.)
+            user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+            assert len(user_warnings) == 1
+            assert "poor fit" in str(user_warnings[0].message).lower()
+            assert "gamma" in str(user_warnings[0].message)  # Best fit is gamma (lowest ks_statistic)
+            assert best[0].distribution == "gamma"
+
+    def test_warn_if_poor_no_warning_for_good_fit(self, results_with_good_fit):
+        """Test that no warning is emitted for good fit."""
+        results = FitResults(results_with_good_fit)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            results.best(n=1, warn_if_poor=True)
+
+            user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+            assert len(user_warnings) == 0
+
+    def test_warn_if_poor_disabled_by_default(self, results_with_poor_fit):
+        """Test that warning is not emitted when warn_if_poor=False (default)."""
+        results = FitResults(results_with_poor_fit)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            results.best(n=1)  # warn_if_poor=False by default
+
+            user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+            assert len(user_warnings) == 0
+
+    def test_warn_if_poor_custom_threshold(self, results_with_good_fit):
+        """Test custom pvalue_threshold for warning."""
+        results = FitResults(results_with_good_fit)
+
+        # With high threshold, even good fits should trigger warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            results.best(n=1, warn_if_poor=True, pvalue_threshold=0.95)
+
+            user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+            assert len(user_warnings) == 1  # p-value 0.85 < 0.95
+
+    def test_warn_if_poor_with_none_pvalue(self, spark_session):
+        """Test that no warning is emitted when pvalue is None."""
+        from pyspark.sql.types import ArrayType, DoubleType, FloatType, StringType, StructField, StructType
+
+        schema = StructType([
+            StructField("distribution", StringType(), False),
+            StructField("parameters", ArrayType(DoubleType()), False),
+            StructField("sse", DoubleType(), False),
+            StructField("aic", DoubleType(), True),
+            StructField("bic", DoubleType(), True),
+            StructField("ks_statistic", DoubleType(), True),
+            StructField("pvalue", DoubleType(), True),
+            StructField("ad_statistic", DoubleType(), True),
+            StructField("ad_pvalue", DoubleType(), True),
+        ])
+        data = [
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, None, 0.35, None),
+        ]
+        df = spark_session.createDataFrame(data, schema)
+        results = FitResults(df)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            results.best(n=1, warn_if_poor=True)
+
+            user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+            assert len(user_warnings) == 0  # No warning when pvalue is None
+
+
+class TestQualityReport:
+    """Tests for quality_report() method."""
+
+    @pytest.fixture
+    def sample_results_df(self, spark_session):
+        """Create sample results for quality report testing."""
+        data = [
+            # distribution, parameters, sse, aic, bic, ks_statistic, pvalue, ad_statistic, ad_pvalue
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.90, 0.35, 0.15),
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.95, 0.40, None),
+            ("expon", [0.0, 5.0], 0.008, 1600.0, 1615.0, 0.035, 0.75, 0.30, 0.20),
+            ("lognorm", [1.0, 0.0, 2.0], 0.010, 1650.0, 1680.0, 0.040, 0.65, 0.60, None),
+            ("weibull_min", [1.5, 0.0, 3.0], 0.004, 1450.0, 1480.0, 0.022, 0.92, 0.45, None),
+        ]
+        return spark_session.createDataFrame(
+            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"]
+        )
+
+    def test_quality_report_returns_dict(self, sample_results_df):
+        """Test that quality_report returns proper dict structure."""
+        results = FitResults(sample_results_df)
+        report = results.quality_report()
+
+        assert isinstance(report, dict)
+        assert "top_fits" in report
+        assert "summary" in report
+        assert "warnings" in report
+        assert "n_acceptable" in report
+
+    def test_quality_report_top_fits(self, sample_results_df):
+        """Test that top_fits contains correct results."""
+        results = FitResults(sample_results_df)
+        report = results.quality_report(n=3)
+
+        assert len(report["top_fits"]) == 3
+        assert all(isinstance(r, DistributionFitResult) for r in report["top_fits"])
+        # Should be sorted by ks_statistic
+        assert report["top_fits"][0].ks_statistic <= report["top_fits"][1].ks_statistic
+
+    def test_quality_report_summary_stats(self, sample_results_df):
+        """Test that summary contains expected statistics."""
+        results = FitResults(sample_results_df)
+        report = results.quality_report()
+
+        summary = report["summary"]
+        assert "min_ks" in summary
+        assert "max_ks" in summary
+        assert "mean_ks" in summary
+        assert "min_pvalue" in summary
+        assert "max_pvalue" in summary
+        assert "total_distributions" in summary
+
+        assert summary["total_distributions"] == 5
+        assert summary["min_ks"] == 0.020  # gamma
+
+    def test_quality_report_n_acceptable(self, sample_results_df):
+        """Test that n_acceptable counts fits meeting thresholds."""
+        results = FitResults(sample_results_df)
+
+        # With default thresholds (pvalue>=0.05, ks<=0.10, ad<=2.0)
+        report = results.quality_report()
+        # All fits should pass default thresholds
+        assert report["n_acceptable"] == 5
+
+    def test_quality_report_strict_thresholds(self, sample_results_df):
+        """Test quality_report with strict thresholds."""
+        results = FitResults(sample_results_df)
+
+        # With strict thresholds
+        report = results.quality_report(
+            pvalue_threshold=0.90,
+            ks_threshold=0.025,
+            ad_threshold=0.40
+        )
+
+        # Only gamma (ks=0.020, pvalue=0.95, ad=0.40) and weibull_min (ks=0.022, pvalue=0.92, ad=0.45)
+        # might pass, but weibull_min has ad=0.45 > 0.40
+        # Actually: gamma ks=0.020 < 0.025, pvalue=0.95 >= 0.90, ad=0.40 <= 0.40 - passes
+        #          weibull_min ks=0.022 < 0.025, pvalue=0.92 >= 0.90, ad=0.45 > 0.40 - fails ad
+        #          norm ks=0.025 <= 0.025, pvalue=0.90 >= 0.90, ad=0.35 <= 0.40 - passes
+        # So 2 should pass
+        assert report["n_acceptable"] == 2
+
+    def test_quality_report_warnings_for_poor_fit(self, spark_session):
+        """Test that warnings are generated for poor fits."""
+        from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
+
+        schema = StructType([
+            StructField("distribution", StringType(), False),
+            StructField("parameters", ArrayType(DoubleType()), False),
+            StructField("sse", DoubleType(), False),
+            StructField("aic", DoubleType(), True),
+            StructField("bic", DoubleType(), True),
+            StructField("ks_statistic", DoubleType(), True),
+            StructField("pvalue", DoubleType(), True),
+            StructField("ad_statistic", DoubleType(), True),
+            StructField("ad_pvalue", DoubleType(), True),
+        ])
+        data = [
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.15, 0.02, 2.5, None),  # All bad
+        ]
+        df = spark_session.createDataFrame(data, schema)
+        results = FitResults(df)
+
+        report = results.quality_report()
+
+        # Should have warnings for low p-value, high KS, high AD
+        assert len(report["warnings"]) >= 1
+        warning_text = " ".join(report["warnings"]).lower()
+        assert "p-value" in warning_text or "k-s" in warning_text or "a-d" in warning_text
+
+    def test_quality_report_no_acceptable_warning(self, spark_session):
+        """Test warning when no distributions meet thresholds."""
+        from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
+
+        schema = StructType([
+            StructField("distribution", StringType(), False),
+            StructField("parameters", ArrayType(DoubleType()), False),
+            StructField("sse", DoubleType(), False),
+            StructField("aic", DoubleType(), True),
+            StructField("bic", DoubleType(), True),
+            StructField("ks_statistic", DoubleType(), True),
+            StructField("pvalue", DoubleType(), True),
+            StructField("ad_statistic", DoubleType(), True),
+            StructField("ad_pvalue", DoubleType(), True),
+        ])
+        data = [
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.15, 0.02, 2.5, None),  # Poor fit
+        ]
+        df = spark_session.createDataFrame(data, schema)
+        results = FitResults(df)
+
+        report = results.quality_report()
+
+        assert report["n_acceptable"] == 0
+        assert any("no distributions" in w.lower() for w in report["warnings"])
+
+    def test_quality_report_few_acceptable_warning(self, spark_session):
+        """Test warning when only 1-2 distributions meet thresholds."""
+        from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
+
+        schema = StructType([
+            StructField("distribution", StringType(), False),
+            StructField("parameters", ArrayType(DoubleType()), False),
+            StructField("sse", DoubleType(), False),
+            StructField("aic", DoubleType(), True),
+            StructField("bic", DoubleType(), True),
+            StructField("ks_statistic", DoubleType(), True),
+            StructField("pvalue", DoubleType(), True),
+            StructField("ad_statistic", DoubleType(), True),
+            StructField("ad_pvalue", DoubleType(), True),
+        ])
+        data = [
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.05, 0.80, 1.0, None),  # Good
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.15, 0.02, 2.5, None),  # Poor
+            ("expon", [0.0, 5.0], 0.008, 1600.0, 1615.0, 0.15, 0.02, 2.5, None),  # Poor
+        ]
+        df = spark_session.createDataFrame(data, schema)
+        results = FitResults(df)
+
+        report = results.quality_report()
+
+        assert report["n_acceptable"] == 1
+        assert any("only 1 distribution" in w.lower() for w in report["warnings"])
