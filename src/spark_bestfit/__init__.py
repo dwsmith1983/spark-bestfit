@@ -33,6 +33,7 @@ from spark_bestfit.core import (
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
 from spark_bestfit.results import DistributionFitResult, FitResults, MetricName
+from spark_bestfit.serialization import SerializationError
 from spark_bestfit.utils import get_spark_session
 
 __author__ = "Dustin Smith"
@@ -54,6 +55,8 @@ __all__ = [
     "DistributionFitResult",
     # Type aliases
     "MetricName",
+    # Serialization
+    "SerializationError",
     # Distribution management
     "DistributionRegistry",
     "DiscreteDistributionRegistry",

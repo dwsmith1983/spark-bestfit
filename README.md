@@ -23,6 +23,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
 - **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
 - **Progress Tracking**: Monitor long-running fits with customizable callbacks
+- **Model Serialization**: Save and load fitted distributions to JSON or pickle
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
@@ -336,6 +337,28 @@ fitter = DistributionFitter(spark, excluded_distributions=exclusions)
 # Or exclude nothing (fit all distributions - may be slow)
 fitter = DistributionFitter(spark, excluded_distributions=())
 ```
+
+### Model Serialization
+
+Save fitted distributions to disk and reload them later for inference:
+
+```python
+from spark_bestfit import DistributionFitResult
+
+# Save the best fit to JSON (human-readable, recommended)
+best.save("model.json")
+
+# Or save to pickle (faster, binary)
+best.save("model.pkl", format="pickle")
+
+# Load and use later - no Spark needed for inference!
+loaded = DistributionFitResult.load("model.json")
+samples = loaded.sample(size=1000)
+percentile_95 = loaded.ppf(0.95)
+```
+
+> **Tip**: JSON format includes version metadata and is recommended for most use cases.
+> See [Serialization](https://spark-bestfit.readthedocs.io/en/latest/serialization.html) for details.
 
 ## Documentation
 

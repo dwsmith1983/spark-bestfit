@@ -14,7 +14,7 @@ from spark_bestfit.discrete_fitting import (
     create_discrete_sample_data,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
-from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, create_fitting_udf
+from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_summary, create_fitting_udf
 from spark_bestfit.histogram import HistogramComputer
 from spark_bestfit.results import DistributionFitResult, FitResults
 from spark_bestfit.utils import get_spark_session
@@ -243,6 +243,9 @@ class DistributionFitter:
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
+        # Compute data summary for provenance (once per column)
+        data_summary = compute_data_summary(data_sample)
+
         try:
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
@@ -252,7 +255,9 @@ class DistributionFitter:
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply fitting UDF
-            fitting_udf = create_fitting_udf(histogram_bc, data_sample_bc, column_name=column)
+            fitting_udf = create_fitting_udf(
+                histogram_bc, data_sample_bc, column_name=column, data_summary=data_summary
+            )
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
             # Filter failed fits
@@ -873,6 +878,9 @@ class DiscreteDistributionFitter:
         histogram_bc = self.spark.sparkContext.broadcast((x_values, empirical_pmf))
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
+        # Compute data summary for provenance (once per column)
+        data_summary = compute_data_summary(data_sample.astype(float))
+
         try:
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
@@ -882,7 +890,9 @@ class DiscreteDistributionFitter:
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply discrete fitting UDF
-            fitting_udf = create_discrete_fitting_udf(histogram_bc, data_sample_bc, column_name=column)
+            fitting_udf = create_discrete_fitting_udf(
+                histogram_bc, data_sample_bc, column_name=column, data_summary=data_summary
+            )
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
             # Filter failed fits

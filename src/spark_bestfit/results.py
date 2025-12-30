@@ -1,7 +1,8 @@
 """Results handling for fitted distributions."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -31,6 +32,9 @@ class DistributionFitResult:
         pvalue: P-value from KS test (higher indicates better fit)
         ad_statistic: Anderson-Darling statistic (lower is better)
         ad_pvalue: P-value from A-D test (only for norm, expon, logistic, gumbel_r, gumbel_l)
+        data_summary: Optional summary statistics of the original data (sample_size,
+            min, max, mean, std). Captured during fitting to aid debugging and
+            provenance tracking.
 
     Note:
         The p-value from the KS test is approximate when parameters are
@@ -54,6 +58,7 @@ class DistributionFitResult:
     pvalue: Optional[float] = None
     ad_statistic: Optional[float] = None
     ad_pvalue: Optional[float] = None
+    data_summary: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> dict:
         """Convert result to dictionary.
@@ -72,6 +77,7 @@ class DistributionFitResult:
             "pvalue": self.pvalue,
             "ad_statistic": self.ad_statistic,
             "ad_pvalue": self.ad_pvalue,
+            "data_summary": self.data_summary,
         }
 
     def get_scipy_dist(self):
@@ -143,6 +149,84 @@ class DistributionFitResult:
         dist = self.get_scipy_dist()
         # Parameters are all positional: (shape params..., loc, scale)
         return dist.ppf(q, *self.parameters)
+
+    def save(
+        self,
+        path: Union[str, Path],
+        format: Optional[Literal["json", "pickle"]] = None,
+        indent: Optional[int] = 2,
+    ) -> None:
+        """Save fitted distribution to file.
+
+        Serializes the distribution parameters and metrics to JSON or pickle format.
+        JSON is recommended for human-readable, version-safe output. Pickle is
+        available for faster serialization when human-readability is not required.
+
+        Args:
+            path: File path. Format is detected from extension if not specified.
+            format: Output format - 'json' (human-readable) or 'pickle'.
+                If None, detected from file extension (.json, .pkl, .pickle).
+            indent: JSON indentation level (default 2). Use None for compact output.
+                Ignored for pickle format.
+
+        Raises:
+            SerializationError: If format cannot be determined or write fails.
+
+        Example:
+            >>> best = results.best(n=1)[0]
+            >>> best.save("model.json")
+            >>> best.save("model.pkl", format="pickle")
+            >>> best.save("compact.json", indent=None)
+        """
+        from spark_bestfit.serialization import detect_format, save_json, save_pickle, serialize_to_dict
+
+        path = Path(path)
+        file_format = format or detect_format(path)
+
+        if file_format == "json":
+            data = serialize_to_dict(self)
+            save_json(data, path, indent)
+        else:  # pickle
+            save_pickle(self, path)
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> "DistributionFitResult":
+        """Load fitted distribution from file.
+
+        Reconstructs a DistributionFitResult from a previously saved file.
+        The loaded result can be used for sampling, PDF/CDF evaluation, etc.
+
+        Args:
+            path: File path. Format is detected from extension (.json, .pkl, .pickle).
+
+        Returns:
+            Reconstructed DistributionFitResult
+
+        Raises:
+            SerializationError: If file format is invalid or distribution is unknown.
+            FileNotFoundError: If file does not exist.
+
+        Example:
+            >>> loaded = DistributionFitResult.load("model.json")
+            >>> samples = loaded.sample(n=1000)
+            >>> pdf_values = loaded.pdf(np.linspace(0, 100, 100))
+
+        Warning:
+            Only load pickle files from trusted sources.
+        """
+        from spark_bestfit.serialization import deserialize_from_dict, detect_format, load_json, load_pickle
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+
+        file_format = detect_format(path)
+
+        if file_format == "json":
+            data = load_json(path)
+            return deserialize_from_dict(data)
+        else:  # pickle
+            return load_pickle(path)
 
     def get_param_names(self) -> List[str]:
         """Get parameter names for this distribution.
@@ -343,6 +427,7 @@ class FitResults:
                 pvalue=row["pvalue"],
                 ad_statistic=row["ad_statistic"],
                 ad_pvalue=row["ad_pvalue"],
+                data_summary=dict(row["data_summary"]) if "data_summary" in row and row["data_summary"] else None,
             )
             for row in top_n
         ]

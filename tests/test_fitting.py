@@ -271,7 +271,7 @@ class TestFitSingleDistributionEdgeCases:
 
         required_keys = {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
-            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary"
         }
         assert set(result.keys()) == required_keys
 
