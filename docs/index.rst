@@ -28,7 +28,6 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 **Known limitations:**
 
 - No real-time/streaming support (batch processing only)
-- No progress tracking for long-running fits (planned for 1.2.0)
 - Custom distribution support planned for 1.3.0
 
 .. toctree::
@@ -36,6 +35,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    :caption: Contents:
 
    quickstart
+   progress
    performance
    api
 
