@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.2.0 (2025-12-30)
+
+### Features
+
+- Add progress tracking for distribution fitting (#12)
+  ([#41](https://github.com/dwsmith1983/spark-bestfit/pull/41),
+  [`5477558`](https://github.com/dwsmith1983/spark-bestfit/commit/5477558d718f9cdb48243b64b68b4f4e3b84ebbb))
+
+
 ## v1.1.0 (2025-12-29)
 
 ### Features
