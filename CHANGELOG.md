@@ -2,6 +2,32 @@
 
 <!-- version list -->
 
+## v1.3.0 (2025-12-30)
+
+### Features
+
+- Add distributed sampling and fit quality warnings (#43, #45)
+  ([#50](https://github.com/dwsmith1983/spark-bestfit/pull/50),
+  [`f696d6a`](https://github.com/dwsmith1983/spark-bestfit/commit/f696d6a767e05863711a137d4fd2ab886639d955))
+
+- Add Gaussian Copula for correlated multi-column sampling
+  ([#50](https://github.com/dwsmith1983/spark-bestfit/pull/50),
+  [`f696d6a`](https://github.com/dwsmith1983/spark-bestfit/commit/f696d6a767e05863711a137d4fd2ab886639d955))
+
+- Add serialization support for fitted distributions
+  ([#50](https://github.com/dwsmith1983/spark-bestfit/pull/50),
+  [`f696d6a`](https://github.com/dwsmith1983/spark-bestfit/commit/f696d6a767e05863711a137d4fd2ab886639d955))
+
+- V1.3.0 Downstream Enablement ([#50](https://github.com/dwsmith1983/spark-bestfit/pull/50),
+  [`f696d6a`](https://github.com/dwsmith1983/spark-bestfit/commit/f696d6a767e05863711a137d4fd2ab886639d955))
+
+### Performance Improvements
+
+- **copula**: Optimize sampling with frozen distributions and return_uniform
+  ([#50](https://github.com/dwsmith1983/spark-bestfit/pull/50),
+  [`f696d6a`](https://github.com/dwsmith1983/spark-bestfit/commit/f696d6a767e05863711a137d4fd2ab886639d955))
+
+
 ## v1.2.0 (2025-12-30)
 
 ### Features
