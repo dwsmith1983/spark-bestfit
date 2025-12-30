@@ -1,7 +1,7 @@
 """Core distribution fitting engine for Spark."""
 
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 import pyspark.sql.functions as F
@@ -93,6 +93,7 @@ class DistributionFitter:
         max_sample_size: int = 1_000_000,
         sample_threshold: int = 10_000_000,
         num_partitions: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> FitResults:
         """Fit distributions to data column(s).
 
@@ -109,6 +110,9 @@ class DistributionFitter:
             max_sample_size: Maximum rows to sample when auto-determining
             sample_threshold: Row count above which sampling is applied
             num_partitions: Spark partitions (None = auto-determine)
+            progress_callback: Optional callback for progress updates.
+                Called with (completed_tasks, total_tasks, percent_complete).
+                Callback is invoked from background thread - ensure thread-safety.
 
         Returns:
             FitResults object with fitted distributions
@@ -159,36 +163,48 @@ class DistributionFitter:
         if max_distributions is not None and max_distributions > 0:
             distributions = distributions[:max_distributions]
 
-        # Fit each column and collect results
-        all_results_dfs = []
-        for col in target_columns:
-            logger.info(f"Fitting column '{col}'...")
-            results_df = self._fit_single_column(
-                df_sample=df_sample,
-                column=col,
-                row_count=row_count,
-                bins=bins,
-                use_rice_rule=use_rice_rule,
-                distributions=distributions,
-                num_partitions=num_partitions,
+        # Start progress tracking if callback provided
+        tracker = None
+        if progress_callback is not None:
+            from spark_bestfit.progress import ProgressTracker
+
+            tracker = ProgressTracker(self.spark, progress_callback)
+            tracker.start()
+
+        try:
+            # Fit each column and collect results
+            all_results_dfs = []
+            for col in target_columns:
+                logger.info(f"Fitting column '{col}'...")
+                results_df = self._fit_single_column(
+                    df_sample=df_sample,
+                    column=col,
+                    row_count=row_count,
+                    bins=bins,
+                    use_rice_rule=use_rice_rule,
+                    distributions=distributions,
+                    num_partitions=num_partitions,
+                )
+                all_results_dfs.append(results_df)
+
+            # Union all results
+            if len(all_results_dfs) == 1:
+                combined_df = all_results_dfs[0]
+            else:
+                combined_df = all_results_dfs[0]
+                for df_part in all_results_dfs[1:]:
+                    combined_df = combined_df.union(df_part)
+
+            combined_df = combined_df.cache()
+            total_results = combined_df.count()
+            logger.info(
+                f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
             )
-            all_results_dfs.append(results_df)
 
-        # Union all results
-        if len(all_results_dfs) == 1:
-            combined_df = all_results_dfs[0]
-        else:
-            combined_df = all_results_dfs[0]
-            for df_part in all_results_dfs[1:]:
-                combined_df = combined_df.union(df_part)
-
-        combined_df = combined_df.cache()
-        total_results = combined_df.count()
-        logger.info(
-            f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
-        )
-
-        return FitResults(combined_df)
+            return FitResults(combined_df)
+        finally:
+            if tracker is not None:
+                tracker.stop()
 
     def _fit_single_column(
         self,
@@ -715,6 +731,7 @@ class DiscreteDistributionFitter:
         max_sample_size: int = 1_000_000,
         sample_threshold: int = 10_000_000,
         num_partitions: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> FitResults:
         """Fit discrete distributions to integer data column(s).
 
@@ -728,6 +745,9 @@ class DiscreteDistributionFitter:
             max_sample_size: Maximum rows to sample when auto-determining
             sample_threshold: Row count above which sampling is applied
             num_partitions: Spark partitions (None = auto-determine)
+            progress_callback: Optional callback for progress updates.
+                Called with (completed_tasks, total_tasks, percent_complete).
+                Callback is invoked from background thread - ensure thread-safety.
 
         Returns:
             FitResults object with fitted distributions
@@ -776,34 +796,46 @@ class DiscreteDistributionFitter:
         if max_distributions is not None and max_distributions > 0:
             distributions = distributions[:max_distributions]
 
-        # Fit each column and collect results
-        all_results_dfs = []
-        for col in target_columns:
-            logger.info(f"Fitting discrete column '{col}'...")
-            results_df = self._fit_single_column(
-                df_sample=df_sample,
-                column=col,
-                row_count=row_count,
-                distributions=distributions,
-                num_partitions=num_partitions,
+        # Start progress tracking if callback provided
+        tracker = None
+        if progress_callback is not None:
+            from spark_bestfit.progress import ProgressTracker
+
+            tracker = ProgressTracker(self.spark, progress_callback)
+            tracker.start()
+
+        try:
+            # Fit each column and collect results
+            all_results_dfs = []
+            for col in target_columns:
+                logger.info(f"Fitting discrete column '{col}'...")
+                results_df = self._fit_single_column(
+                    df_sample=df_sample,
+                    column=col,
+                    row_count=row_count,
+                    distributions=distributions,
+                    num_partitions=num_partitions,
+                )
+                all_results_dfs.append(results_df)
+
+            # Union all results
+            if len(all_results_dfs) == 1:
+                combined_df = all_results_dfs[0]
+            else:
+                combined_df = all_results_dfs[0]
+                for df_part in all_results_dfs[1:]:
+                    combined_df = combined_df.union(df_part)
+
+            combined_df = combined_df.cache()
+            total_results = combined_df.count()
+            logger.info(
+                f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
             )
-            all_results_dfs.append(results_df)
 
-        # Union all results
-        if len(all_results_dfs) == 1:
-            combined_df = all_results_dfs[0]
-        else:
-            combined_df = all_results_dfs[0]
-            for df_part in all_results_dfs[1:]:
-                combined_df = combined_df.union(df_part)
-
-        combined_df = combined_df.cache()
-        total_results = combined_df.count()
-        logger.info(
-            f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
-        )
-
-        return FitResults(combined_df)
+            return FitResults(combined_df)
+        finally:
+            if tracker is not None:
+                tracker.stop()
 
     def _fit_single_column(
         self,

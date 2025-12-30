@@ -22,6 +22,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Multiple Metrics**: Compare fits using K-S statistic, A-D statistic, SSE, AIC, and BIC
 - **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
 - **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
+- **Progress Tracking**: Monitor long-running fits with customizable callbacks
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
 - **Flexible Configuration**: Customize bins, sampling, and distribution selection
@@ -38,7 +39,6 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 
 **Known limitations:**
 - No real-time/streaming support (batch processing only)
-- No progress tracking for long-running fits (planned for 1.2.0)
 - Custom distribution support planned for 1.3.0
 
 ## Installation
@@ -182,6 +182,47 @@ print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
 > **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
 > logistic, gumbel_r, gumbel_l) where scipy has critical value tables. For other distributions,
 > `ad_pvalue` will be `None` but `ad_statistic` is still valid for ranking fits.
+
+### Progress Tracking
+
+Monitor long-running fits with the built-in `console_progress()` utility:
+
+```python
+from spark_bestfit.progress import console_progress
+
+results = fitter.fit(df, column="value", progress_callback=console_progress())
+print()  # Newline after completion
+# Output: Progress: 45/100 tasks (45.0%)
+```
+
+For custom callbacks or tqdm integration:
+
+```python
+# Custom callback
+def on_progress(completed: int, total: int, percent: float) -> None:
+    print(f"\rFitting: {completed}/{total} ({percent:.1f}%)", end="", flush=True)
+
+results = fitter.fit(df, column="value", progress_callback=on_progress)
+
+# tqdm integration
+from tqdm import tqdm
+
+pbar = None
+
+def tqdm_callback(completed: int, total: int, percent: float) -> None:
+    global pbar
+    if pbar is None:
+        pbar = tqdm(total=total, desc="Fitting")
+    pbar.n = completed
+    pbar.refresh()
+
+results = fitter.fit(df, column="value", progress_callback=tqdm_callback)
+if pbar:
+    pbar.close()
+```
+
+> **Note**: Progress percentages may fluctuate during fitting as new Spark stages add tasks.
+> See [Progress Tracking](https://spark-bestfit.readthedocs.io/en/latest/progress.html) for details.
 
 ### Parameter Confidence Intervals
 

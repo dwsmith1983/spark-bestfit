@@ -31,6 +31,7 @@ from spark_bestfit.core import (
     DistributionFitter,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
+from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
 from spark_bestfit.results import DistributionFitResult, FitResults, MetricName
 from spark_bestfit.utils import get_spark_session
 
@@ -41,6 +42,10 @@ __all__ = [
     # Main classes
     "DistributionFitter",
     "DiscreteDistributionFitter",
+    # Progress tracking
+    "ProgressTracker",
+    "ProgressCallback",
+    "console_progress",
     # Constants
     "DEFAULT_EXCLUDED_DISTRIBUTIONS",
     "DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS",
