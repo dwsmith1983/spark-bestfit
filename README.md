@@ -43,7 +43,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 
 **Known limitations:**
 - No real-time/streaming support (batch processing only)
-- Custom distribution support planned for 1.3.0
+- See [Roadmap](#roadmap) for planned features
 
 ## Installation
 
@@ -434,6 +434,19 @@ percentile_95 = loaded.ppf(0.95)
 
 > **Tip**: JSON format includes version metadata and is recommended for most use cases.
 > See [Serialization](https://spark-bestfit.readthedocs.io/en/latest/serialization.html) for details.
+
+## Roadmap
+
+spark-bestfit enables downstream use cases (simulations, ML, analytics) by providing distribution fitting primitives.
+
+| Version | Focus | Key Features |
+|---------|-------|--------------|
+| **1.4.0** | Bounded Distributions | Truncated distribution fitting for data with natural bounds |
+| **2.0.0** | Custom Distributions | User-defined distribution classes |
+| **2.1.0** | Multivariate | Optional multivariate distribution fitting (MVN, MVt) |
+| **3.0.0** | Advanced | Mixture models, streaming support |
+
+See the [GitHub milestones](https://github.com/dwsmith1983/spark-bestfit/milestones) for detailed issue tracking.
 
 ## Documentation
 
