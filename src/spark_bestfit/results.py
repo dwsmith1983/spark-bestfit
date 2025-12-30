@@ -111,7 +111,7 @@ class DistributionFitResult:
     def sample_spark(
         self,
         n: int,
-        spark: "SparkSession",
+        spark: Optional["SparkSession"] = None,
         num_partitions: Optional[int] = None,
         random_seed: Optional[int] = None,
         column_name: str = "sample",
@@ -123,7 +123,7 @@ class DistributionFitResult:
 
         Args:
             n: Total number of samples to generate
-            spark: SparkSession instance
+            spark: SparkSession. If None, uses the active session.
             num_partitions: Number of partitions to use. Defaults to spark default parallelism.
             random_seed: Random seed for reproducibility. Each partition uses seed + partition_id.
             column_name: Name for the output column (default: "sample")

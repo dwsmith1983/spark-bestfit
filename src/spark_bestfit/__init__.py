@@ -24,6 +24,7 @@ Example:
 """
 
 from spark_bestfit._version import __version__
+from spark_bestfit.copula import GaussianCopula
 from spark_bestfit.core import (
     DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS,
     DEFAULT_EXCLUDED_DISTRIBUTIONS,
@@ -43,6 +44,7 @@ __all__ = [
     # Main classes
     "DistributionFitter",
     "DiscreteDistributionFitter",
+    "GaussianCopula",
     # Progress tracking
     "ProgressTracker",
     "ProgressCallback",

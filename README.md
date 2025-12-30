@@ -24,6 +24,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
 - **Progress Tracking**: Monitor long-running fits with customizable callbacks
 - **Distributed Sampling**: Generate millions of samples using Spark's parallelism
+- **Gaussian Copula**: Correlated multi-column sampling at scale via Spark ML
 - **Fit Quality Warnings**: Automatic warnings for poor fits with detailed diagnostics
 - **Model Serialization**: Save and load fitted distributions to JSON or pickle
 - **Results API**: Filter, sort, and export results easily
@@ -271,6 +272,42 @@ samples_df = best.sample_spark(
 > **Tip**: Use `sample_spark()` for very large samples (>10M) to leverage cluster parallelism.
 > For smaller samples, `sample(size=N)` returns a local NumPy array and is more efficient.
 > See [Distributed Sampling](https://spark-bestfit.readthedocs.io/en/latest/sampling.html) for benchmarks.
+
+### Gaussian Copula
+
+Generate correlated multi-column samples that preserve both marginal distributions and correlation structure:
+
+```python
+from spark_bestfit import DistributionFitter, GaussianCopula
+
+# Fit multiple columns
+fitter = DistributionFitter(spark)
+results = fitter.fit(df, columns=["price", "quantity", "revenue"])
+
+# Fit copula - correlation computed via Spark ML (scales to billions of rows)
+copula = GaussianCopula.fit(results, df)
+
+# Local sampling (small scale)
+samples = copula.sample(n=10_000)  # Returns Dict[str, np.ndarray]
+
+# Distributed sampling (large scale) - scales to 100M+ samples
+samples_df = copula.sample_spark(n=100_000_000)
+
+# Serialize for later use
+copula.save("copula.json")
+loaded = GaussianCopula.load("copula.json")
+```
+
+**When to use spark-bestfit copula** (vs statsmodels):
+
+| Scenario | statsmodels | spark-bestfit |
+|----------|-------------|---------------|
+| Data < 10M rows | Faster (use this) | Slower (Spark overhead) |
+| Data > 100M rows | Crashes (OOM) | **Works** (distributed) |
+| Data already in Spark | Requires `.toPandas()` | **Native** (no conversion) |
+| 100M+ samples needed | May OOM | **`sample_spark()`** distributed |
+
+> See [Gaussian Copula](https://spark-bestfit.readthedocs.io/en/latest/copula.html) for details.
 
 ### Custom Plotting
 

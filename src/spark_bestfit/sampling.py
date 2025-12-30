@@ -8,6 +8,8 @@ import scipy.stats as st
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import DoubleType, IntegerType, StructField, StructType
 
+from spark_bestfit.utils import get_spark_session
+
 
 def create_sample_udf_func(
     distribution: str,
@@ -54,7 +56,7 @@ def sample_spark(
     distribution: str,
     parameters: List[float],
     n: int,
-    spark: SparkSession,
+    spark: Optional[SparkSession] = None,
     num_partitions: Optional[int] = None,
     random_seed: Optional[int] = None,
     column_name: str = "sample",
@@ -68,7 +70,7 @@ def sample_spark(
         distribution: scipy.stats distribution name
         parameters: Distribution parameters (shape, loc, scale)
         n: Total number of samples to generate
-        spark: SparkSession instance
+        spark: SparkSession. If None, uses the active session.
         num_partitions: Number of partitions to use. Defaults to spark default parallelism.
         random_seed: Random seed for reproducibility. Each partition uses seed + partition_id.
         column_name: Name for the output column (default: "sample")
@@ -87,6 +89,7 @@ def sample_spark(
         | 1.0093545783546243|
         +-------------------+
     """
+    spark = get_spark_session(spark)
     if num_partitions is None:
         num_partitions = spark.sparkContext.defaultParallelism
 
