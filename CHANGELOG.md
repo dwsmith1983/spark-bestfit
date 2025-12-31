@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.3.1 (2025-12-31)
+
+### Bug Fixes
+
+- **sampling**: Replace iterrows() with iloc for performance
+  ([#52](https://github.com/dwsmith1983/spark-bestfit/pull/52),
+  [`c51f784`](https://github.com/dwsmith1983/spark-bestfit/commit/c51f784a4ef34536a020e573845eb75cd170e0ed))
+
+
 ## v1.3.0 (2025-12-30)
 
 ### Features
