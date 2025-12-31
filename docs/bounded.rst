@@ -184,6 +184,36 @@ Use Cases
        bounded=True, lower_bound=300.0, upper_bound=850.0
    )
 
+Discrete Distributions
+----------------------
+
+Bounded fitting is also supported for discrete distributions:
+
+.. code-block:: python
+
+   from spark_bestfit import DiscreteDistributionFitter
+
+   # Auto-detect bounds
+   fitter = DiscreteDistributionFitter(spark)
+   results = fitter.fit(df, column="count", bounded=True)
+
+   # Explicit bounds
+   results = fitter.fit(
+       df,
+       column="count",
+       bounded=True,
+       lower_bound=0,
+       upper_bound=100,
+   )
+
+   best = results.best(n=1, metric="aic")[0]
+   print(best.lower_bound, best.upper_bound)
+
+.. note::
+   For discrete distributions, bounds are stored with the fit result but sampling
+   uses the underlying scipy distribution. The bounds serve as metadata for the
+   valid range of the fitted distribution.
+
 Performance Considerations
 --------------------------
 

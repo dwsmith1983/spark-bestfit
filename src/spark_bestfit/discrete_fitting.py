@@ -30,6 +30,9 @@ DISCRETE_FIT_RESULT_SCHEMA = StructType(
         StructField("ad_pvalue", FloatType(), True),
         # data_summary: summary statistics of the original data for provenance
         StructField("data_summary", MapType(StringType(), FloatType()), True),
+        # Bounded distribution support
+        StructField("lower_bound", FloatType(), True),
+        StructField("upper_bound", FloatType(), True),
     ]
 )
 
@@ -298,6 +301,8 @@ def fit_single_discrete_distribution(
     registry: DiscreteDistributionRegistry,
     column_name: Optional[str] = None,
     data_summary: Optional[Dict[str, float]] = None,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fit a single discrete distribution and compute goodness-of-fit metrics.
 
@@ -309,9 +314,12 @@ def fit_single_discrete_distribution(
         registry: DiscreteDistributionRegistry for parameter configs
         column_name: Name of the column being fitted (for multi-column support)
         data_summary: Pre-computed summary statistics of the original data
+        lower_bound: Optional lower bound for truncated distribution
+        upper_bound: Optional upper bound for truncated distribution
 
     Returns:
-        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic, ks_statistic, pvalue, data_summary
+        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic,
+        ks_statistic, pvalue, data_summary, lower_bound, upper_bound
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -347,7 +355,7 @@ def fit_single_discrete_distribution(
             # Check for convergence warnings
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
-                    return _failed_discrete_fit_result(dist_name, column_name, data_summary)
+                    return _failed_discrete_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
 
             return {
                 "column_name": column_name,
@@ -361,16 +369,20 @@ def fit_single_discrete_distribution(
                 "ad_statistic": None,  # A-D not computed for discrete distributions
                 "ad_pvalue": None,
                 "data_summary": data_summary,
+                "lower_bound": float(lower_bound) if lower_bound is not None else None,
+                "upper_bound": float(upper_bound) if upper_bound is not None else None,
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_discrete_fit_result(dist_name, column_name, data_summary)
+        return _failed_discrete_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
 
 
 def _failed_discrete_fit_result(
     dist_name: str,
     column_name: Optional[str] = None,
     data_summary: Optional[Dict[str, float]] = None,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Return sentinel values for failed discrete fits.
 
@@ -378,6 +390,8 @@ def _failed_discrete_fit_result(
         dist_name: Name of the distribution that failed
         column_name: Name of the column being fitted (for multi-column support)
         data_summary: Pre-computed summary statistics of the original data
+        lower_bound: Optional lower bound for truncated distribution
+        upper_bound: Optional upper bound for truncated distribution
 
     Returns:
         Dictionary with sentinel values indicating fit failure
@@ -394,6 +408,8 @@ def _failed_discrete_fit_result(
         "ad_statistic": None,  # A-D not computed for discrete distributions
         "ad_pvalue": None,
         "data_summary": data_summary,
+        "lower_bound": float(lower_bound) if lower_bound is not None else None,
+        "upper_bound": float(upper_bound) if upper_bound is not None else None,
     }
 
 
@@ -402,6 +418,8 @@ def create_discrete_fitting_udf(
     data_sample_broadcast: Broadcast[np.ndarray],
     column_name: Optional[str] = None,
     data_summary: Optional[Dict[str, float]] = None,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF for discrete distribution fitting.
 
@@ -410,6 +428,8 @@ def create_discrete_fitting_udf(
         data_sample_broadcast: Broadcast variable containing integer data sample
         column_name: Name of the column being fitted (for result tracking)
         data_summary: Pre-computed summary statistics of the original data
+        lower_bound: Optional lower bound for truncated distribution
+        upper_bound: Optional upper bound for truncated distribution
 
     Returns:
         Pandas UDF function for fitting discrete distributions
@@ -425,7 +445,7 @@ def create_discrete_fitting_udf(
             distribution_names: Series of scipy discrete distribution names
 
         Returns:
-            DataFrame with columns: column_name, distribution, parameters, sse, aic, bic, ks_statistic, pvalue, data_summary
+            DataFrame with fitting results including bounds
         """
         # Get broadcasted data
         x_values, empirical_pmf = histogram_broadcast.value
@@ -442,6 +462,8 @@ def create_discrete_fitting_udf(
                 registry=registry,
                 column_name=column_name,
                 data_summary=data_summary,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
             )
             results.append(result)
 

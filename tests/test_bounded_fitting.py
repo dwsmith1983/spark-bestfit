@@ -455,6 +455,93 @@ class TestBoundedEdgeCases:
         assert samples.max() <= 51.0
 
 
+class TestDiscreteBoundedFitting:
+    """Tests for discrete bounded distribution fitting."""
+
+    def test_discrete_bounded_auto_detect(self, spark_session):
+        """DiscreteDistributionFitter with bounded=True auto-detects bounds."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        data = np.random.poisson(lam=10, size=3000)
+        df = spark_session.createDataFrame([(int(x),) for x in data], ["count"])
+
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            column="count",
+            bounded=True,
+            max_distributions=3,
+        )
+
+        best = results.best(n=1, metric="aic")[0]
+
+        # Bounds should be auto-detected
+        assert best.lower_bound is not None
+        assert best.upper_bound is not None
+        assert best.lower_bound == float(data.min())
+        assert best.upper_bound == float(data.max())
+
+    def test_discrete_bounded_explicit(self, spark_session):
+        """DiscreteDistributionFitter with explicit bounds."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        data = np.random.poisson(lam=10, size=3000)
+        df = spark_session.createDataFrame([(int(x),) for x in data], ["count"])
+
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            column="count",
+            bounded=True,
+            lower_bound=0,
+            upper_bound=50,
+            max_distributions=3,
+        )
+
+        best = results.best(n=1, metric="aic")[0]
+
+        assert best.lower_bound == 0.0
+        assert best.upper_bound == 50.0
+
+    def test_discrete_unbounded_has_no_bounds(self, spark_session):
+        """DiscreteDistributionFitter without bounded=True has None bounds."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        data = np.random.poisson(lam=10, size=3000)
+        df = spark_session.createDataFrame([(int(x),) for x in data], ["count"])
+
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(df, column="count", max_distributions=3)
+
+        best = results.best(n=1, metric="aic")[0]
+
+        assert best.lower_bound is None
+        assert best.upper_bound is None
+
+    def test_discrete_bounds_validation_error(self, spark_session):
+        """DiscreteDistributionFitter raises error when lower >= upper."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        data = np.random.poisson(lam=10, size=1000)
+        df = spark_session.createDataFrame([(int(x),) for x in data], ["count"])
+
+        fitter = DiscreteDistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="lower_bound.*must be less than"):
+            fitter.fit(
+                df,
+                column="count",
+                bounded=True,
+                lower_bound=50,
+                upper_bound=10,
+                max_distributions=3,
+            )
+
+
 class TestBoundedIntegration:
     """Integration tests for bounded distribution fitting."""
 

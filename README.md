@@ -404,6 +404,9 @@ print(f"Best: {best.distribution} (AIC={best.aic:.2f})")
 
 # Plot fitted PMF
 fitter.plot(best, df, "counts", title="Best Discrete Fit")
+
+# Bounded fitting (e.g., counts in range [0, 100])
+results = fitter.fit(df, column="counts", bounded=True, lower_bound=0, upper_bound=100)
 ```
 
 **Metric Selection for Discrete Distributions:**
