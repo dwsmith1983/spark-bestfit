@@ -1,6 +1,7 @@
 """Core distribution fitting engine for Spark."""
 
 import logging
+from functools import reduce
 from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
@@ -187,13 +188,8 @@ class DistributionFitter:
                 )
                 all_results_dfs.append(results_df)
 
-            # Union all results
-            if len(all_results_dfs) == 1:
-                combined_df = all_results_dfs[0]
-            else:
-                combined_df = all_results_dfs[0]
-                for df_part in all_results_dfs[1:]:
-                    combined_df = combined_df.union(df_part)
+            # Union all results using reduce for cleaner query plan
+            combined_df = reduce(DataFrame.union, all_results_dfs)
 
             combined_df = combined_df.cache()
             total_results = combined_df.count()
@@ -545,9 +541,11 @@ class DistributionFitter:
         """
         from spark_bestfit.plotting import plot_qq
 
-        # Sample data for Q-Q plot without requiring count()
-        # orderBy(rand()) + limit() avoids expensive count() operation
-        sample_df = df.select(column).orderBy(F.rand(seed=self.random_seed)).limit(max_points)
+        # Sample data for Q-Q plot using sample() instead of orderBy(rand())
+        # sample() operates per-partition without shuffle, much faster for large datasets
+        row_count = df.count()
+        fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
+        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed).limit(max_points)
         data = sample_df.toPandas()[column].values
 
         return plot_qq(
@@ -636,9 +634,11 @@ class DistributionFitter:
         """
         from spark_bestfit.plotting import plot_pp
 
-        # Sample data for P-P plot without requiring count()
-        # orderBy(rand()) + limit() avoids expensive count() operation
-        sample_df = df.select(column).orderBy(F.rand(seed=self.random_seed)).limit(max_points)
+        # Sample data for P-P plot using sample() instead of orderBy(rand())
+        # sample() operates per-partition without shuffle, much faster for large datasets
+        row_count = df.count()
+        fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
+        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed).limit(max_points)
         data = sample_df.toPandas()[column].values
 
         return plot_pp(
@@ -823,13 +823,8 @@ class DiscreteDistributionFitter:
                 )
                 all_results_dfs.append(results_df)
 
-            # Union all results
-            if len(all_results_dfs) == 1:
-                combined_df = all_results_dfs[0]
-            else:
-                combined_df = all_results_dfs[0]
-                for df_part in all_results_dfs[1:]:
-                    combined_df = combined_df.union(df_part)
+            # Union all results using reduce for cleaner query plan
+            combined_df = reduce(DataFrame.union, all_results_dfs)
 
             combined_df = combined_df.cache()
             total_results = combined_df.count()

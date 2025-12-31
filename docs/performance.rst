@@ -193,6 +193,72 @@ always use ``columns=[...]`` instead of separate ``column=`` calls.
    with 100K rows each took similar time to 10K rows (~4.4s vs ~4.8s), demonstrating
    the sub-linear scaling benefits of the histogram-based approach.
 
+Spark Configuration
+-------------------
+
+For optimal performance, configure your SparkSession with these recommended settings:
+
+.. code-block:: python
+
+    from pyspark.sql import SparkSession
+
+    spark = (
+        SparkSession.builder
+        .appName("DistributionFitting")
+        # Enable Arrow for efficient Pandas UDF serialization
+        .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+        # Enable Adaptive Query Execution for dynamic optimization
+        .config("spark.sql.adaptive.enabled", "true")
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+        # Adjust shuffle partitions based on cluster size
+        .config("spark.sql.shuffle.partitions", "200")
+        .getOrCreate()
+    )
+
+**Key configurations:**
+
+- ``spark.sql.execution.arrow.pyspark.enabled``: **Required** for Pandas UDF performance.
+  Arrow serialization is 10-100x faster than pickle for DataFrame ↔ Pandas conversion.
+
+- ``spark.sql.adaptive.enabled``: Recommended for automatic query optimization.
+  AQE dynamically adjusts shuffle partitions and join strategies.
+
+- ``spark.sql.shuffle.partitions``: Set based on your cluster size.
+  Default is 200; adjust to 2-4× your total executor cores.
+
+Memory Budget by Data Scale
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Recommended memory settings for different data scales:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 25 25
+
+   * - Data Scale
+     - Driver Memory
+     - Executor Memory
+     - Notes
+   * - 10M rows
+     - 2 GB
+     - 4 GB
+     - Default settings work well
+   * - 100M rows
+     - 4 GB
+     - 8 GB
+     - Recommended for production
+   * - 1B+ rows
+     - 8 GB
+     - 16 GB
+     - Enable sampling with ``enable_sampling=True``
+
+.. note::
+
+   spark-bestfit uses broadcast variables for histogram and sample data,
+   resulting in **< 100 KB driver overhead** regardless of data size.
+   The memory recommendations above account for Spark framework overhead,
+   not spark-bestfit itself.
+
 Tuning Recommendations
 ----------------------
 
