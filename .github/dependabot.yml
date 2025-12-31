@@ -1,0 +1,44 @@
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      # Group all dev/test tools together (reduces PR noise)
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "black"
+          - "ruff"
+          - "isort"
+          - "mypy"
+          - "*-stubs"
+          - "pre-commit"
+          - "hatch*"
+      # Group doc dependencies
+      documentation:
+        patterns:
+          - "sphinx*"
+    # Ignore Spark ecosystem (manual control due to delicate compatibility matrix)
+    ignore:
+      - dependency-name: "pyspark"
+      - dependency-name: "pyarrow"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "ci"
