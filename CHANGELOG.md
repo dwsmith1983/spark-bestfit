@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v1.4.0 (2025-12-31)
+
+### Features
+
+- Add bounded distribution fitting for continuous distributions
+  ([#61](https://github.com/dwsmith1983/spark-bestfit/pull/61),
+  [`dd129d5`](https://github.com/dwsmith1983/spark-bestfit/commit/dd129d5b2ec98f4dc95199e5b21837ca907f64be))
+
+- Add bounded distribution fitting for DiscreteDistributionFitter
+  ([#61](https://github.com/dwsmith1983/spark-bestfit/pull/61),
+  [`dd129d5`](https://github.com/dwsmith1983/spark-bestfit/commit/dd129d5b2ec98f4dc95199e5b21837ca907f64be))
+
+- Add bounded/truncated distribution fitting (v1.4.0)
+  ([#61](https://github.com/dwsmith1983/spark-bestfit/pull/61),
+  [`dd129d5`](https://github.com/dwsmith1983/spark-bestfit/commit/dd129d5b2ec98f4dc95199e5b21837ca907f64be))
+
+
 ## v1.3.2 (2025-12-31)
 
 ### Performance Improvements
