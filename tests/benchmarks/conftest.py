@@ -18,8 +18,10 @@ def spark_session():
     spark = (
         SparkSession.builder.appName("spark-bestfit-benchmarks")
         .master("local[*]")
-        .config("spark.sql.shuffle.partitions", "8")
+        .config("spark.sql.shuffle.partitions", "20")
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+        .config("spark.sql.adaptive.enabled", "true")
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
         .config("spark.driver.memory", "4g")
         .config("spark.ui.enabled", "false")
         .getOrCreate()

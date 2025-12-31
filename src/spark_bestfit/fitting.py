@@ -40,6 +40,9 @@ FIT_RESULT_SCHEMA = StructType(
         StructField("ad_pvalue", FloatType(), True),
         # data_summary: summary statistics of the original data for provenance
         StructField("data_summary", MapType(StringType(), FloatType()), True),
+        # Bounds for truncated distribution fitting (v1.4.0)
+        StructField("lower_bound", FloatType(), True),
+        StructField("upper_bound", FloatType(), True),
     ]
 )
 
@@ -70,6 +73,8 @@ def create_fitting_udf(
     data_sample_broadcast: Broadcast[np.ndarray],
     column_name: Optional[str] = None,
     data_summary: Optional[Dict[str, float]] = None,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -82,6 +87,8 @@ def create_fitting_udf(
         data_sample_broadcast: Broadcast variable containing data sample
         column_name: Name of the column being fitted (for result tracking)
         data_summary: Pre-computed summary statistics of the original data
+        lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
+        upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -123,6 +130,8 @@ def create_fitting_udf(
                 y_hist=y_hist,
                 column_name=column_name,
                 data_summary=data_summary,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
             )
             results.append(result)
 
@@ -143,6 +152,8 @@ def fit_single_distribution(
     y_hist: np.ndarray,
     column_name: Optional[str] = None,
     data_summary: Optional[Dict[str, float]] = None,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -153,9 +164,12 @@ def fit_single_distribution(
         y_hist: Histogram density values
         column_name: Name of the column being fitted (for multi-column support)
         data_summary: Pre-computed summary statistics of the original data
+        lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
+        upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
 
     Returns:
-        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic, data_summary
+        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic,
+        ks_statistic, pvalue, ad_statistic, ad_pvalue, data_summary, lower_bound, upper_bound
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -164,41 +178,51 @@ def fit_single_distribution(
             # Get distribution object
             dist = getattr(st, dist_name)
 
-            # Fit distribution to data sample
+            # Fit distribution to data sample (always fit unbounded first)
             params = dist.fit(data_sample)
 
             # Check for NaN in parameters (convergence failure)
             if any(not np.isfinite(p) for p in params):
-                return _failed_fit_result(dist_name, column_name, data_summary)
+                return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
 
-            # Evaluate PDF at histogram bin centers
-            pdf_values = evaluate_pdf(dist, params, x_hist)
+            # Create frozen distribution (possibly truncated) for metrics
+            frozen_dist = dist(*params)
+            if lower_bound is not None or upper_bound is not None:
+                lb = lower_bound if lower_bound is not None else -np.inf
+                ub = upper_bound if upper_bound is not None else np.inf
+                frozen_dist = _create_truncated_dist(frozen_dist, lb, ub)
+
+            # Evaluate PDF at histogram bin centers using frozen distribution
+            pdf_values = frozen_dist.pdf(x_hist)
+            pdf_values = np.nan_to_num(pdf_values, nan=0.0, posinf=0.0, neginf=0.0)
 
             # Compute Sum of Squared Errors
             sse = np.sum((y_hist - pdf_values) ** 2.0)
 
             # Check for invalid SSE
             if not np.isfinite(sse):
-                return _failed_fit_result(dist_name, column_name, data_summary)
+                return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
 
-            # Compute information criteria
-            aic, bic = compute_information_criteria(dist, params, data_sample)
+            # Compute information criteria using frozen distribution
+            aic, bic = compute_information_criteria_frozen(frozen_dist, len(params), data_sample)
 
-            # Compute Kolmogorov-Smirnov statistic and p-value
-            # Note: p-values are approximate when parameters are estimated from data
-            ks_stat, pvalue = compute_ks_statistic(dist, params, data_sample)
+            # Compute Kolmogorov-Smirnov statistic and p-value using frozen distribution
+            ks_stat, pvalue = compute_ks_statistic_frozen(frozen_dist, data_sample)
 
-            # Compute Anderson-Darling statistic (for all distributions)
-            ad_stat = compute_ad_statistic(dist, params, data_sample)
+            # Compute Anderson-Darling statistic using frozen distribution
+            ad_stat = compute_ad_statistic_frozen(frozen_dist, data_sample)
 
-            # Compute Anderson-Darling p-value (only for supported distributions)
-            ad_pvalue = compute_ad_pvalue(dist_name, data_sample)
+            # Compute Anderson-Darling p-value (only for supported distributions, unbounded)
+            # Note: A-D p-value tables are for standard distributions, not truncated
+            ad_pvalue = (
+                compute_ad_pvalue(dist_name, data_sample) if lower_bound is None and upper_bound is None else None
+            )
 
             # Log any warnings that were caught (for debugging)
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
                     # These indicate fitting issues - return failed result
-                    return _failed_fit_result(dist_name, column_name, data_summary)
+                    return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
 
             return {
                 "column_name": column_name,
@@ -212,16 +236,77 @@ def fit_single_distribution(
                 "ad_statistic": float(ad_stat),
                 "ad_pvalue": ad_pvalue,
                 "data_summary": data_summary,
+                "lower_bound": lower_bound,
+                "upper_bound": upper_bound,
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_fit_result(dist_name, column_name, data_summary)
+        return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+
+
+class _TruncatedDist:
+    """Simple truncated distribution wrapper for fitting metrics.
+
+    Uses CDF inversion for proper truncated PDF and logpdf computation.
+    """
+
+    def __init__(self, frozen_dist, lb: float, ub: float):
+        self._dist = frozen_dist
+        self._lb = lb
+        self._ub = ub
+        # Normalization constant
+        self._cdf_lb = frozen_dist.cdf(lb) if np.isfinite(lb) else 0.0
+        self._cdf_ub = frozen_dist.cdf(ub) if np.isfinite(ub) else 1.0
+        self._norm = self._cdf_ub - self._cdf_lb
+
+    def pdf(self, x):
+        x = np.asarray(x)
+        result = np.zeros_like(x, dtype=float)
+        mask = (x >= self._lb) & (x <= self._ub)
+        if np.any(mask) and self._norm > 0:
+            result[mask] = self._dist.pdf(x[mask]) / self._norm
+        return result
+
+    def logpdf(self, x):
+        x = np.asarray(x)
+        result = np.full_like(x, -np.inf, dtype=float)
+        mask = (x >= self._lb) & (x <= self._ub)
+        if np.any(mask) and self._norm > 0:
+            result[mask] = self._dist.logpdf(x[mask]) - np.log(self._norm)
+        return result
+
+    def cdf(self, x):
+        x = np.asarray(x)
+        result = np.zeros_like(x, dtype=float)
+        below = x < self._lb
+        above = x > self._ub
+        between = ~below & ~above
+        result[above] = 1.0
+        if np.any(between) and self._norm > 0:
+            result[between] = (self._dist.cdf(x[between]) - self._cdf_lb) / self._norm
+        return result
+
+
+def _create_truncated_dist(frozen_dist, lb: float, ub: float):
+    """Create a truncated distribution wrapper.
+
+    Args:
+        frozen_dist: Frozen scipy.stats distribution
+        lb: Lower bound
+        ub: Upper bound
+
+    Returns:
+        Truncated distribution wrapper with pdf, logpdf, cdf methods
+    """
+    return _TruncatedDist(frozen_dist, lb, ub)
 
 
 def _failed_fit_result(
     dist_name: str,
     column_name: Optional[str] = None,
     data_summary: Optional[Dict[str, float]] = None,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Return sentinel values for failed fits.
 
@@ -229,6 +314,8 @@ def _failed_fit_result(
         dist_name: Name of the distribution that failed
         column_name: Name of the column being fitted (for multi-column support)
         data_summary: Pre-computed summary statistics of the original data
+        lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
+        upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
 
     Returns:
         Dictionary with sentinel values indicating fit failure
@@ -245,6 +332,8 @@ def _failed_fit_result(
         "ad_statistic": float(np.inf),
         "ad_pvalue": None,
         "data_summary": data_summary,
+        "lower_bound": lower_bound,
+        "upper_bound": upper_bound,
     }
 
 
@@ -454,6 +543,115 @@ def compute_ad_pvalue(dist_name: str, data: np.ndarray) -> float | None:
 
     except (ValueError, RuntimeError, FloatingPointError):
         return None
+
+
+def compute_information_criteria_frozen(frozen_dist: Any, n_params: int, data: np.ndarray) -> Tuple[float, float]:
+    """Compute AIC and BIC information criteria using a frozen distribution.
+
+    This version works with frozen (and possibly truncated) distributions,
+    unlike compute_information_criteria which requires separate dist and params.
+
+    Args:
+        frozen_dist: Frozen scipy.stats distribution (possibly truncated)
+        n_params: Number of parameters in the original distribution
+        data: Original data sample
+
+    Returns:
+        Tuple of (aic, bic)
+    """
+    try:
+        n = len(data)
+        k = n_params
+
+        # Compute log-likelihood using frozen distribution
+        log_likelihood = np.sum(frozen_dist.logpdf(data))
+
+        # Handle numerical issues
+        if not np.isfinite(log_likelihood):
+            return np.inf, np.inf
+
+        # Akaike Information Criterion
+        aic = 2 * k - 2 * log_likelihood
+
+        # Bayesian Information Criterion
+        bic = k * np.log(n) - 2 * log_likelihood
+
+        return aic, bic
+
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.inf, np.inf
+
+
+def compute_ks_statistic_frozen(frozen_dist: Any, data: np.ndarray) -> Tuple[float, float]:
+    """Compute Kolmogorov-Smirnov statistic and p-value using a frozen distribution.
+
+    This version works with frozen (and possibly truncated) distributions.
+
+    Args:
+        frozen_dist: Frozen scipy.stats distribution (possibly truncated)
+        data: Original data sample
+
+    Returns:
+        Tuple of (ks_statistic, pvalue)
+    """
+    try:
+        # Use scipy's kstest with the frozen distribution's CDF
+        result = st.kstest(data, frozen_dist.cdf)
+        ks_stat = result.statistic
+        pvalue = result.pvalue
+
+        # Handle numerical issues
+        if not np.isfinite(ks_stat):
+            return np.inf, 0.0
+        if not np.isfinite(pvalue):
+            pvalue = 0.0
+
+        return ks_stat, pvalue
+
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.inf, 0.0
+
+
+def compute_ad_statistic_frozen(frozen_dist: Any, data: np.ndarray) -> float:
+    """Compute Anderson-Darling statistic using a frozen distribution.
+
+    This version works with frozen (and possibly truncated) distributions.
+
+    Args:
+        frozen_dist: Frozen scipy.stats distribution (possibly truncated)
+        data: Original data sample
+
+    Returns:
+        Anderson-Darling statistic (A²)
+    """
+    try:
+        n = len(data)
+        if n < 2:
+            return np.inf
+
+        # Sort data
+        sorted_data = np.sort(data)
+
+        # Compute CDF values at sorted data points using frozen distribution
+        cdf_values = frozen_dist.cdf(sorted_data)
+
+        # Clamp CDF values to avoid log(0) or log(negative)
+        cdf_values = np.clip(cdf_values, 1e-10, 1 - 1e-10)
+
+        # Compute A-D statistic using the formula
+        # A² = -n - (1/n) Σᵢ₌₁ⁿ (2i-1)[ln F(Xᵢ) + ln(1-F(Xₙ₊₁₋ᵢ))]
+        i = np.arange(1, n + 1)
+        term1 = np.log(cdf_values)
+        term2 = np.log(1 - cdf_values[::-1])  # Reversed for X_{n+1-i}
+        ad_stat = -n - (1 / n) * np.sum((2 * i - 1) * (term1 + term2))
+
+        if not np.isfinite(ad_stat):
+            return np.inf
+
+        return float(ad_stat)
+
+    except (ValueError, RuntimeError, FloatingPointError):
+        return np.inf
 
 
 def get_continuous_param_names(dist_name: str) -> List[str]:

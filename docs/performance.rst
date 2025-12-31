@@ -136,10 +136,10 @@ Fit time is **sub-linear** with data size due to the histogram-based approach:
 
     Data Size    | Fit Time  | Scaling Factor
     -------------|-----------|------------------
-    25,000       | ~9.6s     | 1.0× (baseline)
-    100,000      | ~12.9s    | ~1.3×
-    500,000      | ~12.5s    | ~1.3×
-    1,000,000    | ~15.5s    | ~1.6×
+    25,000       | ~14.7s    | 1.0× (baseline)
+    100,000      | ~19.6s    | ~1.3×
+    500,000      | ~18.8s    | ~1.3×
+    1,000,000    | ~23.4s    | ~1.6×
 
 A 40× increase in data results in only ~1.6× increase in time (vs 40× if O(N)).
 
@@ -153,13 +153,13 @@ distributions are computationally expensive:
 
     # Distributions | Fit Time  | Time per Distribution
     ----------------|-----------|----------------------
-    5               | ~0.4s     | ~76ms (fast dists)
-    20              | ~1.4s     | ~69ms (fast dists)
-    50              | ~2.0s     | ~39ms (fast dists)
-    100             | ~16.2s    | ~162ms (includes slow dists)
+    5               | ~0.5s     | ~102ms (fast dists)
+    20              | ~2.1s     | ~104ms (fast dists)
+    50              | ~2.8s     | ~56ms (fast dists)
+    100             | ~24.4s    | ~244ms (includes slow dists)
 
-The first ~50 distributions are fast (~35-75ms each). The remaining distributions
-include slow ones like ``levy_stable`` and ``studentized_range`` (~285ms each).
+The first ~50 distributions are fast (~50-100ms each). The remaining distributions
+include slow ones like ``levy_stable`` and ``studentized_range`` (~430ms each).
 
 Multi-Column Efficiency
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -190,7 +190,7 @@ always use ``columns=[...]`` instead of separate ``column=`` calls.
 
 .. note::
    Multi-column fitting scales well with data size. In benchmarks, fitting 3 columns
-   with 100K rows each took similar time to 10K rows (~4.4s vs ~4.8s), demonstrating
+   with 100K rows each took similar time to 10K rows (~4.5s vs ~4.9s), demonstrating
    the sub-linear scaling benefits of the histogram-based approach.
 
 Spark Configuration

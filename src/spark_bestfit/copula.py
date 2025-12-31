@@ -191,8 +191,8 @@ class GaussianCopula:
             self._frozen_dists: Dict[str, st.rv_continuous] = {}
         if col not in self._frozen_dists:
             marginal = self.marginals[col]
-            dist = marginal.get_scipy_dist()
-            self._frozen_dists[col] = dist(*marginal.parameters)
+            # get_scipy_dist() now returns frozen distribution by default
+            self._frozen_dists[col] = marginal.get_scipy_dist()
         return self._frozen_dists[col]
 
     def sample(

@@ -238,9 +238,9 @@ class TestGaussianCopulaSample:
             col_samples = samples[col]
 
             # K-S test against the fitted distribution
-            # Use lambda to create a CDF function with frozen parameters
-            dist = marginal.get_scipy_dist()
-            cdf_func = lambda x: dist.cdf(x, *marginal.parameters)
+            # get_scipy_dist() now returns frozen distribution with parameters applied
+            frozen_dist = marginal.get_scipy_dist()
+            cdf_func = lambda x, d=frozen_dist: d.cdf(x)  # capture d to avoid late binding
             ks_stat, p_value = st.kstest(col_samples, cdf_func)
 
             # P-value should be > 0.01 (samples come from the distribution)
