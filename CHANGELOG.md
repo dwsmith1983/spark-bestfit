@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.3.2 (2025-12-31)
+
+### Performance Improvements
+
+- V1.3.2 performance optimizations (#53, #54, #57)
+  ([#58](https://github.com/dwsmith1983/spark-bestfit/pull/58),
+  [`5f3ec48`](https://github.com/dwsmith1983/spark-bestfit/commit/5f3ec48ef793a3af184f598fe20189a0924c8058))
+
+
 ## v1.3.1 (2025-12-31)
 
 ### Bug Fixes
