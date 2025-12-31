@@ -271,7 +271,8 @@ class TestFitSingleDistributionEdgeCases:
 
         required_keys = {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
-            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary"
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary",
+            "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
         }
         assert set(result.keys()) == required_keys
 

@@ -18,7 +18,9 @@ if TYPE_CHECKING:
     from spark_bestfit.results import DistributionFitResult
 
 # Schema version for forward compatibility
-SCHEMA_VERSION = "1.0"
+# 1.0: Initial release
+# 1.1: Added lower_bound and upper_bound for truncated distributions (v1.4.0)
+SCHEMA_VERSION = "1.1"
 
 
 class SerializationError(Exception):
@@ -69,6 +71,9 @@ def serialize_to_dict(result: "DistributionFitResult") -> Dict[str, Any]:
             "ad_pvalue": result.ad_pvalue,
         },
         "data_summary": result.data_summary,
+        # Bounds for truncated distribution fitting (v1.4.0)
+        "lower_bound": result.lower_bound,
+        "upper_bound": result.upper_bound,
     }
 
 
@@ -124,6 +129,8 @@ def deserialize_from_dict(data: Dict[str, Any]) -> "DistributionFitResult":
         ad_statistic=metrics.get("ad_statistic"),
         ad_pvalue=metrics.get("ad_pvalue"),
         data_summary=data.get("data_summary"),
+        lower_bound=data.get("lower_bound"),
+        upper_bound=data.get("upper_bound"),
     )
 
 

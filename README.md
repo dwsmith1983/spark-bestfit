@@ -18,6 +18,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Multi-Column Fitting**: Fit multiple columns efficiently in a single operation
 - **~100 Continuous Distributions**: Access to nearly all scipy.stats continuous distributions
 - **16 Discrete Distributions**: Fit count data with Poisson, negative binomial, geometric, and more
+- **Bounded Distribution Fitting**: Fit truncated distributions with natural bounds (e.g., percentages 0-100, ages 0-120)
 - **Histogram-Based Fitting**: Efficient fitting using histogram representation
 - **Multiple Metrics**: Compare fits using K-S statistic, A-D statistic, SSE, AIC, and BIC
 - **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
@@ -153,6 +154,29 @@ Multi-column fitting is more efficient than fitting columns separately because i
 
 > **Benchmark:** Fitting 3 columns together is ~1.3× faster than 3 separate fits (4.8s vs 6.5s).
 > See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for details.
+
+### Bounded Distribution Fitting
+
+Fit distributions with natural constraints (percentages, ages, prices):
+
+```python
+# Auto-detect bounds from data min/max
+results = fitter.fit(df, column="percentage", bounded=True)
+
+# Explicit bounds
+results = fitter.fit(
+    df, column="price",
+    bounded=True,
+    lower_bound=0.0,      # Prices can't be negative
+    upper_bound=1000.0,   # Max price cap
+)
+
+# Samples automatically respect bounds
+best = results.best(n=1)[0]
+samples = best.sample(1000)  # All within [0, 1000]
+```
+
+> See [Bounded Fitting](https://spark-bestfit.readthedocs.io/en/latest/bounded.html) for details.
 
 ### Working with Results
 
@@ -441,10 +465,23 @@ spark-bestfit enables downstream use cases (simulations, ML, analytics) by provi
 
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **1.4.0** | Bounded Distributions | Truncated distribution fitting for data with natural bounds |
-| **2.0.0** | Custom Distributions | User-defined distribution classes |
+| **2.0.0** | Custom Distributions | User-defined distribution classes, scipy new API support |
 | **2.1.0** | Multivariate | Optional multivariate distribution fitting (MVN, MVt) |
 | **3.0.0** | Advanced | Mixture models, streaming support |
+
+### Future: Scipy New Distribution API
+
+Scipy is developing a [new distribution infrastructure](https://docs.scipy.org/doc/scipy/tutorial/stats/rv_infrastructure.html) that offers true vectorization (10-100x faster for large array operations). The current `rv_continuous` API uses Python loops internally.
+
+**Impact on spark-bestfit:**
+- Core fitting performance is unaffected (the bottleneck is `dist.fit()`, not array operations)
+- User-facing operations like `sample(1_000_000)` would benefit significantly
+- We'll migrate when scipy's new API covers 50+ distributions (currently ~10)
+
+**Migration plan:**
+- v1.x: Current scipy API with custom `TruncatedFrozenDist` implementation
+- v2.0: Abstract `DistributionWrapper` interface supporting both APIs
+- v3.0: Drop legacy API when scipy deprecates it
 
 See the [GitHub milestones](https://github.com/dwsmith1983/spark-bestfit/milestones) for detailed issue tracking.
 

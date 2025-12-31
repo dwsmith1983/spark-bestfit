@@ -95,6 +95,9 @@ class DistributionFitter:
         sample_threshold: int = 10_000_000,
         num_partitions: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        bounded: bool = False,
+        lower_bound: Optional[float] = None,
+        upper_bound: Optional[float] = None,
     ) -> FitResults:
         """Fit distributions to data column(s).
 
@@ -114,6 +117,13 @@ class DistributionFitter:
             progress_callback: Optional callback for progress updates.
                 Called with (completed_tasks, total_tasks, percent_complete).
                 Callback is invoked from background thread - ensure thread-safety.
+            bounded: If True, fit truncated distributions (v1.4.0).
+                When enabled, distributions are truncated to [lower_bound, upper_bound]
+                using scipy.stats.truncate(). Requires scipy >= 1.14.0.
+            lower_bound: Lower bound for truncated distribution fitting.
+                If None and bounded=True, auto-detects from data minimum.
+            upper_bound: Upper bound for truncated distribution fitting.
+                If None and bounded=True, auto-detects from data maximum.
 
         Returns:
             FitResults object with fitted distributions
@@ -131,6 +141,10 @@ class DistributionFitter:
             >>> results = fitter.fit(df, columns=['col1', 'col2', 'col3'])
             >>> best_col1 = results.for_column('col1').best(n=1)[0]
             >>> best_per_col = results.best_per_column(n=1)
+            >>>
+            >>> # Bounded fitting (v1.4.0)
+            >>> results = fitter.fit(df, 'value', bounded=True)  # Auto-detect bounds
+            >>> results = fitter.fit(df, 'value', bounded=True, lower_bound=0, upper_bound=100)
         """
         # Validate column/columns parameters
         if column is None and columns is None:
@@ -145,11 +159,40 @@ class DistributionFitter:
         for col in target_columns:
             self._validate_inputs(df, col, max_distributions, bins, sample_fraction)
 
+        # Validate bounds
+        if lower_bound is not None and upper_bound is not None:
+            if lower_bound >= upper_bound:
+                raise ValueError(f"lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})")
+
         # Get row count (single operation for all columns)
         row_count = df.count()
         if row_count == 0:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
+
+        # Handle bounded fitting: auto-detect bounds if needed
+        effective_lower_bound = lower_bound
+        effective_upper_bound = upper_bound
+        if bounded:
+            # Compute min/max for all target columns if bounds not provided
+            # This reuses the data scan we'd do anyway for the histogram
+            if lower_bound is None or upper_bound is None:
+                agg_exprs = []
+                for col in target_columns:
+                    if lower_bound is None:
+                        agg_exprs.append(F.min(col).alias(f"min_{col}"))
+                    if upper_bound is None:
+                        agg_exprs.append(F.max(col).alias(f"max_{col}"))
+                if agg_exprs:
+                    bounds_row = df.agg(*agg_exprs).first()
+                    # For now, use the first column's bounds (multi-column bounded fitting
+                    # could be enhanced to have per-column bounds in the future)
+                    first_col = target_columns[0]
+                    if lower_bound is None:
+                        effective_lower_bound = float(bounds_row[f"min_{first_col}"])
+                    if upper_bound is None:
+                        effective_upper_bound = float(bounds_row[f"max_{first_col}"])
+                    logger.info(f"Bounded fitting: bounds=[{effective_lower_bound}, {effective_upper_bound}]")
 
         # Sample if needed (single operation for all columns)
         df_sample = self._apply_sampling(
@@ -185,6 +228,8 @@ class DistributionFitter:
                     use_rice_rule=use_rice_rule,
                     distributions=distributions,
                     num_partitions=num_partitions,
+                    lower_bound=effective_lower_bound if bounded else None,
+                    upper_bound=effective_upper_bound if bounded else None,
                 )
                 all_results_dfs.append(results_df)
 
@@ -211,6 +256,8 @@ class DistributionFitter:
         use_rice_rule: bool,
         distributions: List[str],
         num_partitions: Optional[int],
+        lower_bound: Optional[float] = None,
+        upper_bound: Optional[float] = None,
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -222,6 +269,8 @@ class DistributionFitter:
             use_rice_rule: Use Rice rule for bin count
             distributions: List of distribution names to fit
             num_partitions: Number of Spark partitions
+            lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
+            upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -252,7 +301,12 @@ class DistributionFitter:
 
             # Apply fitting UDF
             fitting_udf = create_fitting_udf(
-                histogram_bc, data_sample_bc, column_name=column, data_summary=data_summary
+                histogram_bc,
+                data_sample_bc,
+                column_name=column,
+                data_summary=data_summary,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
             )
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 

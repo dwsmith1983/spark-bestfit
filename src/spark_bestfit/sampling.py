@@ -11,47 +11,6 @@ from pyspark.sql.types import DoubleType, IntegerType, StructField, StructType
 from spark_bestfit.utils import get_spark_session
 
 
-def create_sample_udf_func(
-    distribution: str,
-    parameters: List[float],
-    samples_per_partition: int,
-    random_seed: Optional[int],
-):
-    """Create a function for generating samples in a Pandas UDF.
-
-    Args:
-        distribution: scipy.stats distribution name
-        parameters: Distribution parameters
-        samples_per_partition: Number of samples each partition should generate
-        random_seed: Base random seed (partition id will be added for uniqueness)
-
-    Returns:
-        Function suitable for use with mapInPandas
-    """
-
-    def generate_samples(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
-        """Generate samples for each partition."""
-        dist = getattr(st, distribution)
-
-        for pdf in iterator:
-            # Get partition id from the dataframe (we pass it as a column)
-            if len(pdf) == 0:
-                continue
-
-            partition_id = pdf["partition_id"].iloc[0]
-
-            # Create unique seed for this partition
-            if random_seed is not None:
-                np.random.seed(random_seed + partition_id)
-
-            # Generate samples
-            samples = dist.rvs(*parameters, size=samples_per_partition)
-
-            yield pd.DataFrame({"sample": samples})
-
-    return generate_samples
-
-
 def sample_spark(
     distribution: str,
     parameters: List[float],
@@ -125,8 +84,8 @@ def sample_spark(
     # Get distribution object
     dist = getattr(st, distribution)
 
-    def generate_samples_for_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
-        """Generate samples for each partition (no iterrows for performance)."""
+    def generate_samples_for_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:  # pragma: no cover
+        """Generate samples for each partition (runs in Spark executors)."""
         for pdf in iterator:
             if len(pdf) == 0:
                 continue

@@ -27,10 +27,14 @@ class TestDistributionFitResult:
 
     def test_get_scipy_dist(self, normal_result):
         """Test getting scipy distribution object."""
-        dist = normal_result.get_scipy_dist()
+        # Default: returns frozen distribution with parameters applied
+        frozen = normal_result.get_scipy_dist()
+        assert hasattr(frozen, "rvs")
+        assert hasattr(frozen, "pdf")
 
-        assert isinstance(dist, st.rv_continuous)
-        assert dist.name == "norm"
+        # With frozen=False: returns unfrozen distribution class
+        dist_class = normal_result.get_scipy_dist(frozen=False)
+        assert dist_class is st.norm
 
     def test_sample(self, normal_result):
         """Test generating samples from fitted distribution."""
@@ -431,7 +435,8 @@ class TestDistributionFitResultEdgeCases:
 
         assert set(d.keys()) == {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
-            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary"
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary",
+            "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
         }
         assert d["distribution"] == "gamma"
         assert d["parameters"] == [2.0, 0.0, 5.0]
@@ -445,13 +450,26 @@ class TestDistributionFitResultEdgeCases:
 
     def test_get_scipy_dist_various_distributions(self):
         """Test get_scipy_dist works for various distributions."""
-        distributions = ["norm", "expon", "gamma", "beta", "weibull_min"]
+        # Map distribution name to appropriate parameters
+        dist_params = {
+            "norm": [0.0, 1.0],  # loc, scale
+            "expon": [0.0, 1.0],  # loc, scale
+            "gamma": [1.0, 0.0, 1.0],  # a, loc, scale
+            "beta": [2.0, 2.0, 0.0, 1.0],  # a, b, loc, scale
+            "weibull_min": [1.5, 0.0, 1.0],  # c, loc, scale
+        }
 
-        for dist_name in distributions:
-            result = DistributionFitResult(distribution=dist_name, parameters=[1.0, 0.0, 1.0], sse=0.01)
+        for dist_name, params in dist_params.items():
+            result = DistributionFitResult(distribution=dist_name, parameters=params, sse=0.01)
 
-            dist = result.get_scipy_dist()
-            assert dist.name == dist_name
+            # Default returns frozen distribution
+            frozen = result.get_scipy_dist()
+            assert hasattr(frozen, "rvs")
+            assert hasattr(frozen, "pdf")
+
+            # Check unfrozen distribution class
+            dist_class = result.get_scipy_dist(frozen=False)
+            assert dist_class.name == dist_name
 
     def test_get_scipy_dist_invalid_distribution(self):
         """Test get_scipy_dist raises AttributeError for invalid distribution name."""

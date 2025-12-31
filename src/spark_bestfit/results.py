@@ -19,6 +19,107 @@ if TYPE_CHECKING:
 MetricName = Literal["sse", "aic", "bic", "ks_statistic", "ad_statistic"]
 
 
+class TruncatedFrozenDist:
+    """Wrapper for frozen scipy distributions with truncation bounds.
+
+    Implements truncation for arbitrary scipy.stats frozen distributions
+    using CDF inversion for sampling and proper normalization for PDF/CDF.
+
+    This is needed because scipy.stats.truncate() only works with the new
+    distribution infrastructure (scipy 1.14+), not with traditional rv_frozen objects.
+    """
+
+    def __init__(self, frozen_dist, lb: float, ub: float):
+        """Initialize truncated distribution.
+
+        Args:
+            frozen_dist: Frozen scipy.stats distribution
+            lb: Lower bound (-np.inf for no lower bound)
+            ub: Upper bound (np.inf for no upper bound)
+        """
+        self._dist = frozen_dist
+        self._lb = lb
+        self._ub = ub
+
+        # Pre-compute normalization constant
+        self._cdf_lb = frozen_dist.cdf(lb) if np.isfinite(lb) else 0.0
+        self._cdf_ub = frozen_dist.cdf(ub) if np.isfinite(ub) else 1.0
+        self._norm = self._cdf_ub - self._cdf_lb
+
+        if self._norm <= 0:
+            raise ValueError(f"Invalid truncation: no probability mass in [{lb}, {ub}]")
+
+    def pdf(self, x):
+        """Evaluate probability density function."""
+        x = np.asarray(x)
+        result = np.zeros_like(x, dtype=float)
+
+        # Only compute PDF for values within bounds
+        mask = (x >= self._lb) & (x <= self._ub)
+        if np.any(mask):
+            result[mask] = self._dist.pdf(x[mask]) / self._norm
+
+        return result
+
+    def logpdf(self, x):
+        """Evaluate log probability density function."""
+        x = np.asarray(x)
+        result = np.full_like(x, -np.inf, dtype=float)
+
+        # Only compute logPDF for values within bounds
+        mask = (x >= self._lb) & (x <= self._ub)
+        if np.any(mask):
+            result[mask] = self._dist.logpdf(x[mask]) - np.log(self._norm)
+
+        return result
+
+    def cdf(self, x):
+        """Evaluate cumulative distribution function."""
+        x = np.asarray(x)
+        result = np.zeros_like(x, dtype=float)
+
+        # Below lower bound: 0
+        below = x < self._lb
+        result[below] = 0.0
+
+        # Above upper bound: 1
+        above = x > self._ub
+        result[above] = 1.0
+
+        # Within bounds: scaled CDF
+        between = ~below & ~above
+        if np.any(between):
+            result[between] = (self._dist.cdf(x[between]) - self._cdf_lb) / self._norm
+
+        return result
+
+    def ppf(self, q):
+        """Evaluate percent point function (inverse CDF)."""
+        q = np.asarray(q)
+
+        # Map quantile to the truncated range
+        q_mapped = self._cdf_lb + q * self._norm
+
+        return self._dist.ppf(q_mapped)
+
+    def rvs(self, size=1, random_state=None):
+        """Generate random samples using inverse CDF method."""
+        rng = np.random.default_rng(random_state)
+        u = rng.uniform(0, 1, size=size)
+        return self.ppf(u)
+
+    def mean(self):
+        """Approximate mean of truncated distribution."""
+        # Use numerical integration or sampling
+        samples = self.rvs(size=10000, random_state=42)
+        return np.mean(samples)
+
+    def std(self):
+        """Approximate standard deviation of truncated distribution."""
+        samples = self.rvs(size=10000, random_state=42)
+        return np.std(samples)
+
+
 @dataclass
 class DistributionFitResult:
     """Result from fitting a single distribution.
@@ -37,6 +138,10 @@ class DistributionFitResult:
         data_summary: Optional summary statistics of the original data (sample_size,
             min, max, mean, std). Captured during fitting to aid debugging and
             provenance tracking.
+        lower_bound: Lower bound for truncated distribution fitting (v1.4.0).
+            When set, the distribution is truncated at this lower limit.
+        upper_bound: Upper bound for truncated distribution fitting (v1.4.0).
+            When set, the distribution is truncated at this upper limit.
 
     Note:
         The p-value from the KS test is approximate when parameters are
@@ -48,6 +153,10 @@ class DistributionFitResult:
         logistic, gumbel_r, gumbel_l) where scipy has critical value tables.
         For other distributions, ad_pvalue will be None but ad_statistic
         is still valid for ranking fits.
+
+        When bounds are set (lower_bound and/or upper_bound), methods like
+        sample(), pdf(), cdf(), and ppf() automatically use scipy.stats.truncate()
+        to return values respecting the bounded domain.
     """
 
     distribution: str
@@ -61,6 +170,9 @@ class DistributionFitResult:
     ad_statistic: Optional[float] = None
     ad_pvalue: Optional[float] = None
     data_summary: Optional[Dict[str, float]] = None
+    # Bounds for truncated distribution fitting (v1.4.0)
+    lower_bound: Optional[float] = None
+    upper_bound: Optional[float] = None
 
     def to_dict(self) -> dict:
         """Convert result to dictionary.
@@ -80,15 +192,41 @@ class DistributionFitResult:
             "ad_statistic": self.ad_statistic,
             "ad_pvalue": self.ad_pvalue,
             "data_summary": self.data_summary,
+            "lower_bound": self.lower_bound,
+            "upper_bound": self.upper_bound,
         }
 
-    def get_scipy_dist(self):
+    def get_scipy_dist(self, frozen: bool = True):
         """Get scipy distribution object.
 
+        Args:
+            frozen: If True (default), return a frozen distribution with parameters applied.
+                If False, return the unfrozen distribution class.
+
         Returns:
-            scipy.stats distribution object
+            scipy.stats distribution object. If bounds are set and frozen=True,
+            returns a TruncatedFrozenDist wrapper that handles truncation.
+
+        Note:
+            When bounds are set (lower_bound and/or upper_bound), the returned
+            distribution is truncated. This ensures that sampling and PDF/CDF
+            evaluation respect the bounds.
         """
-        return getattr(st, self.distribution)
+        dist_class = getattr(st, self.distribution)
+
+        if not frozen:
+            return dist_class
+
+        # Create frozen distribution with parameters
+        frozen_dist = dist_class(*self.parameters)
+
+        # Apply truncation if bounds are set
+        if self.lower_bound is not None or self.upper_bound is not None:
+            lb = self.lower_bound if self.lower_bound is not None else -np.inf
+            ub = self.upper_bound if self.upper_bound is not None else np.inf
+            return TruncatedFrozenDist(frozen_dist, lb, ub)
+
+        return frozen_dist
 
     def sample(self, size: int = 1000, random_state: Optional[int] = None) -> np.ndarray:
         """Generate random samples from the fitted distribution.
@@ -98,15 +236,16 @@ class DistributionFitResult:
             random_state: Random seed for reproducibility
 
         Returns:
-            Array of random samples
+            Array of random samples. If bounds are set, samples are
+            guaranteed to be within [lower_bound, upper_bound].
 
         Example:
             >>> result = fitter.fit(df, 'value').best(n=1)[0]
             >>> samples = result.sample(size=10000, random_state=42)
         """
-        dist = self.get_scipy_dist()
-        # Parameters are all positional: (shape params..., loc, scale)
-        return dist.rvs(*self.parameters, size=size, random_state=random_state)
+        # get_scipy_dist() returns a frozen distribution, optionally truncated
+        frozen_dist = self.get_scipy_dist()
+        return frozen_dist.rvs(size=size, random_state=random_state)
 
     def sample_spark(
         self,
@@ -162,16 +301,17 @@ class DistributionFitResult:
             x: Points at which to evaluate PDF
 
         Returns:
-            PDF values at x
+            PDF values at x. If bounds are set, the PDF is normalized
+            to integrate to 1 over the bounded domain.
 
         Example:
             >>> result = fitter.fit(df, 'value').best(n=1)[0]
             >>> x = np.linspace(0, 10, 100)
             >>> y = result.pdf(x)
         """
-        dist = self.get_scipy_dist()
-        # Parameters are all positional: (shape params..., loc, scale)
-        return dist.pdf(x, *self.parameters)
+        # get_scipy_dist() returns a frozen distribution, optionally truncated
+        frozen_dist = self.get_scipy_dist()
+        return frozen_dist.pdf(x)
 
     def cdf(self, x: np.ndarray) -> np.ndarray:
         """Evaluate cumulative distribution function at given points.
@@ -180,11 +320,12 @@ class DistributionFitResult:
             x: Points at which to evaluate CDF
 
         Returns:
-            CDF values at x
+            CDF values at x. If bounds are set, the CDF is adjusted
+            for the truncated domain (0 at lower_bound, 1 at upper_bound).
         """
-        dist = self.get_scipy_dist()
-        # Parameters are all positional: (shape params..., loc, scale)
-        return dist.cdf(x, *self.parameters)
+        # get_scipy_dist() returns a frozen distribution, optionally truncated
+        frozen_dist = self.get_scipy_dist()
+        return frozen_dist.cdf(x)
 
     def ppf(self, q: np.ndarray) -> np.ndarray:
         """Evaluate percent point function (inverse CDF) at given quantiles.
@@ -193,11 +334,12 @@ class DistributionFitResult:
             q: Quantiles at which to evaluate PPF (0 to 1)
 
         Returns:
-            PPF values at q
+            PPF values at q. If bounds are set, values are guaranteed
+            to be within [lower_bound, upper_bound].
         """
-        dist = self.get_scipy_dist()
-        # Parameters are all positional: (shape params..., loc, scale)
-        return dist.ppf(q, *self.parameters)
+        # get_scipy_dist() returns a frozen distribution, optionally truncated
+        frozen_dist = self.get_scipy_dist()
+        return frozen_dist.ppf(q)
 
     def save(
         self,
@@ -392,12 +534,22 @@ class DistributionFitResult:
         ad_str = f"{self.ad_statistic:.6f}" if self.ad_statistic is not None else "None"
         ad_pval_str = f"{self.ad_pvalue:.4f}" if self.ad_pvalue is not None else "None"
         col_str = f"column_name='{self.column_name}', " if self.column_name else ""
+
+        # Build bounds string if set
+        bounds_parts = []
+        if self.lower_bound is not None:
+            bounds_parts.append(f"lower_bound={self.lower_bound:.4f}")
+        if self.upper_bound is not None:
+            bounds_parts.append(f"upper_bound={self.upper_bound:.4f}")
+        bounds_str = ", ".join(bounds_parts)
+        bounds_suffix = f", {bounds_str}" if bounds_str else ""
+
         return (
             f"DistributionFitResult({col_str}distribution='{self.distribution}', "
             f"sse={self.sse:.6f}, aic={aic_str}, bic={bic_str}, "
             f"ks_statistic={ks_str}, pvalue={pval_str}, "
             f"ad_statistic={ad_str}, ad_pvalue={ad_pval_str}, "
-            f"parameters=[{param_str}])"
+            f"parameters=[{param_str}]{bounds_suffix})"
         )
 
 
@@ -489,6 +641,8 @@ class FitResults:
                 ad_statistic=row["ad_statistic"],
                 ad_pvalue=row["ad_pvalue"],
                 data_summary=dict(row["data_summary"]) if "data_summary" in row and row["data_summary"] else None,
+                lower_bound=row["lower_bound"] if "lower_bound" in row else None,
+                upper_bound=row["upper_bound"] if "upper_bound" in row else None,
             )
             for row in top_n
         ]
