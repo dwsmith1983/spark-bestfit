@@ -126,14 +126,14 @@ def sample_spark(
     dist = getattr(st, distribution)
 
     def generate_samples_for_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
-        """Generate samples for each partition."""
+        """Generate samples for each partition (no iterrows for performance)."""
         for pdf in iterator:
             if len(pdf) == 0:
                 continue
 
-            for _, row in pdf.iterrows():
-                n_samples = int(row["n_samples"])
-                partition_id = int(row["partition_id"])
+            for idx in range(len(pdf)):
+                n_samples = int(pdf.iloc[idx]["n_samples"])
+                partition_id = int(pdf.iloc[idx]["partition_id"])
 
                 # Create unique seed for this partition
                 if random_seed is not None:
