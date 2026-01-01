@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-01-01)
+
+### Features
+
+- Add prefilter parameter and CDF-based PDF integration
+  ([#75](https://github.com/dwsmith1983/spark-bestfit/pull/75),
+  [`c418d47`](https://github.com/dwsmith1983/spark-bestfit/commit/c418d47c733a703c4f23352ab65577f9c26bf0f6))
+
+- Add prefilter parameter for shape-based distribution filtering
+  ([#75](https://github.com/dwsmith1983/spark-bestfit/pull/75),
+  [`c418d47`](https://github.com/dwsmith1983/spark-bestfit/commit/c418d47c733a703c4f23352ab65577f9c26bf0f6))
+
+### Performance Improvements
+
+- CDF-based PDF integration and memory management improvements
+  ([#75](https://github.com/dwsmith1983/spark-bestfit/pull/75),
+  [`c418d47`](https://github.com/dwsmith1983/spark-bestfit/commit/c418d47c733a703c4f23352ab65577f9c26bf0f6))
+
+
 ## v1.5.1 (2026-01-01)
 
 ### Bug Fixes
