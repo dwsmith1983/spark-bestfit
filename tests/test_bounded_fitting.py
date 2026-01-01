@@ -1,4 +1,4 @@
-"""Tests for bounded/truncated distribution fitting (v1.4.0 feature).
+"""Tests for bounded/truncated distribution fitting (v1.4.0, v1.5.0 features).
 
 These tests verify that:
 1. Bounds are correctly auto-detected from data
@@ -8,6 +8,7 @@ These tests verify that:
 5. Bounds survive serialization/deserialization
 6. Bounds validation catches errors
 7. Metrics are computed on truncated distributions
+8. Per-column bounds work for multi-column fitting (v1.5.0)
 """
 
 import numpy as np
@@ -607,3 +608,271 @@ class TestBoundedIntegration:
             samples = result.sample(size=500, random_state=42)
             assert samples.min() >= 25.0
             assert samples.max() <= 75.0
+
+
+class TestPerColumnBounds:
+    """Tests for per-column bounds (v1.5.0 feature)."""
+
+    def test_per_column_bounds_dict(self, spark_session):
+        """Dict bounds allow different bounds per column."""
+        np.random.seed(42)
+        # Column 1: uniform in [0, 100]
+        # Column 2: uniform in [-50, 50]
+        data1 = np.random.uniform(10, 90, size=3000)
+        data2 = np.random.uniform(-40, 40, size=3000)
+        df = spark_session.createDataFrame(
+            [(float(d1), float(d2)) for d1, d2 in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["col1", "col2"],
+            bounded=True,
+            lower_bound={"col1": 0.0, "col2": -50.0},
+            upper_bound={"col1": 100.0, "col2": 50.0},
+            max_distributions=3,
+        )
+
+        # Check col1 bounds
+        col1_results = results.for_column("col1").best(n=1)[0]
+        assert col1_results.lower_bound == 0.0
+        assert col1_results.upper_bound == 100.0
+
+        # Check col2 bounds
+        col2_results = results.for_column("col2").best(n=1)[0]
+        assert col2_results.lower_bound == -50.0
+        assert col2_results.upper_bound == 50.0
+
+    def test_per_column_bounds_auto_detect(self, spark_session):
+        """Auto-detect bounds per-column when bounded=True and no explicit bounds."""
+        np.random.seed(42)
+        data1 = np.random.uniform(10, 90, size=3000)
+        data2 = np.random.uniform(-40, 40, size=3000)
+        df = spark_session.createDataFrame(
+            [(float(d1), float(d2)) for d1, d2 in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["col1", "col2"],
+            bounded=True,
+            max_distributions=3,
+        )
+
+        # Each column should have its own auto-detected bounds
+        col1_results = results.for_column("col1").best(n=1)[0]
+        assert col1_results.lower_bound == pytest.approx(data1.min(), rel=0.01)
+        assert col1_results.upper_bound == pytest.approx(data1.max(), rel=0.01)
+
+        col2_results = results.for_column("col2").best(n=1)[0]
+        assert col2_results.lower_bound == pytest.approx(data2.min(), rel=0.01)
+        assert col2_results.upper_bound == pytest.approx(data2.max(), rel=0.01)
+
+    def test_per_column_bounds_partial_dict(self, spark_session):
+        """Partial dict: specify some columns, auto-detect others."""
+        np.random.seed(42)
+        data1 = np.random.uniform(10, 90, size=3000)
+        data2 = np.random.uniform(-40, 40, size=3000)
+        df = spark_session.createDataFrame(
+            [(float(d1), float(d2)) for d1, d2 in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["col1", "col2"],
+            bounded=True,
+            lower_bound={"col1": 0.0},  # Only col1 lower bound specified
+            upper_bound={"col2": 100.0},  # Only col2 upper bound specified
+            max_distributions=3,
+        )
+
+        # col1: explicit lower, auto-detect upper
+        col1_results = results.for_column("col1").best(n=1)[0]
+        assert col1_results.lower_bound == 0.0
+        assert col1_results.upper_bound == pytest.approx(data1.max(), rel=0.01)
+
+        # col2: auto-detect lower, explicit upper
+        col2_results = results.for_column("col2").best(n=1)[0]
+        assert col2_results.lower_bound == pytest.approx(data2.min(), rel=0.01)
+        assert col2_results.upper_bound == 100.0
+
+    def test_per_column_bounds_scalar_applies_to_all(self, spark_session):
+        """Scalar bounds apply to all columns (backward compatible)."""
+        np.random.seed(42)
+        data1 = np.random.normal(50, 10, size=3000)
+        data2 = np.random.normal(50, 10, size=3000)
+        df = spark_session.createDataFrame(
+            [(float(d1), float(d2)) for d1, d2 in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["col1", "col2"],
+            bounded=True,
+            lower_bound=0.0,  # Scalar - applies to all
+            upper_bound=100.0,  # Scalar - applies to all
+            max_distributions=3,
+        )
+
+        # Both columns should have same bounds
+        col1_results = results.for_column("col1").best(n=1)[0]
+        col2_results = results.for_column("col2").best(n=1)[0]
+
+        assert col1_results.lower_bound == 0.0
+        assert col1_results.upper_bound == 100.0
+        assert col2_results.lower_bound == 0.0
+        assert col2_results.upper_bound == 100.0
+
+    def test_per_column_bounds_unknown_column_error(self, spark_session):
+        """Dict with unknown column name raises ValueError."""
+        np.random.seed(42)
+        data = np.random.normal(50, 10, size=1000)
+        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+
+        fitter = DistributionFitter(spark_session)
+
+        with pytest.raises(ValueError, match="unknown columns"):
+            fitter.fit(
+                df,
+                column="value",
+                bounded=True,
+                lower_bound={"nonexistent": 0.0},  # Unknown column
+                max_distributions=3,
+            )
+
+        with pytest.raises(ValueError, match="unknown columns"):
+            fitter.fit(
+                df,
+                column="value",
+                bounded=True,
+                upper_bound={"typo_column": 100.0},  # Unknown column
+                max_distributions=3,
+            )
+
+    def test_per_column_bounds_validation_per_column(self, spark_session):
+        """lower >= upper error is per-column."""
+        np.random.seed(42)
+        data1 = np.random.normal(50, 10, size=1000)
+        data2 = np.random.normal(50, 10, size=1000)
+        df = spark_session.createDataFrame(
+            [(float(d1), float(d2)) for d1, d2 in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+
+        # col1 has valid bounds, col2 has invalid bounds
+        with pytest.raises(ValueError, match="lower_bound.*must be less than.*col2"):
+            fitter.fit(
+                df,
+                columns=["col1", "col2"],
+                bounded=True,
+                lower_bound={"col1": 0.0, "col2": 100.0},
+                upper_bound={"col1": 100.0, "col2": 50.0},  # col2: lower > upper
+                max_distributions=3,
+            )
+
+    def test_per_column_bounds_samples_respect_column_bounds(self, spark_session):
+        """Samples from each column respect that column's bounds."""
+        np.random.seed(42)
+        data1 = np.random.normal(50, 10, size=3000)
+        data2 = np.random.normal(0, 5, size=3000)
+        df = spark_session.createDataFrame(
+            [(float(d1), float(d2)) for d1, d2 in zip(data1, data2)],
+            ["col1", "col2"]
+        )
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["col1", "col2"],
+            bounded=True,
+            lower_bound={"col1": 20.0, "col2": -15.0},
+            upper_bound={"col1": 80.0, "col2": 15.0},
+            max_distributions=3,
+        )
+
+        # Samples from col1 respect col1's bounds
+        col1_best = results.for_column("col1").best(n=1)[0]
+        samples1 = col1_best.sample(size=5000, random_state=42)
+        assert samples1.min() >= 20.0
+        assert samples1.max() <= 80.0
+
+        # Samples from col2 respect col2's bounds
+        col2_best = results.for_column("col2").best(n=1)[0]
+        samples2 = col2_best.sample(size=5000, random_state=42)
+        assert samples2.min() >= -15.0
+        assert samples2.max() <= 15.0
+
+
+class TestDiscretePerColumnBounds:
+    """Tests for per-column bounds with DiscreteDistributionFitter (v1.5.0)."""
+
+    def test_discrete_per_column_bounds_dict(self, spark_session):
+        """DiscreteDistributionFitter supports per-column bounds dicts."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        data1 = np.random.poisson(lam=10, size=3000)
+        data2 = np.random.poisson(lam=20, size=3000)
+        df = spark_session.createDataFrame(
+            [(int(d1), int(d2)) for d1, d2 in zip(data1, data2)],
+            ["count1", "count2"]
+        )
+
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["count1", "count2"],
+            bounded=True,
+            lower_bound={"count1": 0, "count2": 5},
+            upper_bound={"count1": 30, "count2": 50},
+            max_distributions=3,
+        )
+
+        # Check count1 bounds
+        count1_results = results.for_column("count1").best(n=1, metric="aic")[0]
+        assert count1_results.lower_bound == 0.0
+        assert count1_results.upper_bound == 30.0
+
+        # Check count2 bounds
+        count2_results = results.for_column("count2").best(n=1, metric="aic")[0]
+        assert count2_results.lower_bound == 5.0
+        assert count2_results.upper_bound == 50.0
+
+    def test_discrete_per_column_auto_detect(self, spark_session):
+        """DiscreteDistributionFitter auto-detects per-column bounds."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        data1 = np.random.poisson(lam=5, size=3000)
+        data2 = np.random.poisson(lam=15, size=3000)
+        df = spark_session.createDataFrame(
+            [(int(d1), int(d2)) for d1, d2 in zip(data1, data2)],
+            ["count1", "count2"]
+        )
+
+        fitter = DiscreteDistributionFitter(spark_session)
+        results = fitter.fit(
+            df,
+            columns=["count1", "count2"],
+            bounded=True,
+            max_distributions=3,
+        )
+
+        # Each column has its own auto-detected bounds
+        count1_best = results.for_column("count1").best(n=1, metric="aic")[0]
+        assert count1_best.lower_bound == float(data1.min())
+        assert count1_best.upper_bound == float(data1.max())
+
+        count2_best = results.for_column("count2").best(n=1, metric="aic")[0]
+        assert count2_best.lower_bound == float(data2.min())
+        assert count2_best.upper_bound == float(data2.max())

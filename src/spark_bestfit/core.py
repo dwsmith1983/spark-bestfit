@@ -2,7 +2,7 @@
 
 import logging
 from functools import reduce
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pyspark.sql.functions as F
@@ -96,8 +96,8 @@ class DistributionFitter:
         num_partitions: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         bounded: bool = False,
-        lower_bound: Optional[float] = None,
-        upper_bound: Optional[float] = None,
+        lower_bound: Optional[Union[float, Dict[str, float]]] = None,
+        upper_bound: Optional[Union[float, Dict[str, float]]] = None,
     ) -> FitResults:
         """Fit distributions to data column(s).
 
@@ -121,9 +121,13 @@ class DistributionFitter:
                 When enabled, distributions are truncated to [lower_bound, upper_bound]
                 using scipy.stats.truncate(). Requires scipy >= 1.14.0.
             lower_bound: Lower bound for truncated distribution fitting.
-                If None and bounded=True, auto-detects from data minimum.
+                Can be a float (applied to all columns) or a dict mapping
+                column names to bounds (v1.5.0). If None and bounded=True,
+                auto-detects from each column's minimum.
             upper_bound: Upper bound for truncated distribution fitting.
-                If None and bounded=True, auto-detects from data maximum.
+                Can be a float (applied to all columns) or a dict mapping
+                column names to bounds (v1.5.0). If None and bounded=True,
+                auto-detects from each column's maximum.
 
         Returns:
             FitResults object with fitted distributions
@@ -145,6 +149,14 @@ class DistributionFitter:
             >>> # Bounded fitting (v1.4.0)
             >>> results = fitter.fit(df, 'value', bounded=True)  # Auto-detect bounds
             >>> results = fitter.fit(df, 'value', bounded=True, lower_bound=0, upper_bound=100)
+            >>>
+            >>> # Per-column bounds (v1.5.0)
+            >>> results = fitter.fit(
+            ...     df, columns=['col1', 'col2'],
+            ...     bounded=True,
+            ...     lower_bound={'col1': 0, 'col2': -10},
+            ...     upper_bound={'col1': 100, 'col2': 50}
+            ... )
         """
         # Validate column/columns parameters
         if column is None and columns is None:
@@ -159,10 +171,8 @@ class DistributionFitter:
         for col in target_columns:
             self._validate_inputs(df, col, max_distributions, bins, sample_fraction)
 
-        # Validate bounds
-        if lower_bound is not None and upper_bound is not None:
-            if lower_bound >= upper_bound:
-                raise ValueError(f"lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})")
+        # Validate bounds - handle both scalar and dict forms
+        self._validate_bounds(lower_bound, upper_bound, target_columns)
 
         # Get row count (single operation for all columns)
         row_count = df.count()
@@ -170,29 +180,10 @@ class DistributionFitter:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
 
-        # Handle bounded fitting: auto-detect bounds if needed
-        effective_lower_bound = lower_bound
-        effective_upper_bound = upper_bound
+        # Build per-column bounds dict: {col: (lower, upper)}
+        column_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
         if bounded:
-            # Compute min/max for all target columns if bounds not provided
-            # This reuses the data scan we'd do anyway for the histogram
-            if lower_bound is None or upper_bound is None:
-                agg_exprs = []
-                for col in target_columns:
-                    if lower_bound is None:
-                        agg_exprs.append(F.min(col).alias(f"min_{col}"))
-                    if upper_bound is None:
-                        agg_exprs.append(F.max(col).alias(f"max_{col}"))
-                if agg_exprs:
-                    bounds_row = df.agg(*agg_exprs).first()
-                    # For now, use the first column's bounds (multi-column bounded fitting
-                    # could be enhanced to have per-column bounds in the future)
-                    first_col = target_columns[0]
-                    if lower_bound is None:
-                        effective_lower_bound = float(bounds_row[f"min_{first_col}"])
-                    if upper_bound is None:
-                        effective_upper_bound = float(bounds_row[f"max_{first_col}"])
-                    logger.info(f"Bounded fitting: bounds=[{effective_lower_bound}, {effective_upper_bound}]")
+            column_bounds = self._resolve_bounds(df, target_columns, lower_bound, upper_bound)
 
         # Sample if needed (single operation for all columns)
         df_sample = self._apply_sampling(
@@ -219,6 +210,8 @@ class DistributionFitter:
             # Fit each column and collect results
             all_results_dfs = []
             for col in target_columns:
+                # Get per-column bounds (empty dict if not bounded)
+                col_lower, col_upper = column_bounds.get(col, (None, None))
                 logger.info(f"Fitting column '{col}'...")
                 results_df = self._fit_single_column(
                     df_sample=df_sample,
@@ -228,8 +221,8 @@ class DistributionFitter:
                     use_rice_rule=use_rice_rule,
                     distributions=distributions,
                     num_partitions=num_partitions,
-                    lower_bound=effective_lower_bound if bounded else None,
-                    upper_bound=effective_upper_bound if bounded else None,
+                    lower_bound=col_lower,
+                    upper_bound=col_upper,
                 )
                 all_results_dfs.append(results_df)
 
@@ -483,7 +476,20 @@ class DistributionFitter:
         bins: Union[int, Tuple[float, ...]],
         sample_fraction: Optional[float],
     ) -> None:
-        """Validate inputs."""
+        """Validate input parameters for distribution fitting.
+
+        Args:
+            df: Spark DataFrame containing data
+            column: Column name to validate
+            max_distributions: Maximum distributions to fit (0 is invalid)
+            bins: Number of histogram bins (must be positive if int)
+            sample_fraction: Sampling fraction (must be in (0, 1] if provided)
+
+        Raises:
+            ValueError: If max_distributions is 0, column not found, bins invalid,
+                or sample_fraction out of range
+            TypeError: If column is not numeric
+        """
         if max_distributions == 0:
             raise ValueError("max_distributions cannot be 0")
 
@@ -500,6 +506,121 @@ class DistributionFitter:
         if sample_fraction is not None and not 0.0 < sample_fraction <= 1.0:
             raise ValueError(f"sample_fraction must be in (0, 1], got {sample_fraction}")
 
+    @staticmethod
+    def _validate_bounds(
+        lower_bound: Optional[Union[float, Dict[str, float]]],
+        upper_bound: Optional[Union[float, Dict[str, float]]],
+        target_columns: List[str],
+    ) -> None:
+        """Validate bounds parameters.
+
+        Args:
+            lower_bound: Scalar or dict of lower bounds
+            upper_bound: Scalar or dict of upper bounds
+            target_columns: List of columns being fitted
+
+        Raises:
+            ValueError: If bounds are invalid (lower >= upper, unknown columns in dict)
+        """
+        # Validate scalar bounds
+        if isinstance(lower_bound, (int, float)) and isinstance(upper_bound, (int, float)):
+            if lower_bound >= upper_bound:
+                raise ValueError(f"lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})")
+            return
+
+        # Validate dict bounds - check for unknown columns
+        if isinstance(lower_bound, dict):
+            unknown = set(lower_bound.keys()) - set(target_columns)
+            if unknown:
+                raise ValueError(f"lower_bound contains unknown columns: {unknown}. Valid columns: {target_columns}")
+
+        if isinstance(upper_bound, dict):
+            unknown = set(upper_bound.keys()) - set(target_columns)
+            if unknown:
+                raise ValueError(f"upper_bound contains unknown columns: {unknown}. Valid columns: {target_columns}")
+
+        # Validate that lower < upper for each column where both are specified
+        lower_dict = lower_bound if isinstance(lower_bound, dict) else {}
+        upper_dict = upper_bound if isinstance(upper_bound, dict) else {}
+
+        for col in target_columns:
+            col_lower = lower_dict.get(col) if isinstance(lower_bound, dict) else lower_bound
+            col_upper = upper_dict.get(col) if isinstance(upper_bound, dict) else upper_bound
+            if col_lower is not None and col_upper is not None:
+                if col_lower >= col_upper:
+                    raise ValueError(
+                        f"lower_bound ({col_lower}) must be less than upper_bound ({col_upper}) for column '{col}'"
+                    )
+
+    @staticmethod
+    def _resolve_bounds(
+        df: DataFrame,
+        target_columns: List[str],
+        lower_bound: Optional[Union[float, Dict[str, float]]],
+        upper_bound: Optional[Union[float, Dict[str, float]]],
+    ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
+        """Resolve bounds to per-column dict, auto-detecting from data where needed.
+
+        Args:
+            df: DataFrame containing data
+            target_columns: List of columns being fitted
+            lower_bound: Scalar, dict, or None
+            upper_bound: Scalar, dict, or None
+
+        Returns:
+            Dict mapping column name to (lower, upper) tuple
+        """
+        # Determine which columns need auto-detection
+        lower_dict = lower_bound if isinstance(lower_bound, dict) else {}
+        upper_dict = upper_bound if isinstance(upper_bound, dict) else {}
+
+        cols_need_lower = [
+            col for col in target_columns if not isinstance(lower_bound, (int, float)) and col not in lower_dict
+        ]
+        cols_need_upper = [
+            col for col in target_columns if not isinstance(upper_bound, (int, float)) and col not in upper_dict
+        ]
+
+        # Build aggregation expressions for auto-detection
+        agg_exprs = []
+        for col in cols_need_lower:
+            agg_exprs.append(F.min(col).alias(f"min_{col}"))
+        for col in cols_need_upper:
+            agg_exprs.append(F.max(col).alias(f"max_{col}"))
+
+        # Execute single aggregation for all needed bounds
+        auto_bounds: Dict[str, float] = {}
+        if agg_exprs:
+            bounds_row = df.agg(*agg_exprs).first()
+            for col in cols_need_lower:
+                auto_bounds[f"min_{col}"] = float(bounds_row[f"min_{col}"])
+            for col in cols_need_upper:
+                auto_bounds[f"max_{col}"] = float(bounds_row[f"max_{col}"])
+
+        # Build final per-column bounds dict
+        result: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+        for col in target_columns:
+            # Determine lower bound for this column
+            if isinstance(lower_bound, (int, float)):
+                col_lower = float(lower_bound)
+            elif isinstance(lower_bound, dict) and col in lower_bound:
+                col_lower = float(lower_bound[col])
+            else:
+                col_lower = auto_bounds.get(f"min_{col}")
+
+            # Determine upper bound for this column
+            if isinstance(upper_bound, (int, float)):
+                col_upper = float(upper_bound)
+            elif isinstance(upper_bound, dict) and col in upper_bound:
+                col_upper = float(upper_bound[col])
+            else:
+                col_upper = auto_bounds.get(f"max_{col}")
+
+            result[col] = (col_lower, col_upper)
+            logger.info(f"Bounded fitting for '{col}': bounds=[{col_lower}, {col_upper}]")
+
+        return result
+
     def _apply_sampling(
         self,
         df: DataFrame,
@@ -509,7 +630,19 @@ class DistributionFitter:
         max_sample_size: int,
         sample_threshold: int,
     ) -> DataFrame:
-        """Apply sampling if needed."""
+        """Apply sampling to DataFrame if dataset exceeds threshold.
+
+        Args:
+            df: Spark DataFrame to sample
+            row_count: Total row count of DataFrame
+            enable_sampling: Whether sampling is enabled
+            sample_fraction: Explicit fraction to sample (None = auto-determine)
+            max_sample_size: Maximum rows when auto-determining fraction
+            sample_threshold: Row count above which sampling is applied
+
+        Returns:
+            Original DataFrame if no sampling needed, otherwise sampled DataFrame
+        """
         if not enable_sampling or row_count <= sample_threshold:
             return df
 
@@ -522,14 +655,36 @@ class DistributionFitter:
         return df.sample(fraction=fraction, seed=self.random_seed)
 
     def _create_fitting_sample(self, df: DataFrame, column: str, row_count: int) -> np.ndarray:
-        """Create sample for scipy distribution fitting."""
+        """Create numpy sample array for scipy distribution fitting.
+
+        Samples up to FITTING_SAMPLE_SIZE rows from the DataFrame for use in
+        scipy's distribution fitting functions.
+
+        Args:
+            df: Spark DataFrame containing data
+            column: Column name to sample
+            row_count: Total row count (used to calculate sampling fraction)
+
+        Returns:
+            Numpy array of sampled values for distribution fitting
+        """
         sample_size = min(FITTING_SAMPLE_SIZE, row_count)
         fraction = min(sample_size / row_count, 1.0)
         sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed)
         return sample_df.toPandas()[column].values
 
     def _calculate_partitions(self, num_distributions: int) -> int:
-        """Calculate optimal partition count."""
+        """Calculate optimal Spark partition count for distribution fitting.
+
+        Uses the minimum of the number of distributions and twice the default
+        parallelism to balance workload distribution.
+
+        Args:
+            num_distributions: Number of distributions to fit
+
+        Returns:
+            Optimal partition count for the fitting operation
+        """
         total_cores = self.spark.sparkContext.defaultParallelism
         return min(num_distributions, total_cores * 2)
 
@@ -792,8 +947,8 @@ class DiscreteDistributionFitter:
         num_partitions: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         bounded: bool = False,
-        lower_bound: Optional[float] = None,
-        upper_bound: Optional[float] = None,
+        lower_bound: Optional[Union[float, Dict[str, float]]] = None,
+        upper_bound: Optional[Union[float, Dict[str, float]]] = None,
     ) -> FitResults:
         """Fit discrete distributions to integer data column(s).
 
@@ -813,9 +968,13 @@ class DiscreteDistributionFitter:
             bounded: Enable bounded distribution fitting. When True, bounds
                 are auto-detected from data or use explicit lower_bound/upper_bound.
             lower_bound: Lower bound for truncated distribution fitting.
-                If None and bounded=True, auto-detects from data minimum.
+                Can be a float (applied to all columns) or a dict mapping
+                column names to bounds (v1.5.0). If None and bounded=True,
+                auto-detects from each column's minimum.
             upper_bound: Upper bound for truncated distribution fitting.
-                If None and bounded=True, auto-detects from data maximum.
+                Can be a float (applied to all columns) or a dict mapping
+                column names to bounds (v1.5.0). If None and bounded=True,
+                auto-detects from each column's maximum.
 
         Returns:
             FitResults object with fitted distributions
@@ -835,6 +994,14 @@ class DiscreteDistributionFitter:
             >>>
             >>> # Bounded fitting
             >>> results = fitter.fit(df, column='counts', bounded=True, lower_bound=0, upper_bound=100)
+            >>>
+            >>> # Per-column bounds (v1.5.0)
+            >>> results = fitter.fit(
+            ...     df, columns=['counts1', 'counts2'],
+            ...     bounded=True,
+            ...     lower_bound={'counts1': 0, 'counts2': 5},
+            ...     upper_bound={'counts1': 100, 'counts2': 200}
+            ... )
         """
         # Validate column/columns parameters
         if column is None and columns is None:
@@ -849,10 +1016,8 @@ class DiscreteDistributionFitter:
         for col in target_columns:
             self._validate_inputs(df, col, max_distributions, sample_fraction)
 
-        # Validate bounds
-        if lower_bound is not None and upper_bound is not None:
-            if lower_bound >= upper_bound:
-                raise ValueError(f"lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})")
+        # Validate bounds - handle both scalar and dict forms
+        self._validate_bounds(lower_bound, upper_bound, target_columns)
 
         # Get row count (single operation for all columns)
         row_count = df.count()
@@ -860,26 +1025,10 @@ class DiscreteDistributionFitter:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
 
-        # Handle bounded fitting: auto-detect bounds if needed
-        effective_lower_bound = lower_bound
-        effective_upper_bound = upper_bound
+        # Build per-column bounds dict: {col: (lower, upper)}
+        column_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
         if bounded:
-            # Compute min/max for all target columns if bounds not provided
-            if lower_bound is None or upper_bound is None:
-                agg_exprs = []
-                for col in target_columns:
-                    if lower_bound is None:
-                        agg_exprs.append(F.min(col).alias(f"min_{col}"))
-                    if upper_bound is None:
-                        agg_exprs.append(F.max(col).alias(f"max_{col}"))
-                if agg_exprs:
-                    bounds_row = df.agg(*agg_exprs).first()
-                    first_col = target_columns[0]
-                    if lower_bound is None:
-                        effective_lower_bound = float(bounds_row[f"min_{first_col}"])
-                    if upper_bound is None:
-                        effective_upper_bound = float(bounds_row[f"max_{first_col}"])
-                    logger.info(f"Bounded fitting: bounds=[{effective_lower_bound}, {effective_upper_bound}]")
+            column_bounds = self._resolve_bounds(df, target_columns, lower_bound, upper_bound)
 
         # Sample if needed (single operation for all columns)
         df_sample = self._apply_sampling(
@@ -905,6 +1054,8 @@ class DiscreteDistributionFitter:
             # Fit each column and collect results
             all_results_dfs = []
             for col in target_columns:
+                # Get per-column bounds (empty dict if not bounded)
+                col_lower, col_upper = column_bounds.get(col, (None, None))
                 logger.info(f"Fitting discrete column '{col}'...")
                 results_df = self._fit_single_column(
                     df_sample=df_sample,
@@ -912,8 +1063,8 @@ class DiscreteDistributionFitter:
                     row_count=row_count,
                     distributions=distributions,
                     num_partitions=num_partitions,
-                    lower_bound=effective_lower_bound if bounded else None,
-                    upper_bound=effective_upper_bound if bounded else None,
+                    lower_bound=col_lower,
+                    upper_bound=col_upper,
                 )
                 all_results_dfs.append(results_df)
 
@@ -1012,7 +1163,19 @@ class DiscreteDistributionFitter:
         max_distributions: Optional[int],
         sample_fraction: Optional[float],
     ) -> None:
-        """Validate inputs."""
+        """Validate input parameters for discrete distribution fitting.
+
+        Args:
+            df: Spark DataFrame containing data
+            column: Column name to validate
+            max_distributions: Maximum distributions to fit (0 is invalid)
+            sample_fraction: Sampling fraction (must be in (0, 1] if provided)
+
+        Raises:
+            ValueError: If max_distributions is 0, column not found,
+                or sample_fraction out of range
+            TypeError: If column is not numeric
+        """
         if max_distributions == 0:
             raise ValueError("max_distributions cannot be 0")
 
@@ -1026,6 +1189,121 @@ class DiscreteDistributionFitter:
         if sample_fraction is not None and not 0.0 < sample_fraction <= 1.0:
             raise ValueError(f"sample_fraction must be in (0, 1], got {sample_fraction}")
 
+    def _validate_bounds(
+        self,
+        lower_bound: Optional[Union[float, Dict[str, float]]],
+        upper_bound: Optional[Union[float, Dict[str, float]]],
+        target_columns: List[str],
+    ) -> None:
+        """Validate bounds parameters.
+
+        Args:
+            lower_bound: Scalar or dict of lower bounds
+            upper_bound: Scalar or dict of upper bounds
+            target_columns: List of columns being fitted
+
+        Raises:
+            ValueError: If bounds are invalid (lower >= upper, unknown columns in dict)
+        """
+        # Validate scalar bounds
+        if isinstance(lower_bound, (int, float)) and isinstance(upper_bound, (int, float)):
+            if lower_bound >= upper_bound:
+                raise ValueError(f"lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})")
+            return
+
+        # Validate dict bounds - check for unknown columns
+        if isinstance(lower_bound, dict):
+            unknown = set(lower_bound.keys()) - set(target_columns)
+            if unknown:
+                raise ValueError(f"lower_bound contains unknown columns: {unknown}. Valid columns: {target_columns}")
+
+        if isinstance(upper_bound, dict):
+            unknown = set(upper_bound.keys()) - set(target_columns)
+            if unknown:
+                raise ValueError(f"upper_bound contains unknown columns: {unknown}. Valid columns: {target_columns}")
+
+        # Validate that lower < upper for each column where both are specified
+        lower_dict = lower_bound if isinstance(lower_bound, dict) else {}
+        upper_dict = upper_bound if isinstance(upper_bound, dict) else {}
+
+        for col in target_columns:
+            col_lower = lower_dict.get(col) if isinstance(lower_bound, dict) else lower_bound
+            col_upper = upper_dict.get(col) if isinstance(upper_bound, dict) else upper_bound
+            if col_lower is not None and col_upper is not None:
+                if col_lower >= col_upper:
+                    raise ValueError(
+                        f"lower_bound ({col_lower}) must be less than upper_bound ({col_upper}) for column '{col}'"
+                    )
+
+    def _resolve_bounds(
+        self,
+        df: DataFrame,
+        target_columns: List[str],
+        lower_bound: Optional[Union[float, Dict[str, float]]],
+        upper_bound: Optional[Union[float, Dict[str, float]]],
+    ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
+        """Resolve bounds to per-column dict, auto-detecting from data where needed.
+
+        Args:
+            df: DataFrame containing data
+            target_columns: List of columns being fitted
+            lower_bound: Scalar, dict, or None
+            upper_bound: Scalar, dict, or None
+
+        Returns:
+            Dict mapping column name to (lower, upper) tuple
+        """
+        # Determine which columns need auto-detection
+        lower_dict = lower_bound if isinstance(lower_bound, dict) else {}
+        upper_dict = upper_bound if isinstance(upper_bound, dict) else {}
+
+        cols_need_lower = [
+            col for col in target_columns if not isinstance(lower_bound, (int, float)) and col not in lower_dict
+        ]
+        cols_need_upper = [
+            col for col in target_columns if not isinstance(upper_bound, (int, float)) and col not in upper_dict
+        ]
+
+        # Build aggregation expressions for auto-detection
+        agg_exprs = []
+        for col in cols_need_lower:
+            agg_exprs.append(F.min(col).alias(f"min_{col}"))
+        for col in cols_need_upper:
+            agg_exprs.append(F.max(col).alias(f"max_{col}"))
+
+        # Execute single aggregation for all needed bounds
+        auto_bounds: Dict[str, float] = {}
+        if agg_exprs:
+            bounds_row = df.agg(*agg_exprs).first()
+            for col in cols_need_lower:
+                auto_bounds[f"min_{col}"] = float(bounds_row[f"min_{col}"])
+            for col in cols_need_upper:
+                auto_bounds[f"max_{col}"] = float(bounds_row[f"max_{col}"])
+
+        # Build final per-column bounds dict
+        result: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+        for col in target_columns:
+            # Determine lower bound for this column
+            if isinstance(lower_bound, (int, float)):
+                col_lower = float(lower_bound)
+            elif isinstance(lower_bound, dict) and col in lower_bound:
+                col_lower = float(lower_bound[col])
+            else:
+                col_lower = auto_bounds.get(f"min_{col}")
+
+            # Determine upper bound for this column
+            if isinstance(upper_bound, (int, float)):
+                col_upper = float(upper_bound)
+            elif isinstance(upper_bound, dict) and col in upper_bound:
+                col_upper = float(upper_bound[col])
+            else:
+                col_upper = auto_bounds.get(f"max_{col}")
+
+            result[col] = (col_lower, col_upper)
+            logger.info(f"Bounded fitting for '{col}': bounds=[{col_lower}, {col_upper}]")
+
+        return result
+
     def _apply_sampling(
         self,
         df: DataFrame,
@@ -1035,7 +1313,19 @@ class DiscreteDistributionFitter:
         max_sample_size: int,
         sample_threshold: int,
     ) -> DataFrame:
-        """Apply sampling if needed."""
+        """Apply sampling to DataFrame if dataset exceeds threshold.
+
+        Args:
+            df: Spark DataFrame to sample
+            row_count: Total row count of DataFrame
+            enable_sampling: Whether sampling is enabled
+            sample_fraction: Explicit fraction to sample (None = auto-determine)
+            max_sample_size: Maximum rows when auto-determining fraction
+            sample_threshold: Row count above which sampling is applied
+
+        Returns:
+            Original DataFrame if no sampling needed, otherwise sampled DataFrame
+        """
         if not enable_sampling or row_count <= sample_threshold:
             return df
 
@@ -1048,7 +1338,17 @@ class DiscreteDistributionFitter:
         return df.sample(fraction=fraction, seed=self.random_seed)
 
     def _calculate_partitions(self, num_distributions: int) -> int:
-        """Calculate optimal partition count."""
+        """Calculate optimal Spark partition count for distribution fitting.
+
+        Uses the minimum of the number of distributions and twice the default
+        parallelism to balance workload distribution.
+
+        Args:
+            num_distributions: Number of distributions to fit
+
+        Returns:
+            Optimal partition count for the fitting operation
+        """
         total_cores = self.spark.sparkContext.defaultParallelism
         return min(num_distributions, total_cores * 2)
 

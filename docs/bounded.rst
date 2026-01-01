@@ -128,7 +128,41 @@ Bounds are preserved when saving and loading results:
 Multi-Column Bounded Fitting
 ----------------------------
 
-Bounds are applied per-column when fitting multiple columns:
+Starting with v1.5.0, you can specify **different bounds per column** using dictionaries:
+
+.. code-block:: python
+
+   # Different bounds for each column (v1.5.0)
+   results = fitter.fit(
+       df,
+       columns=["percentage", "price", "age"],
+       bounded=True,
+       lower_bound={"percentage": 0.0, "price": 0.0, "age": 0.0},
+       upper_bound={"percentage": 100.0, "price": 10000.0, "age": 120.0},
+   )
+
+   # Each column has its own bounds
+   pct_result = results.for_column("percentage").best(n=1)[0]
+   print(pct_result.lower_bound, pct_result.upper_bound)  # 0.0, 100.0
+
+   price_result = results.for_column("price").best(n=1)[0]
+   print(price_result.lower_bound, price_result.upper_bound)  # 0.0, 10000.0
+
+**Partial dictionaries** are supported - unspecified columns auto-detect from data:
+
+.. code-block:: python
+
+   # Only specify bounds for some columns
+   results = fitter.fit(
+       df,
+       columns=["col_a", "col_b", "col_c"],
+       bounded=True,
+       lower_bound={"col_a": 0.0},  # Only col_a has explicit lower bound
+       upper_bound={"col_b": 100.0},  # Only col_b has explicit upper bound
+   )
+   # col_c auto-detects both bounds from data
+
+**Scalar bounds** apply to all columns (backward compatible):
 
 .. code-block:: python
 
@@ -137,13 +171,9 @@ Bounds are applied per-column when fitting multiple columns:
        df,
        columns=["col_a", "col_b", "col_c"],
        bounded=True,
-       lower_bound=0.0,
-       upper_bound=1.0,
+       lower_bound=0.0,   # Applied to all columns
+       upper_bound=1.0,   # Applied to all columns
    )
-
-.. note::
-   Currently, the same bounds are applied to all columns in a multi-column fit.
-   For different bounds per column, fit columns separately.
 
 Use Cases
 ---------
