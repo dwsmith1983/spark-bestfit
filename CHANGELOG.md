@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.5.1 (2026-01-01)
+
+### Bug Fixes
+
+- Trigger v1.5.1 release for cache warning fix
+  ([#74](https://github.com/dwsmith1983/spark-bestfit/pull/74),
+  [`45b6101`](https://github.com/dwsmith1983/spark-bestfit/commit/45b61011a6f745ccd95e3374884f9c7d01eb6103))
+
+
 ## v1.5.0 (2026-01-01)
 
 ### Features
