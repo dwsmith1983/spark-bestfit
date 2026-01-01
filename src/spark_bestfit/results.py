@@ -1094,7 +1094,8 @@ class FitResults:
             filtered = filtered.filter(F.col("ad_statistic") < ad_threshold)
 
         # Preserve lazy contexts for the filtered results
-        return FitResults(filtered.cache(), lazy_contexts=self._lazy_contexts)
+        # Note: Don't cache here - parent DataFrame is already cached
+        return FitResults(filtered, lazy_contexts=self._lazy_contexts)
 
     def for_column(self, column_name: str) -> "FitResults":
         """Filter results to a single column.
@@ -1119,7 +1120,8 @@ class FitResults:
         if column_name in self._lazy_contexts:
             filtered_contexts[column_name] = self._lazy_contexts[column_name]
 
-        return FitResults(filtered.cache(), lazy_contexts=filtered_contexts)
+        # Note: Don't cache here - parent DataFrame is already cached
+        return FitResults(filtered, lazy_contexts=filtered_contexts)
 
     @property
     def column_names(self) -> List[str]:
