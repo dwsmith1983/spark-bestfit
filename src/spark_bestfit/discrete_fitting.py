@@ -293,6 +293,63 @@ def compute_discrete_ks_statistic(
         return np.inf, 0.0
 
 
+def compute_ks_ad_metrics_discrete(
+    dist_name: str,
+    params: List[float],
+    data_sample: np.ndarray,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Compute KS metrics for a fitted discrete distribution.
+
+    This is the core computation function used for lazy metric evaluation
+    with discrete distributions.
+
+    Note: Anderson-Darling is not computed for discrete distributions
+    (AD test is for continuous distributions only).
+
+    Args:
+        dist_name: Name of scipy.stats discrete distribution
+        params: Fitted distribution parameters
+        data_sample: Integer data sample for metric computation
+        lower_bound: Optional lower bound (unused for discrete, for API compatibility)
+        upper_bound: Optional upper bound (unused for discrete, for API compatibility)
+
+    Returns:
+        Tuple of (ks_statistic, pvalue, ad_statistic, ad_pvalue)
+        ad_statistic and ad_pvalue are always None for discrete distributions.
+        Returns (None, None, None, None) if computation fails.
+    """
+    try:
+        # Get distribution object
+        dist = getattr(st, dist_name)
+
+        # Ensure integer data
+        data_sample = data_sample.astype(int)
+
+        # Compute KS statistic
+        ks_stat, pvalue = compute_discrete_ks_statistic(
+            dist=dist,
+            params=tuple(params),
+            data=data_sample,
+            dist_name=dist_name,
+        )
+
+        # AD is not computed for discrete distributions
+        ad_stat = None
+        ad_pvalue = None
+
+        return (
+            float(ks_stat) if ks_stat is not None and np.isfinite(ks_stat) else None,
+            float(pvalue) if pvalue is not None and np.isfinite(pvalue) else None,
+            ad_stat,
+            ad_pvalue,
+        )
+
+    except (ValueError, RuntimeError, FloatingPointError, AttributeError):
+        return (None, None, None, None)
+
+
 def fit_single_discrete_distribution(
     dist_name: str,
     data_sample: np.ndarray,
@@ -303,6 +360,7 @@ def fit_single_discrete_distribution(
     data_summary: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
+    lazy_metrics: bool = False,
 ) -> Dict[str, Any]:
     """Fit a single discrete distribution and compute goodness-of-fit metrics.
 
@@ -316,6 +374,8 @@ def fit_single_discrete_distribution(
         data_summary: Pre-computed summary statistics of the original data
         lower_bound: Optional lower bound for truncated distribution
         upper_bound: Optional upper bound for truncated distribution
+        lazy_metrics: If True, skip expensive KS computation. These metrics
+            will be None in the result and computed on-demand later. (v1.5.0)
 
     Returns:
         Dictionary with keys: column_name, distribution, parameters, sse, aic, bic,
@@ -346,11 +406,16 @@ def fit_single_discrete_distribution(
             if not np.isfinite(sse):
                 return _failed_discrete_fit_result(dist_name, column_name, data_summary)
 
-            # Compute information criteria
+            # Compute information criteria (fast, always computed)
             aic, bic = compute_discrete_information_criteria(dist, tuple(params), data_sample, dist_name)
 
-            # Compute KS statistic
-            ks_stat, pvalue = compute_discrete_ks_statistic(dist, tuple(params), data_sample, dist_name)
+            # Compute expensive metrics only if not lazy
+            if lazy_metrics:
+                # Skip KS computation for performance - will be computed on-demand
+                ks_stat, pvalue = None, None
+            else:
+                # Compute KS statistic
+                ks_stat, pvalue = compute_discrete_ks_statistic(dist, tuple(params), data_sample, dist_name)
 
             # Check for convergence warnings
             for w in caught_warnings:
@@ -364,8 +429,8 @@ def fit_single_discrete_distribution(
                 "sse": float(sse),
                 "aic": float(aic),
                 "bic": float(bic),
-                "ks_statistic": float(ks_stat),
-                "pvalue": float(pvalue),
+                "ks_statistic": float(ks_stat) if ks_stat is not None else None,
+                "pvalue": float(pvalue) if pvalue is not None else None,
                 "ad_statistic": None,  # A-D not computed for discrete distributions
                 "ad_pvalue": None,
                 "data_summary": data_summary,
@@ -420,6 +485,7 @@ def create_discrete_fitting_udf(
     data_summary: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
+    lazy_metrics: bool = False,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF for discrete distribution fitting.
 
@@ -430,6 +496,9 @@ def create_discrete_fitting_udf(
         data_summary: Pre-computed summary statistics of the original data
         lower_bound: Optional lower bound for truncated distribution
         upper_bound: Optional upper bound for truncated distribution
+        lazy_metrics: If True, skip expensive KS computation during fitting.
+            These metrics will be computed on-demand when accessed via
+            FitResults.best() or DistributionFitResult properties. (v1.5.0)
 
     Returns:
         Pandas UDF function for fitting discrete distributions
@@ -464,6 +533,7 @@ def create_discrete_fitting_udf(
                 data_summary=data_summary,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
+                lazy_metrics=lazy_metrics,
             )
             results.append(result)
 

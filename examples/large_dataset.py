@@ -118,6 +118,74 @@ for size in data_sizes:
     df.unpersist()
 
 # ============================================================================
+# Lazy Metrics Demo (v1.5.0+)
+# ============================================================================
+print(f"\n{'=' * 80}")
+print("LAZY METRICS DEMO (v1.5.0+)")
+print("=" * 80)
+
+print("\nLazy metrics skip expensive KS/AD computation during initial fitting.")
+print("Metrics are computed on-demand when you actually need them.\n")
+
+# Create test data
+np.random.seed(42)
+lazy_data = np.random.gamma(shape=2.0, scale=2.0, size=100_000)
+df_lazy = spark.createDataFrame([(float(x),) for x in lazy_data], ["value"])
+df_lazy = df_lazy.cache()
+df_lazy.count()
+
+# Compare eager vs lazy fitting
+fitter = DistributionFitter(spark)
+
+# Eager fitting (default)
+print("1. Eager fitting (lazy_metrics=False):")
+start_time = time.time()
+results_eager = fitter.fit(df_lazy, column="value", bins=50)
+best_eager = results_eager.best(n=1, metric="aic")[0]
+eager_time = time.time() - start_time
+print(f"   Time: {eager_time:.2f}s")
+print(f"   Best: {best_eager.distribution} (AIC={best_eager.aic:.2f})")
+print(f"   KS computed: {best_eager.ks_statistic is not None}")
+
+# Lazy fitting
+print("\n2. Lazy fitting (lazy_metrics=True):")
+start_time = time.time()
+results_lazy = fitter.fit(df_lazy, column="value", bins=50, lazy_metrics=True)
+best_lazy_aic = results_lazy.best(n=1, metric="aic")[0]
+lazy_time = time.time() - start_time
+print(f"   Time: {lazy_time:.2f}s")
+print(f"   Best: {best_lazy_aic.distribution} (AIC={best_lazy_aic.aic:.2f})")
+print(f"   KS computed: {best_lazy_aic.ks_statistic is not None}")
+print(f"   is_lazy: {results_lazy.is_lazy}")
+
+# On-demand KS computation
+print("\n3. On-demand KS computation:")
+start_time = time.time()
+best_lazy_ks = results_lazy.best(n=1, metric="ks_statistic")[0]
+ks_time = time.time() - start_time
+print(f"   Time to compute KS for top candidates: {ks_time:.2f}s")
+print(f"   Best: {best_lazy_ks.distribution} (KS={best_lazy_ks.ks_statistic:.6f})")
+
+# Materialize all metrics
+print("\n4. Materializing all metrics:")
+start_time = time.time()
+materialized = results_lazy.materialize()
+materialize_time = time.time() - start_time
+print(f"   Time: {materialize_time:.2f}s")
+print(f"   is_lazy after materialize: {materialized.is_lazy}")
+
+# Summary
+speedup = ((eager_time - lazy_time) / eager_time) * 100
+print(f"\n{'Performance Summary':^80}")
+print("-" * 80)
+print(f"Eager fitting:          {eager_time:.2f}s")
+print(f"Lazy fitting (AIC):     {lazy_time:.2f}s ({speedup:.1f}% faster)")
+print(f"+ On-demand KS:         +{ks_time:.2f}s")
+print(f"Full materialize:       {materialize_time:.2f}s")
+
+df_lazy.unpersist()
+
+# ============================================================================
 # Multi-Column Fitting Demo
 # ============================================================================
 print(f"\n{'=' * 80}")

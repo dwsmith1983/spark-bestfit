@@ -75,6 +75,7 @@ def create_fitting_udf(
     data_summary: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
+    lazy_metrics: bool = False,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -89,6 +90,9 @@ def create_fitting_udf(
         data_summary: Pre-computed summary statistics of the original data
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
+        lazy_metrics: If True, skip expensive KS/AD computation during fitting.
+            These metrics will be computed on-demand when accessed via
+            FitResults.best() or DistributionFitResult properties. (v1.5.0)
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -132,6 +136,7 @@ def create_fitting_udf(
                 data_summary=data_summary,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
+                lazy_metrics=lazy_metrics,
             )
             results.append(result)
 
@@ -154,6 +159,7 @@ def fit_single_distribution(
     data_summary: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
+    lazy_metrics: bool = False,
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -166,6 +172,8 @@ def fit_single_distribution(
         data_summary: Pre-computed summary statistics of the original data
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
+        lazy_metrics: If True, skip expensive KS/AD computation. These metrics
+            will be None in the result and computed on-demand later. (v1.5.0)
 
     Returns:
         Dictionary with keys: column_name, distribution, parameters, sse, aic, bic,
@@ -203,20 +211,26 @@ def fit_single_distribution(
             if not np.isfinite(sse):
                 return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
 
-            # Compute information criteria using frozen distribution
+            # Compute information criteria using frozen distribution (fast, always computed)
             aic, bic = compute_information_criteria_frozen(frozen_dist, len(params), data_sample)
 
-            # Compute Kolmogorov-Smirnov statistic and p-value using frozen distribution
-            ks_stat, pvalue = compute_ks_statistic_frozen(frozen_dist, data_sample)
+            # Compute expensive metrics only if not lazy
+            if lazy_metrics:
+                # Skip KS/AD computation for performance - will be computed on-demand
+                ks_stat, pvalue = None, None
+                ad_stat, ad_pvalue = None, None
+            else:
+                # Compute Kolmogorov-Smirnov statistic and p-value using frozen distribution
+                ks_stat, pvalue = compute_ks_statistic_frozen(frozen_dist, data_sample)
 
-            # Compute Anderson-Darling statistic using frozen distribution
-            ad_stat = compute_ad_statistic_frozen(frozen_dist, data_sample)
+                # Compute Anderson-Darling statistic using frozen distribution
+                ad_stat = compute_ad_statistic_frozen(frozen_dist, data_sample)
 
-            # Compute Anderson-Darling p-value (only for supported distributions, unbounded)
-            # Note: A-D p-value tables are for standard distributions, not truncated
-            ad_pvalue = (
-                compute_ad_pvalue(dist_name, data_sample) if lower_bound is None and upper_bound is None else None
-            )
+                # Compute Anderson-Darling p-value (only for supported distributions, unbounded)
+                # Note: A-D p-value tables are for standard distributions, not truncated
+                ad_pvalue = (
+                    compute_ad_pvalue(dist_name, data_sample) if lower_bound is None and upper_bound is None else None
+                )
 
             # Log any warnings that were caught (for debugging)
             for w in caught_warnings:
@@ -231,9 +245,9 @@ def fit_single_distribution(
                 "sse": float(sse),
                 "aic": float(aic),
                 "bic": float(bic),
-                "ks_statistic": float(ks_stat),
-                "pvalue": float(pvalue),
-                "ad_statistic": float(ad_stat),
+                "ks_statistic": float(ks_stat) if ks_stat is not None else None,
+                "pvalue": float(pvalue) if pvalue is not None else None,
+                "ad_statistic": float(ad_stat) if ad_stat is not None else None,
                 "ad_pvalue": ad_pvalue,
                 "data_summary": data_summary,
                 "lower_bound": lower_bound,
@@ -822,6 +836,60 @@ def create_sample_data(
     rng = np.random.RandomState(random_seed)
     indices = rng.choice(len(data_full), size=sample_size, replace=False)
     return data_full[indices]
+
+
+def compute_ks_ad_metrics(
+    dist_name: str,
+    params: List[float],
+    data_sample: np.ndarray,
+    lower_bound: Optional[float] = None,
+    upper_bound: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Compute KS and AD metrics for a fitted distribution.
+
+    This is the core computation function used for lazy metric evaluation.
+    It recreates the frozen distribution and computes all KS/AD metrics.
+
+    Args:
+        dist_name: Name of scipy.stats distribution
+        params: Fitted distribution parameters
+        data_sample: Data sample for metric computation
+        lower_bound: Optional lower bound for truncated distributions
+        upper_bound: Optional upper bound for truncated distributions
+
+    Returns:
+        Tuple of (ks_statistic, pvalue, ad_statistic, ad_pvalue)
+        Returns (None, None, None, None) if computation fails
+    """
+    try:
+        # Get distribution object and create frozen distribution
+        dist = getattr(st, dist_name)
+        frozen_dist = dist(*params)
+
+        # Apply truncation if bounds are set
+        if lower_bound is not None or upper_bound is not None:
+            lb = lower_bound if lower_bound is not None else -np.inf
+            ub = upper_bound if upper_bound is not None else np.inf
+            frozen_dist = _create_truncated_dist(frozen_dist, lb, ub)
+
+        # Compute Kolmogorov-Smirnov statistic and p-value
+        ks_stat, pvalue = compute_ks_statistic_frozen(frozen_dist, data_sample)
+
+        # Compute Anderson-Darling statistic
+        ad_stat = compute_ad_statistic_frozen(frozen_dist, data_sample)
+
+        # Compute Anderson-Darling p-value (only for supported distributions, unbounded)
+        ad_pvalue = compute_ad_pvalue(dist_name, data_sample) if lower_bound is None and upper_bound is None else None
+
+        return (
+            float(ks_stat) if ks_stat is not None and np.isfinite(ks_stat) else None,
+            float(pvalue) if pvalue is not None and np.isfinite(pvalue) else None,
+            float(ad_stat) if ad_stat is not None and np.isfinite(ad_stat) else None,
+            ad_pvalue,
+        )
+
+    except (ValueError, RuntimeError, FloatingPointError, AttributeError):
+        return (None, None, None, None)
 
 
 def extract_distribution_params(params: List[float]) -> Tuple[Tuple[float, ...], float, float]:

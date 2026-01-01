@@ -46,6 +46,7 @@ def extract_scaling_data(results: dict) -> dict:
         "data_size": {"sizes": [], "times": [], "stddevs": []},
         "dist_count": {"counts": [], "times": [], "stddevs": []},
         "multi_column": {"labels": [], "times": [], "stddevs": []},
+        "lazy_metrics": {"labels": [], "times": [], "stddevs": []},
     }
 
     for benchmark in results.get("benchmarks", []):
@@ -58,7 +59,7 @@ def extract_scaling_data(results: dict) -> dict:
             data["data_size"]["sizes"].append(25_000)
             data["data_size"]["times"].append(mean_time)
             data["data_size"]["stddevs"].append(stddev)
-        elif "100k_rows" in name:
+        elif "100k_rows" in name and "lazy" not in name:
             data["data_size"]["sizes"].append(100_000)
             data["data_size"]["times"].append(mean_time)
             data["data_size"]["stddevs"].append(stddev)
@@ -98,6 +99,24 @@ def extract_scaling_data(results: dict) -> dict:
             data["multi_column"]["labels"].append("1 Multi-Column Fit")
             data["multi_column"]["times"].append(mean_time)
             data["multi_column"]["stddevs"].append(stddev)
+
+        # Parse lazy metrics benchmarks
+        if "eager_all_metrics" in name:
+            data["lazy_metrics"]["labels"].append("Eager\n(all metrics)")
+            data["lazy_metrics"]["times"].append(mean_time)
+            data["lazy_metrics"]["stddevs"].append(stddev)
+        elif "lazy_aic_only" in name:
+            data["lazy_metrics"]["labels"].append("Lazy\n(AIC only)")
+            data["lazy_metrics"]["times"].append(mean_time)
+            data["lazy_metrics"]["stddevs"].append(stddev)
+        elif "lazy_with_ks_on_demand" in name:
+            data["lazy_metrics"]["labels"].append("Lazy\n(+ KS on-demand)")
+            data["lazy_metrics"]["times"].append(mean_time)
+            data["lazy_metrics"]["stddevs"].append(stddev)
+        elif "lazy_materialize" in name:
+            data["lazy_metrics"]["labels"].append("Lazy\n(+ materialize)")
+            data["lazy_metrics"]["times"].append(mean_time)
+            data["lazy_metrics"]["stddevs"].append(stddev)
 
     return data
 
@@ -333,6 +352,82 @@ def generate_multi_column_chart(data: dict, output_path: Path) -> None:
     print(f"Saved: {output_path}")
 
 
+def generate_lazy_metrics_chart(data: dict, output_path: Path) -> None:
+    """Generate lazy metrics performance comparison chart."""
+    labels = data["lazy_metrics"]["labels"]
+    times = np.array(data["lazy_metrics"]["times"])
+    stddevs = np.array(data["lazy_metrics"]["stddevs"])
+
+    if len(labels) < 2:
+        print("Not enough data points for lazy metrics chart")
+        return
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Bar colors: eager=red, lazy variants=shades of green
+    colors = ["#dc2626", "#22c55e", "#16a34a", "#15803d"]
+
+    # Create bars
+    x = np.arange(len(labels))
+    bars = ax.bar(x, times, yerr=stddevs, capsize=8, color=colors[: len(labels)], edgecolor="black", linewidth=1.5)
+
+    # Add value labels on bars
+    for bar, time in zip(bars, times):
+        height = bar.get_height()
+        ax.annotate(
+            f"{time:.2f}s",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 5),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=11,
+            fontweight="bold",
+        )
+
+    # Calculate and display speedups relative to eager
+    if len(times) >= 2:
+        eager_time = times[0]
+        for i, (label, time) in enumerate(zip(labels[1:], times[1:]), 1):
+            speedup_pct = (1 - time / eager_time) * 100
+            if speedup_pct > 0:
+                ax.annotate(
+                    f"-{speedup_pct:.0f}%",
+                    xy=(i, time / 2),
+                    fontsize=10,
+                    ha="center",
+                    va="center",
+                    color="white",
+                    fontweight="bold",
+                )
+
+    # Formatting
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=11)
+    ax.set_ylabel("Fit Time (seconds)", fontsize=12)
+    ax.set_title("Lazy Metrics Performance (v1.5.0+)\n(100K rows, 50 distributions)", fontsize=14, fontweight="bold")
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Add legend/explanation
+    ax.text(
+        0.98,
+        0.95,
+        "Green = lazy_metrics=True\nRed = lazy_metrics=False",
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+    )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_path}")
+
+
 def generate_summary_table(data: dict, results: dict, output_path: Path) -> None:
     """Generate a markdown summary table of benchmark results."""
     # Extract machine info
@@ -420,6 +515,38 @@ def generate_summary_table(data: dict, results: dict, output_path: Path) -> None
                 ]
             )
 
+    # Lazy metrics section
+    if data["lazy_metrics"]["labels"]:
+        lines.extend(
+            [
+                "",
+                "## Lazy Metrics Performance (v1.5.0+)",
+                "",
+                "| Mode | Fit Time (mean) | Std Dev | Speedup |",
+                "|------|-----------------|---------|---------|",
+            ]
+        )
+
+        lm_labels = data["lazy_metrics"]["labels"]
+        lm_times = data["lazy_metrics"]["times"]
+        lm_stddevs = data["lazy_metrics"]["stddevs"]
+
+        eager_time = lm_times[0] if lm_times else 1.0
+        for label, time, std in zip(lm_labels, lm_times, lm_stddevs):
+            label_clean = label.replace("\n", " ")
+            speedup_pct = (1 - time / eager_time) * 100 if eager_time > 0 else 0
+            speedup_str = f"-{speedup_pct:.0f}%" if speedup_pct > 0 else "baseline"
+            lines.append(f"| {label_clean} | {time:.3f}s | ±{std:.3f}s | {speedup_str} |")
+
+        if len(lm_times) >= 2:
+            aic_speedup = (1 - lm_times[1] / lm_times[0]) * 100
+            lines.extend(
+                [
+                    "",
+                    f"**AIC-only workflow:** ~{aic_speedup:.0f}% faster than eager fitting",
+                ]
+            )
+
     lines.append("")
 
     with open(output_path, "w") as f:
@@ -458,6 +585,8 @@ def main():
     generate_data_size_chart(data, args.output_dir / "scaling_data_size.png")
     generate_distribution_count_chart(data, args.output_dir / "scaling_dist_count.png")
     generate_multi_column_chart(data, args.output_dir / "multi_column_efficiency.png")
+    # Note: lazy_metrics chart removed - wall-clock comparison doesn't capture the
+    # real benefit (skipping 95% of computations). See docs/performance.rst for details.
     generate_summary_table(data, results, args.output_dir / "benchmark_summary.md")
 
     print("\nCharts generated successfully!")

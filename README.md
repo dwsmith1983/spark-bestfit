@@ -27,6 +27,7 @@ Efficiently fit ~100 scipy.stats distributions to your data using Spark's parall
 - **Distributed Sampling**: Generate millions of samples using Spark's parallelism
 - **Gaussian Copula**: Correlated multi-column sampling at scale via Spark ML
 - **Fit Quality Warnings**: Automatic warnings for poor fits with detailed diagnostics
+- **Lazy Metric Evaluation**: Skip expensive KS/AD computation; compute on-demand when needed
 - **Model Serialization**: Save and load fitted distributions to JSON or pickle
 - **Results API**: Filter, sort, and export results easily
 - **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
@@ -218,6 +219,31 @@ best = results.best(n=1, warn_if_poor=True)[0]
 > **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
 > logistic, gumbel_r, gumbel_l) where scipy has critical value tables. For other distributions,
 > `ad_pvalue` will be `None` but `ad_statistic` is still valid for ranking fits.
+
+### Lazy Metrics (v1.5.0+)
+
+For faster fitting when you only need AIC/BIC for model selection, use lazy metrics:
+
+```python
+# Fast fitting: skip expensive KS/AD computation
+results = fitter.fit(df, column="value", lazy_metrics=True)
+
+# Get best by AIC - fast, no KS/AD computed
+best_aic = results.best(n=1, metric="aic")[0]
+print(best_aic.ks_statistic)  # None (not computed yet)
+
+# Get best by KS - triggers ON-DEMAND computation!
+best_ks = results.best(n=1, metric="ks_statistic")[0]
+print(best_ks.ks_statistic)  # Computed value! (only for top candidates)
+
+# Materialize all metrics before unpersisting source DataFrame
+materialized = results.materialize()
+df.unpersist()  # Safe - all metrics now computed
+```
+
+**Performance**: ~60% speedup for AIC/BIC workflows, ~50% speedup even when requesting best by KS.
+
+> See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for details.
 
 ### Progress Tracking
 
@@ -468,9 +494,9 @@ spark-bestfit enables downstream use cases (simulations, ML, analytics) by provi
 
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **2.0.0** | Custom Distributions | User-defined distribution classes, scipy new API support |
+| **2.0.0** | Custom Distributions | User-defined distribution classes, scipy new API support, core refactoring |
 | **2.1.0** | Multivariate | Optional multivariate distribution fitting (MVN, MVt) |
-| **3.0.0** | Advanced | Mixture models, streaming support |
+| **3.0.0** | Advanced | Mixture models, streaming support, right-censored data |
 
 ### Future: Scipy New Distribution API
 
