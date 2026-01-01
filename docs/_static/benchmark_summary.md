@@ -18,25 +18,38 @@
 
 | Data Size | Fit Time (mean) | Std Dev |
 |-----------|-----------------|---------|
-| 25,000 | 14.696s | ±0.054s |
-| 100,000 | 19.638s | ±0.163s |
-| 500,000 | 18.816s | ±0.037s |
-| 1,000,000 | 23.377s | ±0.072s |
+| 25,000 | 14.645s | ±0.071s |
+| 100,000 | 19.483s | ±0.081s |
+| 500,000 | 18.747s | ±0.029s |
+| 1,000,000 | 23.306s | ±0.058s |
 
 ## Distribution Count Scaling
 
 | # Distributions | Fit Time (mean) | Std Dev |
 |-----------------|-----------------|---------|
-| 5 | 0.510s | ±0.013s |
-| 20 | 2.074s | ±0.029s |
-| 50 | 2.815s | ±0.053s |
-| 100 | 24.414s | ±0.044s |
+| 5 | 0.512s | ±0.013s |
+| 20 | 2.082s | ±0.025s |
+| 50 | 2.825s | ±0.060s |
+| 100 | 24.403s | ±0.037s |
 
 ## Multi-Column Efficiency
 
 | Approach | Fit Time (mean) | Std Dev |
 |----------|-----------------|---------|
-| 3 Separate Fits | 6.451s | ±0.042s |
-| 1 Multi-Column Fit | 4.867s | ±0.051s |
+| 3 Separate Fits | 6.485s | ±0.051s |
+| 1 Multi-Column Fit | 4.954s | ±0.048s |
 
-**Speedup:** 1.3× faster (25% time saved)
+**Speedup:** 1.3× faster (24% time saved)
+
+## Lazy Metrics (v1.5.0+)
+
+Lazy metrics skips KS/AD computation during fitting, computing them on-demand only
+for distributions you actually access.
+
+| Workflow | KS/AD Computations |
+|----------|-------------------|
+| `best(metric="aic")` | **0** (vs 93 eager) |
+| `best(metric="ks_statistic")` | **~5** (vs 93 eager) |
+| `materialize()` | 93 (same as eager) |
+
+**Key benefit:** Skip 95% of KS/AD computations in typical model selection workflows.

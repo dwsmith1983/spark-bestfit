@@ -180,3 +180,79 @@ class TestMultiColumnEfficiency:
         result = benchmark(fit_together_100k)
         assert result.count() > 0
         assert len(result.column_names) == 3
+
+
+class TestLazyMetricsPerformance:
+    """Benchmark lazy metrics feature (v1.5.0+).
+
+    Compares eager vs lazy fitting to measure the speedup from
+    skipping KS/AD computation.
+
+    Note: Uses ALL distributions (no max_distributions) to capture the
+    true benefit - the biggest savings come from slow distributions like
+    levy_stable and studentized_range where KS/AD computation is expensive.
+    """
+
+    def test_fit_eager_all_metrics(self, benchmark, spark_session, df_100k):
+        """Baseline: eager fitting with all metrics computed."""
+        fitter = DistributionFitter(spark_session)
+
+        def fit_eager():
+            results = fitter.fit(
+                df_100k, "value", num_partitions=8, lazy_metrics=False
+            )
+            _ = results.best(n=1, metric="aic")
+            return results
+
+        result = benchmark(fit_eager)
+        best = result.best(n=1)[0]
+        assert best.ks_statistic is not None
+        assert best.ad_statistic is not None
+
+    def test_fit_lazy_aic_only(self, benchmark, spark_session, df_100k):
+        """Lazy fitting with only AIC accessed (no KS/AD computation)."""
+        fitter = DistributionFitter(spark_session)
+
+        def fit_lazy_aic():
+            results = fitter.fit(
+                df_100k, "value", num_partitions=8, lazy_metrics=True
+            )
+            _ = results.best(n=1, metric="aic")
+            return results
+
+        result = benchmark(fit_lazy_aic)
+        best = result.best(n=1, metric="aic")[0]
+        assert best.ks_statistic is None  # Not computed
+        assert best.aic is not None
+
+    def test_fit_lazy_with_ks_on_demand(self, benchmark, spark_session, df_100k):
+        """Lazy fitting with on-demand KS computation for top candidates."""
+        fitter = DistributionFitter(spark_session)
+
+        def fit_lazy_with_ks():
+            results = fitter.fit(
+                df_100k, "value", num_partitions=8, lazy_metrics=True
+            )
+            _ = results.best(n=1, metric="ks_statistic")  # Triggers on-demand
+            return results
+
+        result = benchmark(fit_lazy_with_ks)
+        best = result.best(n=1, metric="ks_statistic")[0]
+        assert best.ks_statistic is not None  # Computed on-demand
+
+    def test_fit_lazy_materialize(self, benchmark, spark_session, df_100k):
+        """Lazy fitting with full materialization."""
+        fitter = DistributionFitter(spark_session)
+
+        def fit_lazy_materialize():
+            results = fitter.fit(
+                df_100k, "value", num_partitions=8, lazy_metrics=True
+            )
+            materialized = results.materialize()
+            _ = materialized.best(n=1, metric="ks_statistic")
+            return materialized
+
+        result = benchmark(fit_lazy_materialize)
+        assert not result.is_lazy
+        best = result.best(n=1)[0]
+        assert best.ks_statistic is not None

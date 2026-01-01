@@ -17,7 +17,7 @@ from spark_bestfit.discrete_fitting import (
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_summary, create_fitting_udf
 from spark_bestfit.histogram import HistogramComputer
-from spark_bestfit.results import DistributionFitResult, FitResults
+from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
 from spark_bestfit.utils import get_spark_session
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,7 @@ class DistributionFitter:
         bounded: bool = False,
         lower_bound: Optional[Union[float, Dict[str, float]]] = None,
         upper_bound: Optional[Union[float, Dict[str, float]]] = None,
+        lazy_metrics: bool = False,
     ) -> FitResults:
         """Fit distributions to data column(s).
 
@@ -128,6 +129,10 @@ class DistributionFitter:
                 Can be a float (applied to all columns) or a dict mapping
                 column names to bounds (v1.5.0). If None and bounded=True,
                 auto-detects from each column's maximum.
+            lazy_metrics: If True, defer computation of expensive KS/AD metrics
+                until accessed (v1.5.0). Improves fitting performance when only
+                using AIC/BIC/SSE for model selection. Default False for
+                backward compatibility.
 
         Returns:
             FitResults object with fitted distributions
@@ -157,6 +162,10 @@ class DistributionFitter:
             ...     lower_bound={'col1': 0, 'col2': -10},
             ...     upper_bound={'col1': 100, 'col2': 50}
             ... )
+            >>>
+            >>> # Lazy metrics for faster fitting when only using AIC/BIC (v1.5.0)
+            >>> results = fitter.fit(df, 'value', lazy_metrics=True)
+            >>> best_aic = results.best(n=1, metric='aic')[0]  # Fast, no KS/AD computed
         """
         # Validate column/columns parameters
         if column is None and columns is None:
@@ -209,6 +218,8 @@ class DistributionFitter:
         try:
             # Fit each column and collect results
             all_results_dfs = []
+            lazy_contexts: Dict[str, LazyMetricsContext] = {}
+
             for col in target_columns:
                 # Get per-column bounds (empty dict if not bounded)
                 col_lower, col_upper = column_bounds.get(col, (None, None))
@@ -223,8 +234,21 @@ class DistributionFitter:
                     num_partitions=num_partitions,
                     lower_bound=col_lower,
                     upper_bound=col_upper,
+                    lazy_metrics=lazy_metrics,
                 )
                 all_results_dfs.append(results_df)
+
+                # Build lazy context for on-demand metric computation
+                if lazy_metrics:
+                    lazy_contexts[col] = LazyMetricsContext(
+                        source_df=df_sample,
+                        column=col,
+                        random_seed=self.random_seed,
+                        row_count=row_count,
+                        lower_bound=col_lower,
+                        upper_bound=col_upper,
+                        is_discrete=False,
+                    )
 
             # Union all results using reduce for cleaner query plan
             combined_df = reduce(DataFrame.union, all_results_dfs)
@@ -235,7 +259,8 @@ class DistributionFitter:
                 f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
             )
 
-            return FitResults(combined_df)
+            # Pass lazy contexts to FitResults for on-demand metric computation
+            return FitResults(combined_df, lazy_contexts=lazy_contexts if lazy_metrics else None)
         finally:
             if tracker is not None:
                 tracker.stop()
@@ -251,6 +276,7 @@ class DistributionFitter:
         num_partitions: Optional[int],
         lower_bound: Optional[float] = None,
         upper_bound: Optional[float] = None,
+        lazy_metrics: bool = False,
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -264,6 +290,7 @@ class DistributionFitter:
             num_partitions: Number of Spark partitions
             lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
             upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
+            lazy_metrics: If True, skip KS/AD computation for performance (v1.5.0)
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -300,6 +327,7 @@ class DistributionFitter:
                 data_summary=data_summary,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
+                lazy_metrics=lazy_metrics,
             )
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
@@ -949,6 +977,7 @@ class DiscreteDistributionFitter:
         bounded: bool = False,
         lower_bound: Optional[Union[float, Dict[str, float]]] = None,
         upper_bound: Optional[Union[float, Dict[str, float]]] = None,
+        lazy_metrics: bool = False,
     ) -> FitResults:
         """Fit discrete distributions to integer data column(s).
 
@@ -975,6 +1004,10 @@ class DiscreteDistributionFitter:
                 Can be a float (applied to all columns) or a dict mapping
                 column names to bounds (v1.5.0). If None and bounded=True,
                 auto-detects from each column's maximum.
+            lazy_metrics: If True, defer computation of expensive KS metrics
+                until accessed (v1.5.0). Improves fitting performance when only
+                using AIC/BIC/SSE for model selection. Default False for
+                backward compatibility.
 
         Returns:
             FitResults object with fitted distributions
@@ -1002,6 +1035,10 @@ class DiscreteDistributionFitter:
             ...     lower_bound={'counts1': 0, 'counts2': 5},
             ...     upper_bound={'counts1': 100, 'counts2': 200}
             ... )
+            >>>
+            >>> # Lazy metrics for faster fitting when only using AIC/BIC (v1.5.0)
+            >>> results = fitter.fit(df, 'counts', lazy_metrics=True)
+            >>> best_aic = results.best(n=1, metric='aic')[0]  # Fast, no KS computed
         """
         # Validate column/columns parameters
         if column is None and columns is None:
@@ -1053,6 +1090,8 @@ class DiscreteDistributionFitter:
         try:
             # Fit each column and collect results
             all_results_dfs = []
+            lazy_contexts: Dict[str, LazyMetricsContext] = {}
+
             for col in target_columns:
                 # Get per-column bounds (empty dict if not bounded)
                 col_lower, col_upper = column_bounds.get(col, (None, None))
@@ -1065,8 +1104,21 @@ class DiscreteDistributionFitter:
                     num_partitions=num_partitions,
                     lower_bound=col_lower,
                     upper_bound=col_upper,
+                    lazy_metrics=lazy_metrics,
                 )
                 all_results_dfs.append(results_df)
+
+                # Build lazy context for on-demand metric computation
+                if lazy_metrics:
+                    lazy_contexts[col] = LazyMetricsContext(
+                        source_df=df_sample,
+                        column=col,
+                        random_seed=self.random_seed,
+                        row_count=row_count,
+                        lower_bound=col_lower,
+                        upper_bound=col_upper,
+                        is_discrete=True,  # Discrete distributions
+                    )
 
             # Union all results using reduce for cleaner query plan
             combined_df = reduce(DataFrame.union, all_results_dfs)
@@ -1077,7 +1129,8 @@ class DiscreteDistributionFitter:
                 f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
             )
 
-            return FitResults(combined_df)
+            # Pass lazy contexts to FitResults for on-demand metric computation
+            return FitResults(combined_df, lazy_contexts=lazy_contexts if lazy_metrics else None)
         finally:
             if tracker is not None:
                 tracker.stop()
@@ -1091,6 +1144,7 @@ class DiscreteDistributionFitter:
         num_partitions: Optional[int],
         lower_bound: Optional[float] = None,
         upper_bound: Optional[float] = None,
+        lazy_metrics: bool = False,
     ) -> DataFrame:
         """Fit discrete distributions to a single column (internal method).
 
@@ -1102,6 +1156,7 @@ class DiscreteDistributionFitter:
             num_partitions: Number of Spark partitions
             lower_bound: Optional lower bound for truncated distribution
             upper_bound: Optional upper bound for truncated distribution
+            lazy_metrics: If True, skip KS computation for performance (v1.5.0)
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -1141,6 +1196,7 @@ class DiscreteDistributionFitter:
                 data_summary=data_summary,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
+                lazy_metrics=lazy_metrics,
             )
             results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
 
