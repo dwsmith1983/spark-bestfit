@@ -505,3 +505,44 @@ class TestLazyMetricsEdgeCases:
         # n=-1 should raise ValueError
         with pytest.raises(ValueError, match="n must be a positive integer"):
             results.best(n=-1)
+
+
+class TestFitResultsUnpersist:
+    """Tests for FitResults.unpersist() method."""
+
+    def test_unpersist_returns_self(self, spark, sample_df):
+        """Test that unpersist() returns self for method chaining."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2)
+
+        # unpersist() should return self
+        returned = results.unpersist()
+        assert returned is results
+
+    def test_unpersist_blocking(self, spark, sample_df):
+        """Test that unpersist(blocking=True) works without error."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2)
+
+        # Should not raise any exceptions
+        results.unpersist(blocking=True)
+
+    def test_unpersist_after_materialize(self, spark, sample_df):
+        """Test unpersist after materialize for lazy metrics workflow."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
+
+        # Typical workflow: materialize metrics, then unpersist
+        results.materialize()
+        returned = results.unpersist()
+
+        # Should return self for chaining
+        assert returned is results
+
+    def test_unpersist_method_chaining(self, spark, sample_df):
+        """Test method chaining with unpersist()."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
+
+        # Chain materialize() and unpersist()
+        results.materialize().unpersist()

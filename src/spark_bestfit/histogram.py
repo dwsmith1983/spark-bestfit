@@ -17,10 +17,11 @@ class HistogramComputer:
 
     Example:
         >>> computer = HistogramComputer()
-        >>> y_hist, x_hist = computer.compute_histogram(
+        >>> y_hist, bin_edges = computer.compute_histogram(
         ...     df, column='value', bins=50
         ... )
-        >>> # y_hist and x_hist are numpy arrays (~100 values total)
+        >>> # y_hist has 50 values, bin_edges has 51 values
+        >>> x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0  # Compute centers if needed
     """
 
     def compute_histogram(
@@ -45,9 +46,9 @@ class HistogramComputer:
             approx_count: Approximate row count (avoids full count if provided)
 
         Returns:
-            Tuple of (y_hist, x_centers) where:
+            Tuple of (y_hist, bin_edges) where:
                 - y_hist: Normalized frequency density for each bin
-                - x_centers: Center point of each bin
+                - bin_edges: Array of bin edge values (len = n_bins + 1)
 
         Example:
             >>> computer = HistogramComputer()
@@ -103,9 +104,6 @@ class HistogramComputer:
             if 0 <= bin_id < len(bin_counts):
                 bin_counts[bin_id] = row["count"]
 
-        # Compute bin centers
-        x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
-
         # Normalize to density (area under curve = 1)
         bin_widths = np.diff(bin_edges)
         total_count = bin_counts.sum()
@@ -116,7 +114,9 @@ class HistogramComputer:
             # Edge case: no data
             y_density = bin_counts
 
-        return y_density, x_centers
+        # Return bin edges for CDF-based fitting (more accurate than center-point evaluation)
+        # Callers can compute centers as: (edges[:-1] + edges[1:]) / 2.0
+        return y_density, bin_edges
 
     @staticmethod
     def _compute_histogram_distributed(df: DataFrame, column: str, bin_edges: np.ndarray) -> DataFrame:

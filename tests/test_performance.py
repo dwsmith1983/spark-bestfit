@@ -28,11 +28,11 @@ class TestFittingPerformance:
         np.random.seed(42)
         data = np.random.normal(loc=50, scale=10, size=10_000)
         hist, bin_edges = np.histogram(data, bins=50, density=True)
-        x_hist = (bin_edges[:-1] + bin_edges[1:]) / 2
+
 
         # Time the fit
         start = time.perf_counter()
-        result = fit_single_distribution("norm", data, x_hist, hist)
+        result = fit_single_distribution("norm", data, bin_edges, hist)
         elapsed = time.perf_counter() - start
 
         # Should complete in under 1 second for a simple distribution
@@ -46,14 +46,14 @@ class TestFittingPerformance:
         np.random.seed(42)
         data = np.random.exponential(scale=5, size=10_000)
         hist, bin_edges = np.histogram(data, bins=50, density=True)
-        x_hist = (bin_edges[:-1] + bin_edges[1:]) / 2
+
 
         distributions = ["norm", "expon", "gamma", "lognorm", "weibull_min"]
 
         start = time.perf_counter()
         results = []
         for dist_name in distributions:
-            result = fit_single_distribution(dist_name, data, x_hist, hist)
+            result = fit_single_distribution(dist_name, data, bin_edges, hist)
             results.append(result)
         elapsed = time.perf_counter() - start
 
@@ -93,12 +93,12 @@ class TestHistogramPerformance:
         computer = HistogramComputer()
 
         start = time.perf_counter()
-        y_hist, x_hist = computer.compute_histogram(df, "value", bins=100)
+        y_hist, bin_edges = computer.compute_histogram(df, "value", bins=100)
         elapsed = time.perf_counter() - start
 
         # Histogram of 100k rows should complete in under 10 seconds
         assert elapsed < 10.0, f"compute_histogram took {elapsed:.2f}s, expected < 10s"
-        assert len(x_hist) == 100
+        assert len(bin_edges) == 101  # n_bins + 1
         assert len(y_hist) == 100
 
 
