@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-01-01)
+
+### Features
+
+- Add lazy metrics for on-demand KS/AD computation
+  ([#72](https://github.com/dwsmith1983/spark-bestfit/pull/72),
+  [`fecc18d`](https://github.com/dwsmith1983/spark-bestfit/commit/fecc18dd5775f98c09f17de5b011ce176371f07f))
+
+- Add per-column bounds for multi-column fitting
+  ([#72](https://github.com/dwsmith1983/spark-bestfit/pull/72),
+  [`fecc18d`](https://github.com/dwsmith1983/spark-bestfit/commit/fecc18dd5775f98c09f17de5b011ce176371f07f))
+
+- V1.5.0 - lazy metrics and per-column bounds
+  ([#72](https://github.com/dwsmith1983/spark-bestfit/pull/72),
+  [`fecc18d`](https://github.com/dwsmith1983/spark-bestfit/commit/fecc18dd5775f98c09f17de5b011ce176371f07f))
+
+
 ## v1.4.0 (2025-12-31)
 
 ### Features
