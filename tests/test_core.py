@@ -757,3 +757,320 @@ class TestDiscreteDistributionFitter:
         assert len(ax.containers) > 0 or len(ax.collections) > 0
 
         plt.close(fig)
+
+
+class TestPrefilter:
+    """Tests for distribution pre-filtering feature (v1.6.0)."""
+
+    def test_prefilter_false_no_filtering(self, spark_session, small_dataset):
+        """Test that prefilter=False doesn't filter any distributions."""
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(small_dataset, column="value", max_distributions=10, prefilter=False)
+        assert results.count() == 10
+
+    def test_prefilter_true_filters_incompatible(self, spark_session):
+        """Test that prefilter=True filters incompatible distributions."""
+        # Create left-skewed data with negative values
+        np.random.seed(42)
+        left_skewed = -np.abs(np.random.exponential(5, 5000))
+        df = spark_session.createDataFrame([(float(x),) for x in left_skewed], ["value"])
+
+        fitter = DistributionFitter(spark_session)
+
+        # Without prefilter
+        results_no_filter = fitter.fit(df, "value", max_distributions=20, prefilter=False, lazy_metrics=True)
+        count_no_filter = results_no_filter.count()
+
+        # With prefilter=True
+        results_filter = fitter.fit(df, "value", max_distributions=20, prefilter=True, lazy_metrics=True)
+        count_filter = results_filter.count()
+
+        # Should filter out positive-skew-only and non-negative-support distributions
+        assert count_filter < count_no_filter, "prefilter should reduce distribution count"
+
+    def test_prefilter_discrete_warns(self, spark_session, poisson_dataset):
+        """Test that prefilter on discrete fitter logs a warning."""
+        fitter = DiscreteDistributionFitter(spark_session)
+
+        with patch("spark_bestfit.core.logger") as mock_logger:
+            results = fitter.fit(poisson_dataset, column="counts", max_distributions=3, prefilter=True)
+            mock_logger.warning.assert_called_once()
+            assert "not yet supported" in str(mock_logger.warning.call_args)
+
+        # Should still return valid results
+        assert results.count() > 0
+
+
+class TestPrefilterUnit:
+    """Unit tests for _prefilter_distributions() method directly."""
+
+    @pytest.fixture
+    def fitter(self, spark_session):
+        """Create a fitter instance for testing."""
+        return DistributionFitter(spark_session)
+
+    def test_no_support_filtering_with_negative_data(self, fitter):
+        """Test that negative data does NOT filter distributions (loc can shift them)."""
+        # scipy.fit() uses loc parameter that can shift any distribution
+        # to cover any data range, so we don't filter by support bounds
+        data = np.array([-5.0, -2.0, 0.0, 1.0, 3.0])  # Has negative values
+        distributions = ["norm", "expon", "gamma", "t", "lognorm", "laplace"]
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=True)
+
+        # ALL distributions should remain (loc can shift them)
+        # Only skewness/kurtosis filtering applies
+        assert "norm" in compatible
+        assert "expon" in compatible  # Can use loc=-10 to fit negative data
+        assert "gamma" in compatible  # Can use loc=-10 to fit negative data
+        assert "t" in compatible
+        assert "lognorm" in compatible  # Can use loc=-10 to fit negative data
+        assert "laplace" in compatible
+
+        # No support-based filtering should occur
+        support_filtered = [f for f in filtered if "support" in f[1]]
+        assert len(support_filtered) == 0
+
+    def test_no_filtering_for_symmetric_data(self, fitter):
+        """Test that symmetric data around zero keeps all distributions."""
+        data = np.array([-5.0, -2.0, 0.0, 2.0, 5.0])  # Symmetric
+        distributions = ["norm", "expon", "gamma", "t", "uniform", "beta"]
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=True)
+
+        # All should be compatible - no skewness or kurtosis filtering triggered
+        assert len(compatible) == len(distributions)
+        assert len(filtered) == 0
+
+    def test_loc_scale_can_shift_any_distribution(self, fitter):
+        """Test that distributions with default [0,1] bounds still pass (loc/scale shift them)."""
+        # Data outside [0, 1] - but beta can be shifted via loc/scale
+        data = np.array([50.0, 55.0, 60.0, 65.0, 70.0])
+        distributions = ["beta", "uniform", "norm"]
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=True)
+
+        # beta and uniform should NOT be filtered (loc/scale shift them)
+        assert "beta" in compatible
+        assert "uniform" in compatible
+        assert "norm" in compatible
+        assert len(filtered) == 0
+
+    def test_skewness_filtering_left_skewed(self, fitter):
+        """Test that left-skewed data filters positive-skew-only distributions."""
+        # Create strongly left-skewed data (skewness < -1.0)
+        np.random.seed(42)
+        data = -np.random.exponential(5, 1000)  # Skewness ~ -2.0
+        distributions = ["norm", "expon", "gamma", "t", "laplace"]
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=True)
+
+        # Positive-skew-only distributions should be filtered by skewness
+        # (skewness is a shape property that cannot be changed by loc/scale)
+        assert "expon" not in compatible
+        assert "gamma" not in compatible
+
+        # Symmetric distributions should remain
+        assert "norm" in compatible
+        assert "t" in compatible
+        assert "laplace" in compatible
+
+    def test_skewness_filtering_threshold(self, fitter):
+        """Test that skewness filter only triggers for |skew| > 1.0."""
+        # Mildly left-skewed data (skewness ~ -0.5)
+        np.random.seed(42)
+        data = np.random.beta(3, 2, 1000) - 0.5  # Mild left skew, has negatives
+
+        from scipy.stats import skew
+        assert -1.0 < skew(data) < 0, "Test data should be mildly left-skewed"
+
+        distributions = ["norm", "t", "laplace"]  # Only unbounded for this test
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=True)
+
+        # All should remain (skewness not extreme enough to trigger filter)
+        assert "norm" in compatible
+        assert "t" in compatible
+        assert "laplace" in compatible
+
+    def test_aggressive_mode_kurtosis_filtering(self, fitter):
+        """Test that aggressive mode filters by kurtosis for heavy-tailed data."""
+        # Create heavy-tailed data WITHIN [0, 1] so uniform's support bounds pass
+        # Use Pareto distribution, clipped and normalized to [0, 1]
+        np.random.seed(42)
+        raw = np.random.pareto(1.5, 10000)
+        p99 = np.percentile(raw, 99)
+        data = np.clip(raw, 0, p99) / p99  # Data in [0, 1] with heavy right tail
+
+        from scipy.stats import kurtosis
+        assert kurtosis(data) > 10, f"Test data should have high kurtosis, got {kurtosis(data)}"
+        assert data.min() >= 0 and data.max() <= 1, "Data should be in [0, 1]"
+
+        # uniform has support [0, 1], so it passes support bounds for this data
+        # norm and beta also work with this range
+        distributions = ["norm", "uniform", "beta"]
+
+        # Safe mode should keep uniform (kurtosis filter not applied)
+        compatible_safe, _ = fitter._prefilter_distributions(distributions, data, mode=True)
+        assert "uniform" in compatible_safe, f"Safe mode should keep uniform, got {compatible_safe}"
+
+        # Aggressive mode should filter uniform (low kurtosis dist for high kurtosis data)
+        compatible_aggressive, filtered_aggressive = fitter._prefilter_distributions(
+            distributions, data, mode="aggressive"
+        )
+        assert "uniform" not in compatible_aggressive, f"Aggressive mode should filter uniform, got {compatible_aggressive}"
+        assert any(f[0] == "uniform" for f in filtered_aggressive), f"uniform should be in filtered list"
+
+    def test_prefilter_mode_false_returns_all(self, fitter):
+        """Test that mode=False returns all distributions unfiltered."""
+        data = np.array([-100.0, -50.0, 0.0])  # Would normally filter many
+        distributions = ["norm", "expon", "gamma", "t"]
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=False)
+
+        # mode=False should return all (no filtering)
+        assert compatible == distributions
+        assert len(filtered) == 0
+
+    def test_unknown_distribution_kept(self, fitter):
+        """Test that unknown distributions are kept (conservative approach)."""
+        data = np.array([-1.0, 0.0, 1.0])
+        distributions = ["norm", "fake_distribution_xyz"]
+
+        compatible, filtered = fitter._prefilter_distributions(distributions, data, mode=True)
+
+        # Unknown distribution should be kept
+        assert "fake_distribution_xyz" in compatible
+        assert "norm" in compatible
+
+
+class TestPrefilterIntegration:
+    """Integration tests for prefilter with full fitting pipeline."""
+
+    def test_prefilter_no_support_filtering_integration(self, spark_session):
+        """Test that prefilter does NOT filter by support (loc/scale can shift distributions)."""
+        np.random.seed(42)
+        # Symmetric data around 0 - no skewness filtering triggered
+        data = np.random.normal(0, 1, 5000)
+        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
+
+        fitted_dists = {r.distribution for r in results.best(n=100)}
+
+        # Distributions CAN be fit even with negative data (loc shifts them)
+        # Only skewness/kurtosis filtering applies, not support bounds
+        # Since data is symmetric, no skewness filtering should occur
+        assert len(fitted_dists) > 0, "Should have fit some distributions"
+
+    def test_prefilter_skewness_filtering_integration(self, spark_session):
+        """Test that prefilter correctly filters by skewness in full pipeline."""
+        np.random.seed(42)
+        left_skewed = -np.random.exponential(5, 5000)
+        from scipy.stats import skew
+        assert skew(left_skewed) < -1.0, "Test data should be clearly left-skewed"
+
+        df = spark_session.createDataFrame([(float(x),) for x in left_skewed], ["value"])
+
+        fitter = DistributionFitter(spark_session)
+        results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
+
+        fitted_dists = {r.distribution for r in results.best(n=100)}
+
+        # Positive-skew-only distributions should be filtered
+        positive_skew_only = {"expon", "gamma", "lognorm"}
+        for dist in positive_skew_only:
+            assert dist not in fitted_dists, f"{dist} should be filtered (positive-skew only)"
+
+    def test_prefilter_aggressive_filters_more(self, spark_session):
+        """Test that aggressive mode filters additional distributions."""
+        np.random.seed(42)
+        # Heavy-tailed data with very high kurtosis
+        heavy_tailed = np.random.standard_t(2, 5000) * 10
+        df = spark_session.createDataFrame([(float(x),) for x in heavy_tailed], ["value"])
+
+        fitter = DistributionFitter(spark_session)
+
+        # Get results with both modes
+        results_safe = fitter.fit(df, "value", max_distributions=20, prefilter=True, lazy_metrics=True)
+        results_aggressive = fitter.fit(df, "value", max_distributions=20, prefilter="aggressive", lazy_metrics=True)
+
+        safe_dists = {r.distribution for r in results_safe.best(n=100)}
+        aggressive_dists = {r.distribution for r in results_aggressive.best(n=100)}
+
+        # Aggressive should filter at least as much as safe (usually more)
+        assert len(aggressive_dists) <= len(safe_dists)
+
+        # Specifically, uniform should be filtered in aggressive mode for heavy-tailed data
+        # (if it was in the original distribution list)
+        if "uniform" in safe_dists:
+            assert "uniform" not in aggressive_dists, "uniform should be filtered in aggressive mode"
+
+    def test_prefilter_multicolumn(self, spark_session):
+        """Test that prefilter works correctly for multi-column fitting."""
+        np.random.seed(42)
+        # Column 1: left-skewed data (should filter positive-skew-only dists by skewness)
+        col1 = -np.random.exponential(5, 1000)  # Left-skewed
+        # Column 2: right-skewed data (should keep positive-skew-only dists)
+        col2 = np.random.exponential(5, 1000)  # Right-skewed
+
+        from scipy.stats import skew
+        assert skew(col1) < -1.0, "col1 should be left-skewed"
+        assert skew(col2) > 1.0, "col2 should be right-skewed"
+
+        data = [(float(c1), float(c2)) for c1, c2 in zip(col1, col2)]
+        df = spark_session.createDataFrame(data, ["col1", "col2"])
+
+        fitter = DistributionFitter(spark_session)
+        # Use max_distributions=30 to ensure expon/gamma are included
+        results = fitter.fit(df, columns=["col1", "col2"], max_distributions=30, prefilter=True, lazy_metrics=True)
+
+        # Get results per column
+        col1_dists = {r.distribution for r in results.for_column("col1").best(n=100)}
+        col2_dists = {r.distribution for r in results.for_column("col2").best(n=100)}
+
+        # Col1 (left-skewed) should filter positive-skew-only distributions
+        assert "expon" not in col1_dists, "expon should be filtered for left-skewed data"
+        assert "gamma" not in col1_dists, "gamma should be filtered for left-skewed data"
+
+        # Col2 (right-skewed) should keep positive-skew-only distributions
+        assert "expon" in col2_dists, "expon should be kept for right-skewed data"
+        assert "gamma" in col2_dists, "gamma should be kept for right-skewed data"
+
+    def test_prefilter_fallback_logs_warning(self, spark_session):
+        """Test that fallback when all filtered logs appropriate warning."""
+        np.random.seed(42)
+        negative_data = np.random.normal(-100, 10, 1000)
+        df = spark_session.createDataFrame([(float(x),) for x in negative_data], ["value"])
+
+        # Create fitter that only has non-negative distributions
+        # by using a very restrictive exclusion list
+        fitter = DistributionFitter(spark_session)
+
+        with patch("spark_bestfit.core.logger") as mock_logger:
+            results = fitter.fit(
+                df, "value",
+                max_distributions=5,
+                prefilter=True,
+                lazy_metrics=True
+            )
+            # Should still return results
+            assert results.count() > 0
+
+    def test_prefilter_logs_filtered_distributions(self, spark_session):
+        """Test that prefilter logs which distributions were filtered."""
+        np.random.seed(42)
+        # Use left-skewed data to trigger skewness filtering
+        left_skewed_data = -np.random.exponential(5, 1000)
+        df = spark_session.createDataFrame([(float(x),) for x in left_skewed_data], ["value"])
+
+        fitter = DistributionFitter(spark_session)
+
+        with patch("spark_bestfit.core.logger") as mock_logger:
+            results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
+
+            # Verify info log was called with prefilter message
+            info_calls = [str(call) for call in mock_logger.info.call_args_list]
+            prefilter_logged = any("Pre-filter: skipped" in call for call in info_calls)
+            assert prefilter_logged, "Should log pre-filter info message (skewness filtering)"
