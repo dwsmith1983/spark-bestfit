@@ -735,7 +735,40 @@ class FitResults:
         # Return new FitResults without lazy contexts (fully materialized)
         return FitResults(materialized_df.cache(), lazy_contexts=None)
 
-    def _recreate_sample(self, context: LazyMetricsContext) -> np.ndarray:
+    def unpersist(self, blocking: bool = False) -> "FitResults":
+        """Release the cached DataFrame from memory.
+
+        Call this method when you no longer need the FitResults to free
+        executor memory. This is especially useful in notebook sessions
+        where multiple fits accumulate cached DataFrames.
+
+        Note:
+            If lazy_metrics=True was used during fitting and you haven't
+            called materialize(), you should do so before unpersisting if
+            you need KS/AD metrics later. After unpersisting, methods like
+            best(), filter(), etc. may trigger recomputation from source.
+
+        Args:
+            blocking: If True, block until unpersist completes. Default False.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> results = fitter.fit(df, 'value')
+            >>> best = results.best(n=3)  # Get what you need
+            >>> results.unpersist()  # Release memory
+            >>>
+            >>> # With lazy metrics, materialize first
+            >>> lazy_results = fitter.fit(df, 'value', lazy_metrics=True)
+            >>> materialized = lazy_results.materialize()
+            >>> lazy_results.unpersist()  # Release lazy version
+        """
+        self._df.unpersist(blocking)
+        return self
+
+    @staticmethod
+    def _recreate_sample(context: LazyMetricsContext) -> np.ndarray:
         """Recreate the exact sample used during fitting.
 
         Uses the stored seed and row count to reproduce the same sample

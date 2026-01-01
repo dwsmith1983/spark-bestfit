@@ -25,11 +25,10 @@ class TestFitSingleDistribution:
 
     def test_fit_normal_distribution(self, normal_data):
         """Test fitting normal distribution to normal data."""
-        # Create histogram
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        # Create histogram (pass bin_edges for CDF-based fitting)
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist)
 
         # Should succeed
         assert result["distribution"] == "norm"
@@ -48,10 +47,9 @@ class TestFitSingleDistribution:
 
     def test_fit_exponential_distribution(self, exponential_data):
         """Test fitting exponential distribution."""
-        y_hist, x_edges = np.histogram(exponential_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(exponential_data, bins=50, density=True)
 
-        result = fit_single_distribution("expon", exponential_data, x_hist, y_hist)
+        result = fit_single_distribution("expon", exponential_data, bin_edges, y_hist)
 
         # Should succeed
         assert result["distribution"] == "expon"
@@ -64,10 +62,9 @@ class TestFitSingleDistribution:
 
     def test_fit_gamma_distribution(self, gamma_data):
         """Test fitting gamma distribution."""
-        y_hist, x_edges = np.histogram(gamma_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(gamma_data, bins=50, density=True)
 
-        result = fit_single_distribution("gamma", gamma_data, x_hist, y_hist)
+        result = fit_single_distribution("gamma", gamma_data, bin_edges, y_hist)
 
         # Should succeed
         assert result["distribution"] == "gamma"
@@ -75,10 +72,10 @@ class TestFitSingleDistribution:
 
     def test_fit_invalid_distribution(self, normal_data):
         """Test fitting with invalid distribution name."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("invalid_dist", normal_data, x_hist, y_hist)
+
+        result = fit_single_distribution("invalid_dist", normal_data, bin_edges, y_hist)
 
         # Should fail gracefully
         assert result["distribution"] == "invalid_dist"
@@ -91,9 +88,9 @@ class TestFitSingleDistribution:
         """Test fitting with very little data."""
         data = np.array([1.0, 2.0, 3.0])
         y_hist = np.array([0.5, 0.3, 0.2])
-        x_hist = np.array([1.0, 2.0, 3.0])
+        bin_edges = np.array([0.5, 1.5, 2.5, 3.5])  # 3 bins
 
-        result = fit_single_distribution("norm", data, x_hist, y_hist)
+        result = fit_single_distribution("norm", data, bin_edges, y_hist)
 
         # Should attempt to fit (may succeed or fail)
         assert result["distribution"] == "norm"
@@ -242,10 +239,10 @@ class TestFitSingleDistributionEdgeCases:
         """Test fitting positive-only distribution to negative data."""
         data = np.array([-5.0, -3.0, -1.0, 0.0, 1.0])
         y_hist = np.array([0.2, 0.3, 0.3, 0.2])
-        x_hist = np.array([-4.0, -2.0, 0.0, 0.5])
+        bin_edges = np.array([-5.0, -3.0, -1.0, 0.5, 1.5])  # 4 bins
 
         # expon requires positive data, may fail or produce poor fit
-        result = fit_single_distribution("expon", data, x_hist, y_hist)
+        result = fit_single_distribution("expon", data, bin_edges, y_hist)
 
         assert result["distribution"] == "expon"
         # Either succeeds with a result or fails gracefully
@@ -253,21 +250,21 @@ class TestFitSingleDistributionEdgeCases:
 
     def test_fit_with_empty_params_distribution(self, normal_data):
         """Test distributions with different parameter structures."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
+
 
         # Test uniform distribution (only loc and scale)
-        result = fit_single_distribution("uniform", normal_data, x_hist, y_hist)
+        result = fit_single_distribution("uniform", normal_data, bin_edges, y_hist)
 
         assert result["distribution"] == "uniform"
         assert len(result["parameters"]) >= 2  # at least loc, scale
 
     def test_fit_returns_correct_structure(self, normal_data):
         """Test that fit returns dict with all required keys."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+
+        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist)
 
         required_keys = {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
@@ -631,10 +628,10 @@ class TestFitSingleDistributionWithKS:
 
     def test_fit_returns_ks_fields(self, normal_data):
         """Test that fit_single_distribution returns K-S fields."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+
+        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist)
 
         # Should have K-S fields
         assert "ks_statistic" in result
@@ -646,10 +643,10 @@ class TestFitSingleDistributionWithKS:
 
     def test_failed_fit_returns_ks_sentinel_values(self, normal_data):
         """Test that failed fits return sentinel values for K-S fields."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("invalid_dist", normal_data, x_hist, y_hist)
+
+        result = fit_single_distribution("invalid_dist", normal_data, bin_edges, y_hist)
 
         # Should have K-S sentinel values
         assert result["ks_statistic"] == np.inf
@@ -805,10 +802,10 @@ class TestFitSingleDistributionWithAD:
 
     def test_fit_returns_ad_fields(self, normal_data):
         """Test that fit_single_distribution returns A-D fields."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("norm", normal_data, x_hist, y_hist)
+
+        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist)
 
         # Should have A-D fields
         assert "ad_statistic" in result
@@ -822,11 +819,11 @@ class TestFitSingleDistributionWithAD:
 
     def test_fit_unsupported_returns_ad_statistic_no_pvalue(self, normal_data):
         """Test that unsupported distributions have A-D statistic but no p-value."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
+
 
         # gamma is not in AD_PVALUE_DISTRIBUTIONS
-        result = fit_single_distribution("gamma", normal_data, x_hist, y_hist)
+        result = fit_single_distribution("gamma", normal_data, bin_edges, y_hist)
 
         # Should have A-D statistic
         assert np.isfinite(result["ad_statistic"])
@@ -835,10 +832,10 @@ class TestFitSingleDistributionWithAD:
 
     def test_failed_fit_returns_ad_sentinel_values(self, normal_data):
         """Test that failed fits return sentinel values for A-D fields."""
-        y_hist, x_edges = np.histogram(normal_data, bins=50, density=True)
-        x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
 
-        result = fit_single_distribution("invalid_dist", normal_data, x_hist, y_hist)
+
+        result = fit_single_distribution("invalid_dist", normal_data, bin_edges, y_hist)
 
         # Should have A-D sentinel values
         assert result["ad_statistic"] == np.inf

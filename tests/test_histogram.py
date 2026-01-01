@@ -11,15 +11,15 @@ class TestHistogramComputer:
     def test_compute_histogram_basic(self, spark_session, small_dataset):
         """Test basic histogram computation."""
         computer = HistogramComputer()
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=50)
 
-        # Should return arrays of correct size
+        # Should return arrays of correct size (bin_edges has n+1 elements)
         assert len(y_hist) == 50
-        assert len(x_hist) == 50
+        assert len(bin_edges) == 51  # n_bins + 1
 
         # Histogram should be normalized (density sums to ~1 when multiplied by bin widths)
-        bin_width = x_hist[1] - x_hist[0]
-        total_area = np.sum(y_hist * bin_width)
+        bin_widths = np.diff(bin_edges)
+        total_area = np.sum(y_hist * bin_widths)
         assert np.isclose(total_area, 1.0, atol=0.01)
 
         # All values should be non-negative
@@ -30,17 +30,17 @@ class TestHistogramComputer:
         computer = HistogramComputer()
 
         for n_bins in [10, 25, 100]:
-            y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=n_bins)
+            y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=n_bins)
 
             assert len(y_hist) == n_bins
-            assert len(x_hist) == n_bins
+            assert len(bin_edges) == n_bins + 1  # edges have n+1 elements
 
     def test_compute_histogram_rice_rule(self, spark_session, small_dataset):
         """Test histogram with Rice rule for bin calculation."""
         computer = HistogramComputer()
         row_count = small_dataset.count()
 
-        y_hist, x_hist = computer.compute_histogram(
+        y_hist, bin_edges = computer.compute_histogram(
             small_dataset, "value", bins=50, use_rice_rule=True, approx_count=row_count
         )
 
@@ -48,43 +48,43 @@ class TestHistogramComputer:
         expected_bins = int(np.ceil(row_count ** (1 / 3)) * 2)
 
         assert len(y_hist) == expected_bins
-        assert len(x_hist) == expected_bins
+        assert len(bin_edges) == expected_bins + 1
 
     def test_compute_histogram_constant_values(self, spark_session, constant_dataset):
         """Test histogram with constant values (edge case)."""
         computer = HistogramComputer()
-        y_hist, x_hist = computer.compute_histogram(constant_dataset, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(constant_dataset, "value", bins=50)
 
-        # Should handle min == max case
+        # Should handle min == max case (returns single bin)
         assert len(y_hist) == 1
-        assert len(x_hist) == 1
+        assert len(bin_edges) == 1  # Special case: single value returns single edge
 
-        # Single bin centered at the constant value
-        assert np.isclose(x_hist[0], 42.0)
+        # Single bin at the constant value
+        assert np.isclose(bin_edges[0], 42.0)
         assert np.isclose(y_hist[0], 1.0)
 
     def test_compute_histogram_positive_data(self, spark_session, positive_dataset):
         """Test histogram with only positive values."""
         computer = HistogramComputer()
-        y_hist, x_hist = computer.compute_histogram(positive_dataset, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(positive_dataset, "value", bins=50)
 
-        # All bin centers should be positive
-        assert np.all(x_hist >= 0)
+        # All bin edges should be positive (or at least non-negative)
+        assert np.all(bin_edges >= 0)
 
         # Should have correct size
         assert len(y_hist) == 50
-        assert len(x_hist) == 50
+        assert len(bin_edges) == 51
 
     def test_compute_histogram_bin_edges_array(self, spark_session, small_dataset):
         """Test histogram with custom bin edges as array."""
         computer = HistogramComputer()
         custom_bins = np.array([0, 20, 40, 60, 80, 100])
 
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=custom_bins)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=custom_bins)
 
         # Should have len(bins) - 1 bins
         assert len(y_hist) == len(custom_bins) - 1
-        assert len(x_hist) == len(custom_bins) - 1
+        assert len(bin_edges) == len(custom_bins)  # Returns the custom edges
 
     def test_compute_histogram_distributed_no_collect(self, spark_session, small_dataset):
         """Test that histogram stays distributed (doesn't collect raw data)."""
@@ -135,7 +135,7 @@ class TestHistogramComputer:
     def test_histogram_no_data_loss(self, spark_session, small_dataset):
         """Test that histogram captures all data (no bins with zero when they shouldn't be)."""
         computer = HistogramComputer()
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=50)
 
         # For normal distribution, most bins should have some data
         non_zero_bins = np.sum(y_hist > 0)
@@ -152,29 +152,29 @@ class TestHistogramComputer:
         df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
 
         computer = HistogramComputer()
-        y_hist, x_hist = computer.compute_histogram(df, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(df, "value", bins=50)
 
         # Should handle outliers gracefully
         assert len(y_hist) == 50
-        assert len(x_hist) == 50
+        assert len(bin_edges) == 51
 
-        # Min and max should capture outliers
-        assert x_hist.min() < 0
-        assert x_hist.max() > 200
+        # Min and max edges should capture outliers
+        assert bin_edges.min() < 0
+        assert bin_edges.max() > 200
 
     def test_medium_dataset_performance(self, spark_session, medium_dataset):
         """Test histogram computation on medium dataset (100K rows)."""
         computer = HistogramComputer()
 
         # Should complete without errors
-        y_hist, x_hist = computer.compute_histogram(medium_dataset, "value", bins=100)
+        y_hist, bin_edges = computer.compute_histogram(medium_dataset, "value", bins=100)
 
         assert len(y_hist) == 100
-        assert len(x_hist) == 100
+        assert len(bin_edges) == 101
 
         # Should still be normalized
-        bin_width = x_hist[1] - x_hist[0]
-        total_area = np.sum(y_hist * bin_width)
+        bin_widths = np.diff(bin_edges)
+        total_area = np.sum(y_hist * bin_widths)
         assert np.isclose(total_area, 1.0, atol=0.01)
 
 class TestHistogramErrorHandling:
@@ -201,22 +201,22 @@ class TestHistogramErrorHandling:
         single_row_df = spark_session.createDataFrame([(42.0,)], ["value"])
         computer = HistogramComputer()
 
-        y_hist, x_hist = computer.compute_histogram(single_row_df, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(single_row_df, "value", bins=50)
 
         # Should handle single value case (like constant dataset)
         assert len(y_hist) >= 1
-        assert len(x_hist) >= 1
+        assert len(bin_edges) >= 1
 
     def test_two_distinct_values(self, spark_session):
         """Test histogram with only two distinct values."""
         df = spark_session.createDataFrame([(1.0,), (100.0,)], ["value"])
         computer = HistogramComputer()
 
-        y_hist, x_hist = computer.compute_histogram(df, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(df, "value", bins=50)
 
         # Should create proper histogram with two values
         assert len(y_hist) == 50
-        assert len(x_hist) == 50
+        assert len(bin_edges) == 51
 
     def test_all_null_values(self, spark_session):
         """Test histogram computation with all null values raises ValueError."""
@@ -234,10 +234,10 @@ class TestHistogramErrorHandling:
         computer = HistogramComputer()
 
         # Null values should be filtered out, histogram computed on valid values
-        y_hist, x_hist = computer.compute_histogram(df, "value", bins=10)
+        y_hist, bin_edges = computer.compute_histogram(df, "value", bins=10)
 
         assert len(y_hist) == 10
-        assert len(x_hist) == 10
+        assert len(bin_edges) == 11
         assert np.all(y_hist >= 0)
 
     def test_very_large_bin_count(self, spark_session, small_dataset):
@@ -245,10 +245,10 @@ class TestHistogramErrorHandling:
         computer = HistogramComputer()
 
         # Many bins (more than data points would have in many bins)
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=1000)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=1000)
 
         assert len(y_hist) == 1000
-        assert len(x_hist) == 1000
+        assert len(bin_edges) == 1001
 
     def test_single_bin(self, spark_session, small_dataset):
         """Test histogram with bins=1 is automatically upgraded to bins=2.
@@ -259,17 +259,17 @@ class TestHistogramErrorHandling:
         computer = HistogramComputer()
 
         # bins=1 is upgraded to bins=2
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=1)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=1)
 
         assert len(y_hist) == 2
-        assert len(x_hist) == 2
+        assert len(bin_edges) == 3
 
     def test_rice_rule_small_dataset(self, spark_session):
         """Test Rice rule with very small dataset."""
         small_df = spark_session.createDataFrame([(float(i),) for i in range(5)], ["value"])
         computer = HistogramComputer()
 
-        y_hist, x_hist = computer.compute_histogram(
+        y_hist, bin_edges = computer.compute_histogram(
             small_df, "value", bins=50, use_rice_rule=True, approx_count=5
         )
 
@@ -298,17 +298,18 @@ class TestHistogramErrorHandling:
     def test_histogram_returns_numpy_arrays(self, spark_session, small_dataset):
         """Test that histogram returns numpy arrays."""
         computer = HistogramComputer()
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=50)
 
         assert isinstance(y_hist, np.ndarray)
-        assert isinstance(x_hist, np.ndarray)
+        assert isinstance(bin_edges, np.ndarray)
 
     def test_histogram_preserves_data_range(self, spark_session, small_dataset):
-        """Test that histogram x values cover the data range."""
+        """Test that histogram bin edges cover the data range."""
         computer = HistogramComputer()
         stats = computer.compute_statistics(small_dataset, "value")
-        y_hist, x_hist = computer.compute_histogram(small_dataset, "value", bins=50)
+        y_hist, bin_edges = computer.compute_histogram(small_dataset, "value", bins=50)
 
-        # Bin centers should be within or close to data range
-        assert x_hist.min() >= stats["min"] - (x_hist[1] - x_hist[0])
-        assert x_hist.max() <= stats["max"] + (x_hist[1] - x_hist[0])
+        # Bin edges should cover the data range (with small epsilon tolerance)
+        bin_width = bin_edges[1] - bin_edges[0]
+        assert bin_edges.min() <= stats["min"] + bin_width
+        assert bin_edges.max() >= stats["max"] - bin_width

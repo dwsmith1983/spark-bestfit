@@ -295,14 +295,14 @@ class DistributionFitter:
         Returns:
             Spark DataFrame with fit results for this column
         """
-        # Compute histogram
-        y_hist, x_hist = self._histogram_computer.compute_histogram(
+        # Compute histogram (returns bin edges for CDF-based fitting)
+        y_hist, bin_edges = self._histogram_computer.compute_histogram(
             df_sample, column, bins=bins, use_rice_rule=use_rice_rule, approx_count=row_count
         )
-        logger.info(f"  Histogram for '{column}': {len(x_hist)} bins")
+        logger.info(f"  Histogram for '{column}': {len(bin_edges) - 1} bins")
 
-        # Broadcast histogram
-        histogram_bc = self.spark.sparkContext.broadcast((y_hist, x_hist))
+        # Broadcast histogram (y_hist densities + bin_edges for CDF computation)
+        histogram_bc = self.spark.sparkContext.broadcast((y_hist, bin_edges))
 
         # Create fitting sample
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
@@ -340,6 +340,10 @@ class DistributionFitter:
             return results_df
 
         finally:
+            # Release broadcast variables from executor memory
+            # Note: Using unpersist() rather than destroy() because Spark's lazy
+            # evaluation means the broadcast may still be referenced by pending
+            # DataFrame operations. unpersist() allows completion before cleanup.
             histogram_bc.unpersist()
             data_sample_bc.unpersist()
 
@@ -397,13 +401,16 @@ class DistributionFitter:
         """
         from spark_bestfit.plotting import plot_distribution
 
-        # Compute histogram for plotting
-        y_hist, x_hist = self._histogram_computer.compute_histogram(df, column, bins=bins, use_rice_rule=use_rice_rule)
+        # Compute histogram for plotting (bin edges -> centers for display)
+        y_hist, bin_edges = self._histogram_computer.compute_histogram(
+            df, column, bins=bins, use_rice_rule=use_rice_rule
+        )
+        x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
         return plot_distribution(
             result=result,
             y_hist=y_hist,
-            x_hist=x_hist,
+            x_hist=x_centers,
             title=title,
             xlabel=xlabel,
             ylabel=ylabel,
@@ -474,12 +481,16 @@ class DistributionFitter:
         """
         from spark_bestfit.plotting import plot_comparison
 
-        y_hist, x_hist = self._histogram_computer.compute_histogram(df, column, bins=bins, use_rice_rule=use_rice_rule)
+        # Compute histogram for plotting (bin edges -> centers for display)
+        y_hist, bin_edges = self._histogram_computer.compute_histogram(
+            df, column, bins=bins, use_rice_rule=use_rice_rule
+        )
+        x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
         return plot_comparison(
             results=results,
             y_hist=y_hist,
-            x_hist=x_hist,
+            x_hist=x_centers,
             title=title,
             xlabel=xlabel,
             ylabel=ylabel,
@@ -1209,6 +1220,7 @@ class DiscreteDistributionFitter:
             return results_df
 
         finally:
+            # Release broadcast variables (see note in _fit_column for why unpersist)
             histogram_bc.unpersist()
             data_sample_bc.unpersist()
 
