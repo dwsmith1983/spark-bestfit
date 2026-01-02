@@ -3,6 +3,9 @@
 Compares discrete fitting (MLE-based) vs continuous fitting (scipy.fit).
 
 Run with: make benchmark
+
+Note: These benchmarks use distribution-aware partitioning (v1.6.1+) which
+automatically calculates optimal partition count based on distribution mix.
 """
 
 import pytest
@@ -19,7 +22,7 @@ class TestDiscreteVsContinuous:
 
         def fit_continuous():
             # Use max_distributions=10 for fair comparison with discrete
-            results = fitter.fit(df_10k, "value", max_distributions=10, num_partitions=8)
+            results = fitter.fit(df_10k, "value", max_distributions=10)
             _ = results.best(n=1)
             return results
 
@@ -32,7 +35,7 @@ class TestDiscreteVsContinuous:
 
         def fit_discrete():
             # Use max_distributions=10 for fair comparison with continuous
-            results = fitter.fit(discrete_df_10k, "counts", max_distributions=10, num_partitions=8)
+            results = fitter.fit(discrete_df_10k, "counts", max_distributions=10)
             _ = results.best(n=1)
             return results
 
@@ -48,7 +51,8 @@ class TestDiscreteFitterScaling:
         fitter = DiscreteDistributionFitter(spark_session)
 
         def fit_all_discrete():
-            results = fitter.fit(discrete_df_10k, "counts", num_partitions=8)
+            # Let fitter use distribution-aware partitioning
+            results = fitter.fit(discrete_df_10k, "counts")
             _ = results.best(n=1)
             return results
 
@@ -69,7 +73,7 @@ class TestDiscreteMultiColumnEfficiency:
         def fit_separately():
             all_results = []
             for col in columns:
-                results = fitter.fit(discrete_df_multi_3col_10k, column=col, num_partitions=8)
+                results = fitter.fit(discrete_df_multi_3col_10k, column=col)
                 _ = results.best(n=1, metric="aic")
                 all_results.append(results)
             return all_results
@@ -86,7 +90,7 @@ class TestDiscreteMultiColumnEfficiency:
         columns = ["col_poisson", "col_nbinom", "col_geom"]
 
         def fit_together():
-            results = fitter.fit(discrete_df_multi_3col_10k, columns=columns, num_partitions=8)
+            results = fitter.fit(discrete_df_multi_3col_10k, columns=columns)
             _ = results.best_per_column(n=1, metric="aic")
             return results
 

@@ -16,7 +16,8 @@ class TestDistributionRegistry:
         assert "kappa4" in registry.get_exclusions()
         assert "studentized_range" in registry.get_exclusions()
         assert "gausshyper" in registry.get_exclusions()
-        assert len(registry.get_exclusions()) == 17
+        # 20 exclusions: 17 original + 3 added in v1.6.1 (tukeylambda, nct, dpareto_lognorm)
+        assert len(registry.get_exclusions()) == 20
 
     def test_initialization_custom_exclusions(self):
         """Test initialization with custom exclusions."""
@@ -150,7 +151,8 @@ class TestDistributionRegistry:
         # Should have default exclusions
         assert "levy_stable" in registry.get_exclusions()
         assert "norm" not in registry.get_exclusions()
-        assert len(registry.get_exclusions()) == 17
+        # 20 exclusions: 17 original + 3 added in v1.6.1 (tukeylambda, nct, dpareto_lognorm)
+        assert len(registry.get_exclusions()) == 20
 
     def test_has_support_at_zero_positive(self):
         """Test _has_support_at_zero for positive distributions."""
