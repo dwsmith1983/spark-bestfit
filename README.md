@@ -1,6 +1,6 @@
 # spark-bestfit
 
-[![CI](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml/badge.svg)](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml)
+[![CI](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dwsmith1983/spark-bestfit/actions/workflows/ci.yml)
 [![Documentation Status](https://readthedocs.org/projects/spark-bestfit/badge/?version=latest)](https://spark-bestfit.readthedocs.io/en/latest/)
 [![PyPI version](https://img.shields.io/pypi/v/spark-bestfit)](https://pypi.org/project/spark-bestfit/)
 [![Production Ready](https://img.shields.io/badge/status-production--ready-brightgreen)](https://github.com/dwsmith1983/spark-bestfit)
