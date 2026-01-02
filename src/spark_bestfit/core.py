@@ -814,8 +814,8 @@ class DistributionFitter:
         total_cores = self.spark.sparkContext.defaultParallelism
         return min(effective_count, total_cores * 2)
 
+    @staticmethod
     def _prefilter_distributions(
-        self,
         distributions: List[str],
         data_sample: np.ndarray,
         mode: Union[bool, str],

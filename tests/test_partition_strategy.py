@@ -5,15 +5,11 @@ This test demonstrates that interleaving slow distributions reduces
 total fitting time by avoiding partition clustering.
 """
 
-import time
 from typing import List, Set
 
 import numpy as np
 import pytest
-from pyspark.sql import SparkSession
 
-import sys
-sys.path.insert(0, "/Users/dustin/Documents/code/spark-bestfit/src")
 from spark_bestfit import DistributionFitter
 from spark_bestfit.distributions import DistributionRegistry
 
@@ -63,20 +59,11 @@ class TestPartitionStrategy:
     """Tests validating the partition interleaving strategy."""
 
     @pytest.fixture
-    def spark_session(self):
-        """Create a local Spark session for testing."""
-        spark = SparkSession.builder \
-            .appName("PartitionStrategyTest") \
-            .master("local[4]") \
-            .config("spark.driver.memory", "2g") \
-            .getOrCreate()
-        spark.sparkContext.setLogLevel("WARN")
-        yield spark
-        spark.stop()
-
-    @pytest.fixture
     def test_data(self, spark_session):
-        """Create test DataFrame with 100K rows."""
+        """Create test DataFrame with 100K rows.
+
+        Uses the session-scoped spark_session fixture from conftest.py.
+        """
         np.random.seed(42)
         data = np.random.normal(50, 10, 100_000)
         df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
