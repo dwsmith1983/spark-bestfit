@@ -58,7 +58,6 @@ new_api_call()
 - [ ] I have updated the documentation if needed
 - [ ] I have added tests that prove my fix/feature works
 - [ ] All new and existing tests pass locally
-- [ ] I have updated CHANGELOG.md (for user-facing changes)
 
 ## Screenshots / Examples
 <!-- Optional: Include screenshots, example outputs, or code snippets showing the change -->
