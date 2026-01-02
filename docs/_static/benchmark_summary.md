@@ -52,13 +52,10 @@
 
 **AIC-only workflow:** ~71% faster than eager fitting
 
-## Slow Distribution Optimization (v1.6.1)
+## New Exclusions (v1.7.0)
 
-| Mode | Fit Time (mean) | Std Dev |
-|------|-----------------|---------|
-| Default Exclusions (20 excluded) | 9.826s | ±0.052s |
-| All Distributions (0 excluded) | 9.820s | ±0.055s |
+Three slow distributions added to `DEFAULT_EXCLUSIONS`:
 
-**Default exclusions:** 1.0× faster (-0% time saved)
-
-New exclusions in v1.6.1: `tukeylambda` (~7s), `nct` (~1.4s), `dpareto_lognorm` (~0.5s)
+- `tukeylambda` (~7s) - ill-conditioned optimization
+- `nct` (~1.4s) - non-central t distribution
+- `dpareto_lognorm` (~0.5s) - double Pareto-lognormal

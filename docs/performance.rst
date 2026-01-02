@@ -676,10 +676,10 @@ total fitting time by 50-80% for typical workflows.
 
 .. _slow-distribution-optimizations:
 
-Slow Distribution Optimizations (v1.6.1)
+Slow Distribution Optimizations (v1.7.0)
 ----------------------------------------
 
-Based on comprehensive timing analysis, v1.6.1 adds several performance optimizations
+Based on comprehensive timing analysis, v1.7.0 adds several performance optimizations
 for handling slow scipy distributions.
 
 New Default Exclusions
@@ -709,7 +709,7 @@ These are now excluded by default.
 Benchmark Results
 ^^^^^^^^^^^^^^^^^
 
-The v1.6.1 optimizations provide significant performance improvements:
+The v1.7.0 optimizations provide significant performance improvements:
 
 .. list-table::
    :header-rows: 1
@@ -717,7 +717,7 @@ The v1.6.1 optimizations provide significant performance improvements:
 
    * - Test
      - Before (v1.6.0)
-     - After (v1.6.1)
+     - After (v1.7.0)
      - Improvement
    * - Fit all distributions (10K rows)
      - 24.4s
@@ -738,10 +738,6 @@ The v1.6.1 optimizations provide significant performance improvements:
 
 The overall benchmark suite runtime dropped from **90 minutes to 47 minutes** (48% faster).
 
-.. image:: _static/slow_dist_optimization.png
-   :alt: Slow distribution optimization comparison
-   :width: 100%
-
 Distribution-Aware Partitioning
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -749,7 +745,7 @@ When fitting distributions in parallel across Spark partitions, some distributio
 take 3-5× longer than others. Without intervention, these "slow" distributions can
 cluster in a single partition, creating a straggler effect.
 
-v1.6.1 implements two optimizations:
+v1.7.0 implements two optimizations:
 
 1. **Distribution interleaving**: Slow distributions are spread evenly among fast
    ones before creating the Spark DataFrame, ensuring they're distributed across

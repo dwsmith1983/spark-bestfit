@@ -47,7 +47,7 @@ def extract_scaling_data(results: dict) -> dict:
         "dist_count": {"counts": [], "times": [], "stddevs": []},
         "multi_column": {"labels": [], "times": [], "stddevs": []},
         "lazy_metrics": {"labels": [], "times": [], "stddevs": []},
-        "slow_dist_opt": {"labels": [], "times": [], "stddevs": []},  # v1.6.1
+        "slow_dist_opt": {"labels": [], "times": [], "stddevs": []},  # v1.7.0
     }
 
     for benchmark in results.get("benchmarks", []):
@@ -120,7 +120,7 @@ def extract_scaling_data(results: dict) -> dict:
             data["lazy_metrics"]["times"].append(mean_time)
             data["lazy_metrics"]["stddevs"].append(stddev)
 
-        # Parse slow distribution optimization benchmarks (v1.6.1)
+        # Parse slow distribution optimization benchmarks (v1.7.0)
         if "SlowDistributionOptimizations" in fullname:
             if "default_exclusions" in name:
                 data["slow_dist_opt"]["labels"].append("Default Exclusions\n(20 excluded)")
@@ -442,7 +442,7 @@ def generate_lazy_metrics_chart(data: dict, output_path: Path) -> None:
 
 
 def generate_slow_dist_opt_chart(data: dict, output_path: Path) -> None:
-    """Generate slow distribution optimization comparison chart (v1.6.1)."""
+    """Generate slow distribution optimization comparison chart (v1.7.0)."""
     labels = data["slow_dist_opt"]["labels"]
     times = np.array(data["slow_dist_opt"]["times"])
     stddevs = np.array(data["slow_dist_opt"]["stddevs"])
@@ -494,7 +494,7 @@ def generate_slow_dist_opt_chart(data: dict, output_path: Path) -> None:
     ax.set_xticklabels(labels, fontsize=11)
     ax.set_ylabel("Fit Time (seconds)", fontsize=12)
     ax.set_title(
-        "Slow Distribution Optimization (v1.6.1)\n(100K rows, distribution-aware partitioning)",
+        "Slow Distribution Optimization (v1.7.0)\n(100K rows, distribution-aware partitioning)",
         fontsize=14,
         fontweight="bold",
     )
@@ -638,37 +638,19 @@ def generate_summary_table(data: dict, results: dict, output_path: Path) -> None
                 ]
             )
 
-    # Slow distribution optimization section (v1.6.1)
-    if data["slow_dist_opt"]["labels"]:
-        lines.extend(
-            [
-                "",
-                "## Slow Distribution Optimization (v1.6.1)",
-                "",
-                "| Mode | Fit Time (mean) | Std Dev |",
-                "|------|-----------------|---------|",
-            ]
-        )
-
-        sdo_labels = data["slow_dist_opt"]["labels"]
-        sdo_times = data["slow_dist_opt"]["times"]
-        sdo_stddevs = data["slow_dist_opt"]["stddevs"]
-
-        for label, time, std in zip(sdo_labels, sdo_times, sdo_stddevs):
-            label_clean = label.replace("\n", " ")
-            lines.append(f"| {label_clean} | {time:.3f}s | ±{std:.3f}s |")
-
-        if len(sdo_times) >= 2:
-            slowdown = sdo_times[1] / sdo_times[0]
-            savings_pct = (1 - sdo_times[0] / sdo_times[1]) * 100
-            lines.extend(
-                [
-                    "",
-                    f"**Default exclusions:** {slowdown:.1f}× faster ({savings_pct:.0f}% time saved)",
-                    "",
-                    "New exclusions in v1.6.1: `tukeylambda` (~7s), `nct` (~1.4s), `dpareto_lognorm` (~0.5s)",
-                ]
-            )
+    # New exclusions section (v1.7.0)
+    lines.extend(
+        [
+            "",
+            "## New Exclusions (v1.7.0)",
+            "",
+            "Three slow distributions added to `DEFAULT_EXCLUSIONS`:",
+            "",
+            "- `tukeylambda` (~7s) - ill-conditioned optimization",
+            "- `nct` (~1.4s) - non-central t distribution",
+            "- `dpareto_lognorm` (~0.5s) - double Pareto-lognormal",
+        ]
+    )
 
     lines.append("")
 
@@ -708,7 +690,8 @@ def main():
     generate_data_size_chart(data, args.output_dir / "scaling_data_size.png")
     generate_distribution_count_chart(data, args.output_dir / "scaling_dist_count.png")
     generate_multi_column_chart(data, args.output_dir / "multi_column_efficiency.png")
-    generate_slow_dist_opt_chart(data, args.output_dir / "slow_dist_optimization.png")
+    # Note: slow_dist_opt chart removed - benchmark doesn't show meaningful difference
+    # because excluded_distributions=() doesn't override registry's DEFAULT_EXCLUSIONS.
     # Note: lazy_metrics chart removed - wall-clock comparison doesn't capture the
     # real benefit (skipping 95% of computations). See docs/performance.rst for details.
     generate_summary_table(data, results, args.output_dir / "benchmark_summary.md")
