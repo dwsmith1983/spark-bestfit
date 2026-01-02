@@ -1,6 +1,6 @@
 """spark-bestfit: Modern Spark distribution fitting library.
 
-Efficiently fits ~100 scipy.stats distributions to data using Spark's
+Efficiently fits ~90 scipy.stats distributions to data using Spark's
 parallel processing with optimized Pandas UDFs and broadcast variables.
 
 Example:

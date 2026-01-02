@@ -1,0 +1,142 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: checkboxes
+    id: pre-submission
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: This worked in a previous version of spark-bestfit
+          required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug
+      placeholder: Describe what's happening...
+    validations:
+      required: true
+
+  - type: input
+    id: spark-bestfit-version
+    attributes:
+      label: spark-bestfit Version
+      description: Run `python -c "import spark_bestfit; print(spark_bestfit.__version__)"`
+      placeholder: "1.7.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: python-version
+    attributes:
+      label: Python Version
+      options:
+        - "3.12"
+        - "3.11"
+        - "3.10"
+        - "3.9"
+        - "Other (specify in additional context)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: spark-version
+    attributes:
+      label: Spark Version
+      options:
+        - "3.5.x"
+        - "3.4.x"
+        - "3.3.x"
+        - "3.2.x"
+        - "Other (specify in additional context)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Type
+      description: Where is Spark running?
+      options:
+        - "Local / Single Node"
+        - "Cluster (YARN)"
+        - "Cluster (Kubernetes)"
+        - "Databricks"
+        - "AWS EMR"
+        - "Google Dataproc"
+        - "Other (specify in additional context)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - "macOS"
+        - "Linux (Ubuntu/Debian)"
+        - "Linux (RHEL/CentOS)"
+        - "Linux (Other)"
+        - "Windows"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal code to reproduce the issue
+      render: python
+      placeholder: |
+        from pyspark.sql import SparkSession
+        from spark_bestfit import DistributionFitter
+
+        spark = SparkSession.builder.getOrCreate()
+        # Your code here
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: Describe the expected behavior...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: Describe what actually happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Message / Stack Trace
+      description: Paste any error messages or stack traces
+      render: shell
+      placeholder: |
+        Traceback (most recent call last):
+          File "...", line X, in <module>
+            ...
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context about the problem (data characteristics, Spark config, screenshots, logs, etc.)
+      placeholder: |
+        - Data size: 100K rows
+        - Using lazy_metrics=True
+        - Spark config: ...

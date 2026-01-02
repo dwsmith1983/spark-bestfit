@@ -20,7 +20,7 @@ spark-bestfit is designed to minimize memory usage on the driver node:
    - Overhead is minimal as data is already small
 
 4. **Results DataFrame**:
-   - ~100 distributions × ~50 bytes each = ~5KB
+   - ~90 distributions × ~50 bytes each = ~4.5KB
    - Kept as Spark DataFrame until explicitly collected
 
 Memory Comparison (100M row dataset):

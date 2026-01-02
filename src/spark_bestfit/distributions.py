@@ -37,7 +37,7 @@ class DistributionRegistry:
         "ncf",  # Slow - non-central F
         "wald",  # Sometimes numerically unstable
         "mielke",  # Slow
-        "exonpow",  # Slow - exponential power
+        "exponpow",  # Slow - exponential power
         "studentized_range",  # Very slow - scipy docs recommend approximation
         "gausshyper",  # Very slow - Gauss hypergeometric
         "geninvgauss",  # Can hang - generalized inverse Gaussian

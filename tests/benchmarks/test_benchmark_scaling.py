@@ -2,7 +2,7 @@
 
 These benchmarks measure how fit time scales with:
 - Data size (25K, 100K, 500K, 1M rows)
-- Number of distributions (5, 20, 50, ~91 with default exclusions)
+- Number of distributions (5, 20, 50, ~90 with default exclusions)
 
 Run with: make benchmark
 """
@@ -79,7 +79,7 @@ class TestDistributionCountScaling:
     """
 
     def test_fit_default_distributions(self, benchmark, spark_session, df_10k):
-        """Benchmark fitting ~91 distributions (with default exclusions).
+        """Benchmark fitting ~90 distributions (with default exclusions).
 
         Uses distribution-aware partitioning to handle slow distributions
         like burr, t, johnsonsb, etc. (100-160ms each vs ~32ms median).
@@ -311,8 +311,8 @@ class TestSlowDistributionOptimizations:
         - dpareto_lognorm: ~0.5s per fit (double Pareto-lognormal)
 
         This demonstrates the fix for excluded_distributions parameter while
-        keeping benchmark runtime reasonable. Compared to default (91 dists),
-        this adds 16 more distributions that were previously excluded.
+        keeping benchmark runtime reasonable. Compared to default (90 dists),
+        this adds 17 more distributions that were previously excluded.
         """
         # Exclude only the 3 extremely slow distributions that can hang
         extremely_slow = ("tukeylambda", "nct", "dpareto_lognorm")

@@ -1,8 +1,14 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
   - name: Documentation
     url: https://spark-bestfit.readthedocs.io/
     about: Check the documentation for usage guides and API reference
   - name: Discussions
     url: https://github.com/dwsmith1983/spark-bestfit/discussions
-    about: Ask questions and discuss ideas
+    about: Ask questions and discuss ideas with the community
+  - name: Changelog
+    url: https://github.com/dwsmith1983/spark-bestfit/blob/main/CHANGELOG.md
+    about: See what's changed in recent versions
+  - name: Performance Guide
+    url: https://spark-bestfit.readthedocs.io/en/latest/performance.html
+    about: Tips for optimizing performance with large datasets

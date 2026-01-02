@@ -1,0 +1,154 @@
+name: Performance Report
+description: Report slow performance or request optimization
+title: "[PERF] "
+labels: ["performance", "triage"]
+body:
+  - type: checkboxes
+    id: pre-submission
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I reviewed the [performance documentation](https://spark-bestfit.readthedocs.io/en/latest/performance.html)
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Performance Issue
+      description: What's slower than expected?
+      placeholder: Describe the performance issue...
+    validations:
+      required: true
+
+  - type: input
+    id: data-size
+    attributes:
+      label: Data Size
+      description: Number of rows being fitted
+      placeholder: "1M rows"
+    validations:
+      required: true
+
+  - type: input
+    id: num-distributions
+    attributes:
+      label: Number of Distributions
+      description: How many distributions are being fitted? (default is ~90)
+      placeholder: "90 (default)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: fitter-type
+    attributes:
+      label: Fitter Type
+      options:
+        - "DistributionFitter (continuous)"
+        - "DiscreteDistributionFitter"
+        - "Both"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: lazy-metrics
+    attributes:
+      label: Using Lazy Metrics?
+      description: Are you using lazy_metrics=True?
+      options:
+        - "Yes (lazy_metrics=True)"
+        - "No (lazy_metrics=False, default)"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: input
+    id: num-columns
+    attributes:
+      label: Number of Columns
+      description: If using multi-column fitting, how many columns?
+      placeholder: "1"
+
+  - type: textarea
+    id: timing
+    attributes:
+      label: Timing Results
+      description: Observed time vs expected time
+      placeholder: |
+        Observed: 45 seconds for 100K rows
+        Expected: ~10 seconds based on benchmarks
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Type
+      options:
+        - "Local / Single Node"
+        - "Cluster (YARN)"
+        - "Cluster (Kubernetes)"
+        - "Databricks"
+        - "AWS EMR"
+        - "Google Dataproc"
+        - "Other (specify below)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: spark-config
+    attributes:
+      label: Spark Configuration
+      description: Relevant Spark configuration (executors, memory, partitions)
+      render: python
+      placeholder: |
+        # From spark.sparkContext.getConf().getAll() or SparkUI
+        spark.executor.instances = 4
+        spark.executor.memory = 4g
+        spark.executor.cores = 2
+        spark.default.parallelism = 8
+        spark.sql.shuffle.partitions = 200
+
+  - type: input
+    id: spark-bestfit-version
+    attributes:
+      label: spark-bestfit Version
+      placeholder: "1.7.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: spark-version
+    attributes:
+      label: Spark Version
+      options:
+        - "3.5.x"
+        - "3.4.x"
+        - "3.3.x"
+        - "3.2.x"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Sample
+      description: The code you're running (if helpful for diagnosis)
+      render: python
+      placeholder: |
+        from spark_bestfit import DistributionFitter
+
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(df, "value")
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other relevant information (data characteristics, skew, etc.)
+      placeholder: |
+        - Data is highly skewed
+        - Running alongside other Spark jobs
+        - Memory pressure observed in SparkUI
