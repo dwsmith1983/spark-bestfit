@@ -211,8 +211,8 @@ def generate_data_size_chart(data: dict, output_path: Path) -> None:
 
     # Add insight annotation
     ax.text(
-        0.95,
-        0.05,
+        0.97,
+        0.15,
         f"{data_increase:.0f}× data increase\n{time_increase:.1f}× time increase\n= Sub-linear scaling!",
         transform=ax.transAxes,
         fontsize=11,

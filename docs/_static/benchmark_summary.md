@@ -18,40 +18,40 @@
 
 | Data Size | Fit Time (mean) | Std Dev |
 |-----------|-----------------|---------|
-| 25,000 | 7.383s | ±0.043s |
-| 100,000 | 10.082s | ±0.226s |
-| 500,000 | 9.486s | ±0.143s |
-| 1,000,000 | 7.750s | ±0.113s |
+| 25,000 | 7.390s | ±0.070s |
+| 100,000 | 9.907s | ±0.049s |
+| 500,000 | 9.076s | ±0.053s |
+| 1,000,000 | 7.803s | ±0.202s |
 
 ## Distribution Count Scaling
 
 | # Distributions | Fit Time (mean) | Std Dev |
 |-----------------|-----------------|---------|
-| 5 | 0.542s | ±0.015s |
-| 20 | 1.084s | ±0.025s |
-| 50 | 2.036s | ±0.032s |
-| 90 | 8.754s | ±0.049s |
-| 107 | 10.297s | ±0.123s |
+| 5 | 0.563s | ±0.019s |
+| 20 | 1.218s | ±0.051s |
+| 50 | 2.079s | ±0.066s |
+| 90 | 8.874s | ±0.109s |
+| 107 | 9.995s | ±0.092s |
 
 ## Multi-Column Efficiency
 
 | Approach | Fit Time (mean) | Std Dev |
 |----------|-----------------|---------|
-| 3 Separate Fits | 3.580s | ±0.077s |
-| 1 Multi-Column Fit | 3.114s | ±0.086s |
+| 3 Separate Fits | 3.648s | ±0.045s |
+| 1 Multi-Column Fit | 3.079s | ±0.082s |
 
-**Speedup:** 1.1× faster (13% time saved)
+**Speedup:** 1.2× faster (16% time saved)
 
 ## Lazy Metrics Performance (v1.5.0+)
 
 | Mode | Fit Time (mean) | Std Dev | Speedup |
 |------|-----------------|---------|---------|
-| Eager (all metrics) | 9.892s | ±0.048s | baseline |
-| Lazy (AIC only) | 2.818s | ±0.038s | -72% |
-| Lazy (+ KS on-demand) | 2.886s | ±0.050s | -71% |
-| Lazy (+ materialize) | 5.463s | ±0.086s | -45% |
+| Eager (all metrics) | 10.417s | ±0.291s | baseline |
+| Lazy (AIC only) | 2.833s | ±0.065s | -73% |
+| Lazy (+ KS on-demand) | 2.836s | ±0.038s | -73% |
+| Lazy (+ materialize) | 5.437s | ±0.054s | -48% |
 
-**AIC-only workflow:** ~72% faster than eager fitting
+**AIC-only workflow:** ~73% faster than eager fitting
 
 ## New Exclusions (v1.7.0)
 
