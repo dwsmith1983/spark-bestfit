@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.7.2 (2026-01-02)
+
+### Bug Fixes
+
+- Correct exponpow typo and modernize GitHub templates
+  ([#81](https://github.com/dwsmith1983/spark-bestfit/pull/81),
+  [`d4697f2`](https://github.com/dwsmith1983/spark-bestfit/commit/d4697f2de97057fdc4726a08194735d933c4e2cf))
+
+
 ## v1.7.1 (2026-01-02)
 
 ### Bug Fixes
