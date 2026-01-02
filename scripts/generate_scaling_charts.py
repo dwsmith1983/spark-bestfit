@@ -88,8 +88,8 @@ def extract_scaling_data(results: dict) -> dict:
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
         elif "default_distributions" in name and "discrete" not in name:
-            # ~91 distributions with default exclusions (20 slow dists excluded)
-            data["dist_count"]["counts"].append(91)
+            # ~90 distributions with default exclusions (20 slow dists excluded)
+            data["dist_count"]["counts"].append(90)
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
         elif "SlowDistributionOptimizations" in fullname and "all_distributions" in name:
@@ -211,8 +211,8 @@ def generate_data_size_chart(data: dict, output_path: Path) -> None:
 
     # Add insight annotation
     ax.text(
-        0.95,
-        0.05,
+        0.97,
+        0.15,
         f"{data_increase:.0f}× data increase\n{time_increase:.1f}× time increase\n= Sub-linear scaling!",
         transform=ax.transAxes,
         fontsize=11,

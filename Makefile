@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-charts
+.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-charts validate-notebooks
 
 .DEFAULT_GOAL := help
 
@@ -58,3 +58,12 @@ benchmark: ## Run performance benchmarks (not run in CI)
 
 benchmark-charts: ## Generate scaling charts from benchmark results
 	python scripts/generate_scaling_charts.py
+
+validate-notebooks: ## Run all example notebooks to validate they execute without errors
+	@echo "Validating example notebooks..."
+	@for nb in examples/*.ipynb; do \
+		echo "  Running $$nb..."; \
+		PYTHONPATH=src jupyter nbconvert --to notebook --execute --inplace \
+			--ExecutePreprocessor.timeout=600 "$$nb" || exit 1; \
+	done
+	@echo "All notebooks validated successfully!"

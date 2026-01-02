@@ -1,0 +1,82 @@
+name: Question
+description: Ask a question about using spark-bestfit
+title: "[QUESTION] "
+labels: ["question"]
+body:
+  - type: checkboxes
+    id: pre-submission
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I checked the [documentation](https://spark-bestfit.readthedocs.io/) and didn't find an answer
+          required: true
+        - label: I searched existing issues and discussions
+          required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know?
+      placeholder: |
+        How do I...?
+        What's the best way to...?
+        Is it possible to...?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: topic
+    attributes:
+      label: Topic Area
+      description: What area does your question relate to?
+      options:
+        - "Basic usage / Getting started"
+        - "Distribution fitting (continuous)"
+        - "Distribution fitting (discrete)"
+        - "Performance / Optimization"
+        - "Multi-column fitting"
+        - "Lazy metrics"
+        - "Serialization / Saving results"
+        - "Copulas"
+        - "Integration with other tools"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What are you trying to accomplish? (helps us give better answers)
+      placeholder: |
+        I'm working on a project that needs to...
+        My data looks like...
+        I'm using spark-bestfit with...
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Sample
+      description: If relevant, share the code you're working with
+      render: python
+      placeholder: |
+        from spark_bestfit import DistributionFitter
+
+        # Your code here
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What I've Tried
+      description: What have you already attempted?
+      placeholder: |
+        - I tried X but got error Y
+        - I looked at the examples but they don't cover Z
+
+  - type: input
+    id: version
+    attributes:
+      label: spark-bestfit Version
+      description: Optional, but helpful for version-specific questions
+      placeholder: "1.7.1"

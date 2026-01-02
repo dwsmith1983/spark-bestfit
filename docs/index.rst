@@ -3,7 +3,7 @@ spark-bestfit
 
 Modern Spark distribution fitting library with efficient parallel processing.
 
-Automatically fit ~100 scipy.stats continuous distributions and 16 discrete distributions
+Automatically fit ~90 scipy.stats continuous distributions and 16 discrete distributions
 to your data using Apache Spark's distributed computing power, with optimized Pandas UDFs.
 
 **Supported Versions:**
@@ -19,7 +19,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 
 **What it does well:**
 
-- Fit ~100 continuous and 16 discrete scipy.stats distributions in parallel
+- Fit ~90 continuous and 16 discrete scipy.stats distributions in parallel
 - Multi-column fitting: fit multiple columns efficiently in a single operation
 - Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
 - Generate publication-ready visualizations (histograms, Q-Q plots, P-P plots)

@@ -134,10 +134,11 @@ distribution fitting. Each partition fits a subset of distributions independentl
 
 **Default behavior (num_partitions=None):**
 
-The library auto-calculates partitions using: ``min(num_distributions, 2 × defaultParallelism)``
+As of v1.7.0, the library uses **distribution-aware auto-partitioning**:
 
-- ``num_distributions``: Number of distributions being fitted
-- ``defaultParallelism``: Spark's default parallelism (typically equals total executor cores)
+- Slow distributions (e.g., ``burr``, ``t``, ``johnsonsb``) are weighted 3× when calculating partition count
+- Distributions are interleaved to spread slow ones across partitions, avoiding stragglers
+- Formula: ``min(effective_count, 2 × defaultParallelism)`` where slow distributions count 3×
 
 **When to override:**
 
@@ -153,8 +154,8 @@ The library auto-calculates partitions using: ``min(num_distributions, 2 × defa
    results = fitter.fit(df, "value", max_distributions=10)  # num_partitions auto-set
 
 .. note::
-   Setting ``num_partitions`` higher than the number of distributions has no benefit,
-   as each distribution requires exactly one task.
+   In most cases, the default auto-partitioning provides optimal performance.
+   Only override if you have specific cluster constraints or are debugging performance issues.
 
 Multi-Column Fitting
 --------------------

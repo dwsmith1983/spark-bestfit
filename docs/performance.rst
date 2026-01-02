@@ -57,7 +57,7 @@ Where:
 
 - **N** = number of data rows
 - **C** = number of columns being fitted
-- **D** = number of distributions (~91 continuous by default, ~16 discrete)
+- **D** = number of distributions (~90 continuous by default, 16 discrete)
 - **B** = histogram bins (default: 100)
 
 **Single-column:** O(N) + O(D × B) — histogram dominates for large N
@@ -156,7 +156,7 @@ distributions are computationally expensive:
     5               | ~0.5s     | ~110ms (fast dists)
     20              | ~1.1s     | ~53ms (fast dists)
     50              | ~2.0s     | ~40ms (fast dists)
-    91 (default)    | ~8.8s     | ~96ms (includes slow dists)
+    90 (default)    | ~8.8s     | ~98ms (includes slow dists)
     107 (near-all)  | ~10.3s    | ~96ms (excludes only 3 extremely slow)
 
 The first ~50 distributions are fast (~40-50ms each). The remaining distributions
@@ -267,17 +267,21 @@ Tuning Recommendations
 num_partitions
 ^^^^^^^^^^^^^^
 
-Controls parallelism for distribution fitting:
+Controls parallelism for distribution fitting. As of v1.7.0, spark-bestfit uses
+**distribution-aware auto-partitioning** that calculates the optimal partition count
+based on the distribution mix:
 
 .. code-block:: python
 
-    # Default: uses spark.sql.shuffle.partitions
+    # Default (recommended): auto-partitioning based on distribution mix
+    # Slow distributions are weighted 3× when calculating partition count
     fitter.fit(df, "value")
 
-    # Explicit: more partitions = more parallelism
+    # Explicit override: use a specific partition count
     fitter.fit(df, "value", num_partitions=16)
 
-**Recommendation**: Set to 2-4× the number of executor cores.
+**Recommendation**: Let the library auto-calculate partitions (the default). Only
+override if you have specific cluster constraints or are debugging performance issues.
 
 max_samples
 ^^^^^^^^^^^
@@ -294,27 +298,39 @@ For confidence intervals, controls the data sample size:
 
 **Trade-off**: Larger samples → more precise CI, more memory, slower bootstrap.
 
-Excluding Slow Distributions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Default Exclusions
+^^^^^^^^^^^^^^^^^^
 
-Some distributions are computationally expensive. Exclude them for faster fitting:
+spark-bestfit excludes 20 slow or problematic distributions by default. These include:
+
+- ``tukeylambda``, ``nct``, ``dpareto_lognorm``: Extremely slow (0.5-7+ seconds)
+- ``levy_stable``, ``studentized_range``, ``kstwo``: Complex optimization
+- ``kappa4``, ``ncx2``, ``ncf``, ``geninvgauss``: Slow or can hang
+
+To see the full list:
 
 .. code-block:: python
 
-    from spark_bestfit import DistributionFitter, DEFAULT_EXCLUDED_DISTRIBUTIONS
+    from spark_bestfit.distributions import DistributionRegistry
+    print(DistributionRegistry.DEFAULT_EXCLUSIONS)
 
-    # Add slow distributions to the default exclusion list
-    slow_dists = ("levy_stable", "studentized_range", "kstwo")
-    exclusions = DEFAULT_EXCLUDED_DISTRIBUTIONS + slow_dists
+If you need to include a specific excluded distribution:
 
-    fitter = DistributionFitter(spark, excluded_distributions=exclusions)
-    results = fitter.fit(df, "value")
+.. code-block:: python
 
-**Common slow distributions**:
+    from spark_bestfit import DistributionFitter
+    from spark_bestfit.distributions import DistributionRegistry
 
-- ``levy_stable``: Complex optimization
-- ``studentized_range``: Expensive CDF computation
-- ``kstwo``: Numerical integration required
+    # Get default exclusions and remove the one you want
+    exclusions = DistributionRegistry.DEFAULT_EXCLUSIONS - {"levy_stable"}
+    fitter = DistributionFitter(spark, excluded_distributions=tuple(exclusions))
+
+To fit ALL 110 scipy distributions (not recommended for production):
+
+.. code-block:: python
+
+    # Warning: tukeylambda can take 7+ seconds or hang
+    fitter = DistributionFitter(spark, excluded_distributions=())
 
 Running Benchmarks
 ------------------
@@ -368,7 +384,7 @@ Not all goodness-of-fit metrics have the same computational cost:
      - Slow (~200-500ms)
      - O(n log n) sort + 2n log operations
 
-With ~91 distributions (default), computing KS/AD for all can add **20-50 seconds** to the
+With ~90 distributions (default), computing KS/AD for all can add **20-50 seconds** to the
 total fitting time. With lazy metrics, you only pay this cost for the distributions
 you actually access.
 
@@ -401,7 +417,7 @@ Enable lazy metrics to skip initial KS/AD computation during fitting:
 spark-bestfit automatically:
 
 1. Gets top N×3 candidates sorted by AIC (fast, already computed)
-2. Computes KS/AD only for those candidates (not all ~91 distributions)
+2. Computes KS/AD only for those candidates (not all ~90 distributions)
 3. Re-sorts by actual KS and returns top N
 
 This means you get correct results while computing metrics for only ~5% of distributions.
@@ -476,9 +492,9 @@ Why Lazy Metrics Matters
 The value of lazy metrics isn't measured in wall-clock speedup for a single fit—it's
 about **skipping work you don't need** across your entire workflow.
 
-**The core insight:** When fitting ~91 distributions (default), you typically only examine
+**The core insight:** When fitting ~90 distributions (default), you typically only examine
 the top 3-5 results. With eager evaluation, you compute KS/AD statistics for all
-91 distributions. With lazy evaluation, you compute them for **only the ones you
+90 distributions. With lazy evaluation, you compute them for **only the ones you
 actually access**.
 
 .. list-table:: What Gets Computed
@@ -489,14 +505,14 @@ actually access**.
      - Eager Mode
      - Lazy Mode
    * - ``best(n=1, metric="aic")``
-     - 91 KS/AD computations
+     - 90 KS/AD computations
      - **0** KS/AD computations
    * - ``best(n=1, metric="ks_statistic")``
-     - 91 KS/AD computations
+     - 90 KS/AD computations
      - **~5** KS/AD computations
    * - ``materialize()`` then filter
-     - 91 KS/AD computations
-     - 91 KS/AD computations
+     - 90 KS/AD computations
+     - 90 KS/AD computations
 
 Scaling Characteristics
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -511,8 +527,8 @@ Scaling Characteristics
 
    .. code-block:: text
 
-      10 columns × 5 iterations × 86 skipped distributions
-      = 4,300 KS/AD computations avoided
+      10 columns × 5 iterations × 85 skipped distributions
+      = 4,250 KS/AD computations avoided
 
 3. **Interactive workflows**: During exploratory analysis, you iterate quickly
    using AIC/BIC for model selection. Lazy metrics gives you instant feedback
@@ -520,7 +536,7 @@ Scaling Characteristics
 
 4. **Surgical on-demand computation**: When you request ``best(metric="ks_statistic")``,
    we get top candidates by AIC first (already computed), then compute KS/AD for
-   only those ~5 candidates—not all 91 distributions.
+   only those ~5 candidates—not all 90 distributions.
 
 **Production recommendation**: Use ``lazy_metrics=True`` as the default for
 exploratory analysis and model selection. Only use ``lazy_metrics=False`` when you
@@ -538,7 +554,7 @@ Why Pre-filter?
 ^^^^^^^^^^^^^^^
 
 Distribution fitting is expensive. Each scipy ``dist.fit()`` call involves numerical
-optimization that takes 50-500ms depending on the distribution. With ~91 distributions (default),
+optimization that takes 50-500ms depending on the distribution. With ~90 distributions (default),
 this adds up to significant time—but many distributions have intrinsic shape properties
 that make them poor fits for your data.
 
@@ -629,7 +645,7 @@ a warning:
 
 .. code-block:: text
 
-   WARNING: Pre-filter removed all 91 distributions; falling back to fitting all distributions
+   WARNING: Pre-filter removed all 90 distributions; falling back to fitting all distributions
 
 This ensures you always get results, even if the pre-filter was too aggressive.
 
@@ -784,7 +800,7 @@ partitioning optimizations ensure they're processed efficiently in parallel.
 Fitting More Distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you need to fit more distributions than the default 91, you can customize
+If you need to fit more distributions than the default 90, you can customize
 the exclusions:
 
 .. code-block:: python

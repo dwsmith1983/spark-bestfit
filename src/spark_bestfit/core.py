@@ -70,7 +70,7 @@ def _interleave_distributions(distributions: List[str]) -> List[str]:
 class DistributionFitter:
     """Modern Spark distribution fitting engine.
 
-    Efficiently fits ~100 scipy.stats distributions to data using Spark's
+    Efficiently fits ~90 scipy.stats distributions to data using Spark's
     parallel processing capabilities. Uses broadcast variables and Pandas UDFs
     to avoid data collection and minimize serialization overhead.
 
