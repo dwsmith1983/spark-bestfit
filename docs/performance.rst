@@ -57,7 +57,7 @@ Where:
 
 - **N** = number of data rows
 - **C** = number of columns being fitted
-- **D** = number of distributions (~100 continuous, ~16 discrete)
+- **D** = number of distributions (~91 continuous by default, ~16 discrete)
 - **B** = histogram bins (default: 100)
 
 **Single-column:** O(N) + O(D × B) — histogram dominates for large N
@@ -156,7 +156,8 @@ distributions are computationally expensive:
     5               | ~0.5s     | ~110ms (fast dists)
     20              | ~1.1s     | ~53ms (fast dists)
     50              | ~2.0s     | ~40ms (fast dists)
-    ~94 (default)   | ~8.7s     | ~93ms (includes slow dists)
+    91 (default)    | ~8.8s     | ~96ms (includes slow dists)
+    107 (near-all)  | ~10.3s    | ~96ms (excludes only 3 extremely slow)
 
 The first ~50 distributions are fast (~40-50ms each). The remaining distributions
 include slower ones like ``burr``, ``t``, and ``johnsonsb`` (~100-160ms each).
@@ -367,7 +368,7 @@ Not all goodness-of-fit metrics have the same computational cost:
      - Slow (~200-500ms)
      - O(n log n) sort + 2n log operations
 
-With ~100 distributions, computing KS/AD for all can add **20-50 seconds** to the
+With ~91 distributions (default), computing KS/AD for all can add **20-50 seconds** to the
 total fitting time. With lazy metrics, you only pay this cost for the distributions
 you actually access.
 
@@ -400,7 +401,7 @@ Enable lazy metrics to skip initial KS/AD computation during fitting:
 spark-bestfit automatically:
 
 1. Gets top N×3 candidates sorted by AIC (fast, already computed)
-2. Computes KS/AD only for those candidates (not all ~100 distributions)
+2. Computes KS/AD only for those candidates (not all ~91 distributions)
 3. Re-sorts by actual KS and returns top N
 
 This means you get correct results while computing metrics for only ~5% of distributions.
@@ -475,9 +476,9 @@ Why Lazy Metrics Matters
 The value of lazy metrics isn't measured in wall-clock speedup for a single fit—it's
 about **skipping work you don't need** across your entire workflow.
 
-**The core insight:** When fitting ~100 distributions, you typically only examine
+**The core insight:** When fitting ~91 distributions (default), you typically only examine
 the top 3-5 results. With eager evaluation, you compute KS/AD statistics for all
-100 distributions. With lazy evaluation, you compute them for **only the ones you
+91 distributions. With lazy evaluation, you compute them for **only the ones you
 actually access**.
 
 .. list-table:: What Gets Computed
@@ -488,14 +489,14 @@ actually access**.
      - Eager Mode
      - Lazy Mode
    * - ``best(n=1, metric="aic")``
-     - 93 KS/AD computations
+     - 91 KS/AD computations
      - **0** KS/AD computations
    * - ``best(n=1, metric="ks_statistic")``
-     - 93 KS/AD computations
+     - 91 KS/AD computations
      - **~5** KS/AD computations
    * - ``materialize()`` then filter
-     - 93 KS/AD computations
-     - 93 KS/AD computations
+     - 91 KS/AD computations
+     - 91 KS/AD computations
 
 Scaling Characteristics
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -510,8 +511,8 @@ Scaling Characteristics
 
    .. code-block:: text
 
-      10 columns × 5 iterations × 88 skipped distributions
-      = 4,400 KS/AD computations avoided
+      10 columns × 5 iterations × 86 skipped distributions
+      = 4,300 KS/AD computations avoided
 
 3. **Interactive workflows**: During exploratory analysis, you iterate quickly
    using AIC/BIC for model selection. Lazy metrics gives you instant feedback
@@ -519,7 +520,7 @@ Scaling Characteristics
 
 4. **Surgical on-demand computation**: When you request ``best(metric="ks_statistic")``,
    we get top candidates by AIC first (already computed), then compute KS/AD for
-   only those ~5 candidates—not all 93 distributions.
+   only those ~5 candidates—not all 91 distributions.
 
 **Production recommendation**: Use ``lazy_metrics=True`` as the default for
 exploratory analysis and model selection. Only use ``lazy_metrics=False`` when you
@@ -537,7 +538,7 @@ Why Pre-filter?
 ^^^^^^^^^^^^^^^
 
 Distribution fitting is expensive. Each scipy ``dist.fit()`` call involves numerical
-optimization that takes 50-500ms depending on the distribution. With ~100 distributions,
+optimization that takes 50-500ms depending on the distribution. With ~91 distributions (default),
 this adds up to significant time—but many distributions have intrinsic shape properties
 that make them poor fits for your data.
 
@@ -628,7 +629,7 @@ a warning:
 
 .. code-block:: text
 
-   WARNING: Pre-filter removed all 93 distributions; falling back to fitting all distributions
+   WARNING: Pre-filter removed all 91 distributions; falling back to fitting all distributions
 
 This ensures you always get results, even if the pre-filter was too aggressive.
 
@@ -780,26 +781,37 @@ The slow distributions (100-160ms vs ~32ms median) include:
 These distributions are **not excluded**—they are available for fitting. The
 partitioning optimizations ensure they're processed efficiently in parallel.
 
-Fitting All Distributions
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Fitting More Distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you need to fit all scipy distributions (including the extremely slow ones),
-you can override the default exclusions:
+If you need to fit more distributions than the default 91, you can customize
+the exclusions:
 
 .. code-block:: python
 
    from spark_bestfit import DistributionFitter
 
-   # Fit ALL scipy continuous distributions (including slow ones)
+   # Fit 107 distributions (exclude only the 3 extremely slow ones)
+   # This is practical and completes in ~10s on a 10-core machine
+   extremely_slow = ("tukeylambda", "nct", "dpareto_lognorm")
+   fitter = DistributionFitter(spark, excluded_distributions=extremely_slow)
+   results = fitter.fit(df, "value")
+
+   # Fit ALL 110 scipy continuous distributions (including extremely slow ones)
+   # WARNING: tukeylambda can take 7+ seconds per fit or even hang
    fitter = DistributionFitter(spark, excluded_distributions=())
    results = fitter.fit(df, "value")
 
+.. warning::
+
+   Using ``excluded_distributions=()`` includes ``tukeylambda``, which has
+   ill-conditioned numerical optimization that can take **7+ seconds per fit**
+   or even hang on certain data distributions. For practical use, we recommend
+   excluding at least the 3 extremely slow distributions as shown above.
+
 .. note::
 
-   With distribution-aware partitioning, fitting all distributions takes ~10s
-   on a 10-core machine (vs ~25s with fixed partitioning). The slow distributions
-   (``tukeylambda``, ``nct``, ``dpareto_lognorm``) are spread across partitions
-   and processed in parallel, minimizing straggler effects.
-
-   Use ``excluded_distributions=()`` only when you specifically need results
-   for the extremely slow distributions.
+   With distribution-aware partitioning, fitting 107 distributions (excluding
+   only the 3 extremely slow ones) takes ~10.3s on a 10-core machine. The slow
+   distributions (``burr``, ``t``, ``johnsonsb``, etc.) are spread across
+   partitions and processed in parallel, minimizing straggler effects.
