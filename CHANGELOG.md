@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.7.1 (2026-01-02)
+
+### Bug Fixes
+
+- Excluded_distributions parameter now properly overrides registry defaults
+  ([#79](https://github.com/dwsmith1983/spark-bestfit/pull/79),
+  [`320a615`](https://github.com/dwsmith1983/spark-bestfit/commit/320a61584c0b92c6639ca260719c1bc5289f1919))
+
+
 ## v1.7.0 (2026-01-02)
 
 ### Features
