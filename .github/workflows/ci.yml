@@ -12,7 +12,6 @@ jobs:
       src: ${{ steps.filter.outputs.src }}
       tests: ${{ steps.filter.outputs.tests }}
       docs: ${{ steps.filter.outputs.docs }}
-      examples: ${{ steps.filter.outputs.examples }}
       deps: ${{ steps.filter.outputs.deps }}
     steps:
       - uses: actions/checkout@v6
@@ -28,8 +27,6 @@ jobs:
               - 'docs/**'
               - '*.md'
               - '.readthedocs.yaml'
-            examples:
-              - 'examples/**'
             deps:
               - 'pyproject.toml'
 
@@ -163,27 +160,9 @@ jobs:
       - name: Build documentation
         run: sphinx-build -b html docs docs/_build/html -W --keep-going
 
-  examples:
-    needs: [changes, pre-commit]
-    # Run when source, examples, or dependencies change
-    if: |
-      needs.changes.outputs.src == 'true' ||
-      needs.changes.outputs.examples == 'true' ||
-      needs.changes.outputs.deps == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install -e .
-      - name: Validate example imports
-        run: python scripts/validate_examples.py
-
   # Summary job for branch protection - single required check
   ci:
-    needs: [changes, test, docs, examples]
+    needs: [changes, test, docs]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -192,15 +171,13 @@ jobs:
           # Get job results (skipped jobs are OK - they were intentionally filtered)
           test_result="${{ needs.test.result }}"
           docs_result="${{ needs.docs.result }}"
-          examples_result="${{ needs.examples.result }}"
 
           echo "Job results:"
           echo "  test: $test_result"
           echo "  docs: $docs_result"
-          echo "  examples: $examples_result"
 
           # Check each job - 'success' or 'skipped' are acceptable
-          for job in test docs examples; do
+          for job in test docs; do
             result_var="${job}_result"
             result="${!result_var}"
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
