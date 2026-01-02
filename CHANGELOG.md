@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-01-02)
+
+### Features
+
+- **perf**: Add distribution-aware partitioning for better load balancing
+  ([#76](https://github.com/dwsmith1983/spark-bestfit/pull/76),
+  [`c42fc24`](https://github.com/dwsmith1983/spark-bestfit/commit/c42fc24f566cb8832487db24de547ad2116c50ce))
+
+
 ## v1.6.0 (2026-01-01)
 
 ### Features
