@@ -30,6 +30,46 @@ class TestDistributionFitter:
         assert fitter.excluded_distributions == expected_excluded
         assert fitter.random_seed == expected_seed
 
+    def test_empty_exclusions_uses_all_distributions(self, spark_session):
+        """Test that excluded_distributions=() enables ALL scipy distributions.
+
+        This is a regression test for issue #78 where excluded_distributions=()
+        did not override the registry's DEFAULT_EXCLUSIONS.
+        """
+        from spark_bestfit.distributions import DistributionRegistry
+
+        # Get count of ALL scipy distributions (no exclusions)
+        all_dists = DistributionRegistry(custom_exclusions=set()).get_distributions()
+        default_dists = DistributionRegistry().get_distributions()
+
+        # Verify there are more distributions without exclusions
+        assert len(all_dists) > len(default_dists), "ALL should have more distributions than default"
+
+        # Create fitter with empty exclusions
+        fitter = DistributionFitter(spark_session, excluded_distributions=())
+
+        # Verify the fitter's registry has ALL distributions
+        fitter_dists = fitter._registry.get_distributions()
+        assert len(fitter_dists) == len(all_dists), (
+            f"Fitter with excluded_distributions=() should have {len(all_dists)} distributions, "
+            f"got {len(fitter_dists)}"
+        )
+
+    def test_default_exclusions_applied(self, spark_session):
+        """Test that default behavior applies DEFAULT_EXCLUSIONS."""
+        from spark_bestfit.distributions import DistributionRegistry
+
+        default_dists = DistributionRegistry().get_distributions()
+
+        # Create fitter with default exclusions (excluded_distributions=None)
+        fitter = DistributionFitter(spark_session)
+
+        # Verify the fitter's registry uses default exclusions
+        fitter_dists = fitter._registry.get_distributions()
+        assert len(fitter_dists) == len(default_dists), (
+            f"Default fitter should have {len(default_dists)} distributions, got {len(fitter_dists)}"
+        )
+
     def test_fit_basic(self, spark_session, small_dataset):
         """Test basic fitting operation returns valid results."""
         fitter = DistributionFitter(spark_session)
@@ -685,6 +725,32 @@ class TestDiscreteDistributionFitter:
 
         assert fitter.excluded_distributions == custom_exclusions
         assert fitter.random_seed == 123
+
+    def test_empty_exclusions_disables_registry_defaults(self, spark_session):
+        """Test that excluded_distributions=() disables registry's DEFAULT_EXCLUSIONS.
+
+        This is a regression test for issue #78.
+
+        Note: For discrete distributions, get_distributions() only returns distributions
+        with param configs. The DEFAULT_EXCLUSIONS don't have configs, so they're not
+        available regardless. This test verifies the registry is created correctly.
+        """
+        from spark_bestfit.distributions import DiscreteDistributionRegistry
+
+        # Create fitter with empty exclusions
+        fitter = DiscreteDistributionFitter(spark_session, excluded_distributions=())
+
+        # Verify the fitter's registry has custom_exclusions=set() (empty)
+        assert fitter._registry._excluded == set(), (
+            f"Fitter with excluded_distributions=() should have empty registry exclusions, "
+            f"got {fitter._registry._excluded}"
+        )
+
+        # Verify default fitter uses DEFAULT_EXCLUSIONS
+        default_fitter = DiscreteDistributionFitter(spark_session)
+        assert default_fitter._registry._excluded == DiscreteDistributionRegistry.DEFAULT_EXCLUSIONS, (
+            "Default fitter should use DEFAULT_EXCLUSIONS"
+        )
 
     def test_fit_identifies_poisson(self, spark_session, poisson_dataset):
         """Test that fitter identifies Poisson for Poisson data."""

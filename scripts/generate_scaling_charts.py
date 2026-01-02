@@ -87,8 +87,14 @@ def extract_scaling_data(results: dict) -> dict:
             data["dist_count"]["counts"].append(50)
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
-        elif "all_distributions" in name and "discrete" not in name and "SlowDistributionOptimizations" not in fullname:
-            data["dist_count"]["counts"].append(100)
+        elif "default_distributions" in name and "discrete" not in name:
+            # ~91 distributions with default exclusions (20 slow dists excluded)
+            data["dist_count"]["counts"].append(91)
+            data["dist_count"]["times"].append(mean_time)
+            data["dist_count"]["stddevs"].append(stddev)
+        elif "SlowDistributionOptimizations" in fullname and "all_distributions" in name:
+            # 107 distributions (only 3 extremely slow excluded) - shows fix works
+            data["dist_count"]["counts"].append(107)
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
 
@@ -281,7 +287,7 @@ def generate_distribution_count_chart(data: dict, output_path: Path) -> None:
     ax.set_title("spark-bestfit: Fit Time vs Distribution Count", fontsize=14, fontweight="bold")
     ax.legend(loc="upper left", fontsize=11)
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(0, 110)
+    ax.set_xlim(0, 115)
     ax.set_ylim(bottom=0)
 
     # Add annotation explaining the jump at high distribution counts

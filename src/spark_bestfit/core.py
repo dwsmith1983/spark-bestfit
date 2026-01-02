@@ -108,6 +108,7 @@ class DistributionFitter:
             spark: SparkSession. If None, uses the active session.
             excluded_distributions: Distributions to exclude from fitting.
                 Defaults to DEFAULT_EXCLUDED_DISTRIBUTIONS (slow distributions).
+                Pass an empty tuple ``()`` to include ALL scipy distributions.
             random_seed: Random seed for reproducible sampling.
 
         Raises:
@@ -118,7 +119,12 @@ class DistributionFitter:
             excluded_distributions if excluded_distributions is not None else DEFAULT_EXCLUDED_DISTRIBUTIONS
         )
         self.random_seed = random_seed
-        self._registry = DistributionRegistry()
+        # When excluded_distributions=() is explicitly passed, disable registry's
+        # default exclusions so ALL scipy distributions are available
+        if excluded_distributions == ():
+            self._registry = DistributionRegistry(custom_exclusions=set())
+        else:
+            self._registry = DistributionRegistry()
         self._histogram_computer = HistogramComputer()
 
     def fit(
@@ -1147,6 +1153,7 @@ class DiscreteDistributionFitter:
             spark: SparkSession. If None, uses the active session.
             excluded_distributions: Distributions to exclude from fitting.
                 Defaults to DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS.
+                Pass an empty tuple ``()`` to include ALL scipy discrete distributions.
             random_seed: Random seed for reproducible sampling.
 
         Raises:
@@ -1157,7 +1164,12 @@ class DiscreteDistributionFitter:
             excluded_distributions if excluded_distributions is not None else DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
         )
         self.random_seed = random_seed
-        self._registry = DiscreteDistributionRegistry()
+        # When excluded_distributions=() is explicitly passed, disable registry's
+        # default exclusions so ALL scipy discrete distributions are available
+        if excluded_distributions == ():
+            self._registry = DiscreteDistributionRegistry(custom_exclusions=set())
+        else:
+            self._registry = DiscreteDistributionRegistry()
 
     def fit(
         self,
