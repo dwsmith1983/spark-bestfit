@@ -26,6 +26,47 @@ logger = logging.getLogger(__name__)
 DEFAULT_EXCLUDED_DISTRIBUTIONS: Tuple[str, ...] = tuple(DistributionRegistry.DEFAULT_EXCLUSIONS)
 
 
+def _interleave_distributions(distributions: List[str]) -> List[str]:
+    """Interleave slow distributions among fast ones for better partition balance.
+
+    When Spark repartitions the distribution DataFrame, this ordering ensures
+    slow distributions are spread across partitions rather than clustered,
+    reducing straggler effects.
+
+    Args:
+        distributions: List of distribution names to fit
+
+    Returns:
+        Reordered list with slow distributions spread evenly among fast ones
+
+    Example:
+        >>> dists = ["norm", "expon", "gamma", "burr", "t", "johnsonsb"]
+        >>> # burr, t, johnsonsb are slow - they get spread out:
+        >>> _interleave_distributions(dists)
+        ['burr', 'norm', 'expon', 't', 'gamma', 'johnsonsb']
+    """
+    from spark_bestfit.distributions import DistributionRegistry
+
+    slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
+    slow = [d for d in distributions if d in slow_set]
+    fast = [d for d in distributions if d not in slow_set]
+
+    if not slow or not fast:
+        return distributions
+
+    # Insert slow distributions at even intervals among fast ones
+    result: List[str] = []
+    slow_interval = max(1, len(fast) // len(slow))
+    slow_idx = 0
+    for i, d in enumerate(fast):
+        if slow_idx < len(slow) and i % slow_interval == 0:
+            result.append(slow[slow_idx])
+            slow_idx += 1
+        result.append(d)
+    result.extend(slow[slow_idx:])  # Remaining slow ones at end
+    return result
+
+
 class DistributionFitter:
     """Modern Spark distribution fitting engine.
 
@@ -348,11 +389,14 @@ class DistributionFitter:
         data_summary = compute_data_summary(data_sample)
 
         try:
+            # Interleave slow distributions for better partition balance
+            distributions = _interleave_distributions(distributions)
+
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
 
-            # Determine partitioning
-            n_partitions = num_partitions or self._calculate_partitions(len(distributions))
+            # Determine partitioning (weighted for slow distributions)
+            n_partitions = num_partitions or self._calculate_partitions(distributions)
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply fitting UDF
@@ -748,23 +792,30 @@ class DistributionFitter:
         sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed)
         return sample_df.toPandas()[column].values
 
-    def _calculate_partitions(self, num_distributions: int) -> int:
+    def _calculate_partitions(self, distributions: List[str]) -> int:
         """Calculate optimal Spark partition count for distribution fitting.
 
-        Uses the minimum of the number of distributions and twice the default
-        parallelism to balance workload distribution.
+        Uses distribution-aware weighting: slow distributions count as 3x
+        for partition calculation to reduce straggler effects when slow
+        distributions cluster in the same partition.
 
         Args:
-            num_distributions: Number of distributions to fit
+            distributions: List of distribution names to fit
 
         Returns:
             Optimal partition count for the fitting operation
         """
-        total_cores = self.spark.sparkContext.defaultParallelism
-        return min(num_distributions, total_cores * 2)
+        from spark_bestfit.distributions import DistributionRegistry
 
+        slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
+        slow_count = sum(1 for d in distributions if d in slow_set)
+        # Slow distributions count as 3x (add 2 extra for each slow one)
+        effective_count = len(distributions) + slow_count * 2
+        total_cores = self.spark.sparkContext.defaultParallelism
+        return min(effective_count, total_cores * 2)
+
+    @staticmethod
     def _prefilter_distributions(
-        self,
         distributions: List[str],
         data_sample: np.ndarray,
         mode: Union[bool, str],
@@ -1335,11 +1386,15 @@ class DiscreteDistributionFitter:
         data_summary = compute_data_summary(data_sample.astype(float))
 
         try:
+            # Interleave slow distributions for better partition balance
+            # (Currently no slow discrete distributions, but maintains consistency)
+            distributions = _interleave_distributions(distributions)
+
             # Create DataFrame of distributions
             dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
 
             # Determine partitioning
-            n_partitions = num_partitions or self._calculate_partitions(len(distributions))
+            n_partitions = num_partitions or self._calculate_partitions(distributions)
             dist_df = dist_df.repartition(n_partitions)
 
             # Apply discrete fitting UDF
@@ -1548,20 +1603,26 @@ class DiscreteDistributionFitter:
         logger.info(f"Sampling {fraction * 100:.1f}% of data ({int(row_count * fraction)} rows)")
         return df.sample(fraction=fraction, seed=self.random_seed)
 
-    def _calculate_partitions(self, num_distributions: int) -> int:
+    def _calculate_partitions(self, distributions: List[str]) -> int:
         """Calculate optimal Spark partition count for distribution fitting.
 
-        Uses the minimum of the number of distributions and twice the default
-        parallelism to balance workload distribution.
+        Uses distribution-aware weighting: slow distributions count 3x to ensure
+        adequate parallelism when fitting computationally expensive distributions.
 
         Args:
-            num_distributions: Number of distributions to fit
+            distributions: List of distribution names to fit
 
         Returns:
             Optimal partition count for the fitting operation
         """
+        from spark_bestfit.distributions import DistributionRegistry
+
+        slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
+        slow_count = sum(1 for d in distributions if d in slow_set)
+        # Slow distributions count 3x (1 base + 2 extra)
+        effective_count = len(distributions) + slow_count * 2
         total_cores = self.spark.sparkContext.defaultParallelism
-        return min(num_distributions, total_cores * 2)
+        return min(effective_count, total_cores * 2)
 
     def plot(
         self,

@@ -150,8 +150,11 @@ class TestDistributionFitter:
     def test_calculate_partitions(self, spark_session, num_dists):
         """Test partition calculation returns reasonable values."""
         fitter = DistributionFitter(spark_session)
-        partitions = fitter._calculate_partitions(num_dists)
-        assert 1 <= partitions <= num_dists
+        # _calculate_partitions now takes a list of distribution names
+        dists = ["norm", "expon", "gamma", "beta", "uniform"][:num_dists] if num_dists <= 5 else \
+                DistributionRegistry().get_distributions()[:num_dists]
+        partitions = fitter._calculate_partitions(dists)
+        assert 1 <= partitions <= len(dists) * 3  # Allow for slow distribution weighting
 
     def test_fit_caches_results(self, spark_session, small_dataset):
         """Test that fit results are cached and consistent."""
@@ -1074,3 +1077,145 @@ class TestPrefilterIntegration:
             info_calls = [str(call) for call in mock_logger.info.call_args_list]
             prefilter_logged = any("Pre-filter: skipped" in call for call in info_calls)
             assert prefilter_logged, "Should log pre-filter info message (skewness filtering)"
+
+
+class TestNewExclusions:
+    """Tests for new DEFAULT_EXCLUSIONS added in v1.6.1."""
+
+    def test_tukeylambda_excluded_by_default(self):
+        """tukeylambda should not be in default distributions (extremely slow ~7s)."""
+        registry = DistributionRegistry()
+        dists = registry.get_distributions()
+        assert "tukeylambda" not in dists
+        assert "tukeylambda" in DistributionRegistry.DEFAULT_EXCLUSIONS
+
+    def test_nct_excluded_by_default(self):
+        """nct should not be in default distributions (very slow ~1.4s)."""
+        registry = DistributionRegistry()
+        dists = registry.get_distributions()
+        assert "nct" not in dists
+        assert "nct" in DistributionRegistry.DEFAULT_EXCLUSIONS
+
+    def test_dpareto_lognorm_excluded_by_default(self):
+        """dpareto_lognorm should not be in default distributions (slow ~0.5s)."""
+        registry = DistributionRegistry()
+        dists = registry.get_distributions()
+        assert "dpareto_lognorm" not in dists
+        assert "dpareto_lognorm" in DistributionRegistry.DEFAULT_EXCLUSIONS
+
+    def test_slow_distributions_constant_exists(self):
+        """SLOW_DISTRIBUTIONS constant should exist for partition weighting."""
+        assert hasattr(DistributionRegistry, "SLOW_DISTRIBUTIONS")
+        slow_dists = DistributionRegistry.SLOW_DISTRIBUTIONS
+        assert isinstance(slow_dists, set)
+        assert len(slow_dists) > 0
+        # Verify some known slow distributions are present
+        assert "burr" in slow_dists
+        assert "t" in slow_dists
+        assert "johnsonsb" in slow_dists
+
+    def test_slow_distributions_not_in_exclusions(self):
+        """SLOW_DISTRIBUTIONS should be fittable (not in exclusions)."""
+        slow_dists = DistributionRegistry.SLOW_DISTRIBUTIONS
+        exclusions = DistributionRegistry.DEFAULT_EXCLUSIONS
+        # Slow distributions should NOT be excluded - they're used for weighting
+        for dist in slow_dists:
+            assert dist not in exclusions, f"{dist} is in both SLOW_DISTRIBUTIONS and DEFAULT_EXCLUSIONS"
+
+
+class TestInterleaveDistributions:
+    """Tests for _interleave_distributions helper function."""
+
+    def test_interleave_spreads_slow_distributions(self):
+        """Slow distributions should not be consecutive after interleaving."""
+        from spark_bestfit.core import _interleave_distributions
+
+        slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
+        # Create a list with slow distributions at the end (worst case for round-robin)
+        fast = ["norm", "expon", "gamma", "beta", "uniform", "chi2", "f", "weibull_min"]
+        slow = ["burr", "t", "johnsonsb", "fisk"]
+        clustered = fast + slow
+
+        interleaved = _interleave_distributions(clustered)
+
+        # Get indices of slow distributions after interleaving
+        slow_indices = [i for i, d in enumerate(interleaved) if d in slow_set]
+
+        # Verify slow distributions are spread out (not all at end)
+        assert slow_indices != [8, 9, 10, 11], "Slow distributions should not all be at end"
+
+    def test_interleave_preserves_all_distributions(self):
+        """Interleaving should not drop any distributions."""
+        from spark_bestfit.core import _interleave_distributions
+
+        dists = ["norm", "expon", "burr", "t", "gamma", "johnsonsb"]
+        interleaved = _interleave_distributions(dists)
+
+        assert len(interleaved) == len(dists)
+        assert set(interleaved) == set(dists)
+
+    def test_interleave_handles_no_slow(self):
+        """Interleaving handles lists with no slow distributions."""
+        from spark_bestfit.core import _interleave_distributions
+
+        fast_only = ["norm", "expon", "gamma"]
+        result = _interleave_distributions(fast_only)
+        assert result == fast_only
+
+    def test_interleave_handles_all_slow(self):
+        """Interleaving handles lists with only slow distributions."""
+        from spark_bestfit.core import _interleave_distributions
+
+        slow_only = ["burr", "t", "johnsonsb"]
+        result = _interleave_distributions(slow_only)
+        assert result == slow_only
+
+
+class TestDistributionAwarePartitioning:
+    """Tests for distribution-aware partition calculation."""
+
+    def test_slow_distributions_weighted_3x(self, spark_session):
+        """Slow distributions should count as 3x for partition calculation."""
+        fitter = DistributionFitter(spark_session)
+
+        # Get default parallelism for comparison
+        total_cores = spark_session.sparkContext.defaultParallelism
+
+        # Test with fast distributions only
+        fast_dists = ["norm", "expon", "gamma", "beta"]  # 4 fast
+        fast_partitions = fitter._calculate_partitions(fast_dists)
+
+        # Test with same count but some slow distributions
+        mixed_dists = ["norm", "expon", "burr", "t"]  # 2 fast, 2 slow
+        mixed_partitions = fitter._calculate_partitions(mixed_dists)
+
+        # Mixed should have more effective count: 4 + (2 * 2) = 8 effective
+        # vs fast which has 4 effective
+        # So mixed_partitions >= fast_partitions (unless capped by cores)
+        if total_cores * 2 > 4:
+            assert mixed_partitions >= fast_partitions
+
+    def test_partitions_capped_at_2x_cores(self, spark_session):
+        """Partition count should not exceed 2x available cores."""
+        fitter = DistributionFitter(spark_session)
+        total_cores = spark_session.sparkContext.defaultParallelism
+
+        # Create a large list with many slow distributions
+        slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
+        many_slow = list(slow_set)[:10] + ["norm"] * 50
+
+        partitions = fitter._calculate_partitions(many_slow)
+
+        assert partitions <= total_cores * 2
+
+    def test_discrete_fitter_has_same_partitioning(self, spark_session):
+        """Discrete fitter should use the same partitioning logic."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        discrete_fitter = DiscreteDistributionFitter(spark_session)
+
+        # Verify discrete fitter has _calculate_partitions with list signature
+        fast_dists = ["poisson", "geom", "binom"]
+        partitions = discrete_fitter._calculate_partitions(fast_dists)
+        assert isinstance(partitions, int)
+        assert partitions > 0

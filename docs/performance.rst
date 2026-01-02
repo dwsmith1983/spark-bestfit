@@ -136,12 +136,12 @@ Fit time is **sub-linear** with data size due to the histogram-based approach:
 
     Data Size    | Fit Time  | Scaling Factor
     -------------|-----------|------------------
-    25,000       | ~14.7s    | 1.0× (baseline)
-    100,000      | ~19.6s    | ~1.3×
-    500,000      | ~18.8s    | ~1.3×
-    1,000,000    | ~23.4s    | ~1.6×
+    25,000       | ~7.3s     | 1.0× (baseline)
+    100,000      | ~9.8s     | ~1.3×
+    500,000      | ~9.0s     | ~1.2×
+    1,000,000    | ~7.6s     | ~1.0×
 
-A 40× increase in data results in only ~1.6× increase in time (vs 40× if O(N)).
+A 40× increase in data results in only ~1.0× increase in time (vs 40× if O(N)).
 
 Distribution Count Scaling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -153,13 +153,14 @@ distributions are computationally expensive:
 
     # Distributions | Fit Time  | Time per Distribution
     ----------------|-----------|----------------------
-    5               | ~0.5s     | ~102ms (fast dists)
-    20              | ~2.1s     | ~104ms (fast dists)
-    50              | ~2.8s     | ~56ms (fast dists)
-    100             | ~24.4s    | ~244ms (includes slow dists)
+    5               | ~0.5s     | ~110ms (fast dists)
+    20              | ~1.1s     | ~53ms (fast dists)
+    50              | ~2.0s     | ~40ms (fast dists)
+    ~94 (default)   | ~8.7s     | ~93ms (includes slow dists)
 
-The first ~50 distributions are fast (~50-100ms each). The remaining distributions
-include slow ones like ``levy_stable`` and ``studentized_range`` (~430ms each).
+The first ~50 distributions are fast (~40-50ms each). The remaining distributions
+include slower ones like ``burr``, ``t``, and ``johnsonsb`` (~100-160ms each).
+See :ref:`slow-distribution-optimizations` for details.
 
 Multi-Column Efficiency
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -672,3 +673,137 @@ Pre-filtering and lazy metrics are complementary optimizations:
 **Combined benefit:** Pre-filtering reduces the number of distributions to fit,
 and lazy metrics defers expensive KS/AD computation. Together, they can reduce
 total fitting time by 50-80% for typical workflows.
+
+.. _slow-distribution-optimizations:
+
+Slow Distribution Optimizations (v1.6.1)
+----------------------------------------
+
+Based on comprehensive timing analysis, v1.6.1 adds several performance optimizations
+for handling slow scipy distributions.
+
+New Default Exclusions
+^^^^^^^^^^^^^^^^^^^^^^
+
+Three extremely slow distributions were added to ``DEFAULT_EXCLUSIONS``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - Distribution
+     - Fit Time
+     - Notes
+   * - ``tukeylambda``
+     - ~6.8s
+     - Extremely slow due to ill-conditioned optimization
+   * - ``nct``
+     - ~1.4s
+     - Non-central t distribution, expensive PDF computation
+   * - ``dpareto_lognorm``
+     - ~0.5s
+     - Double Pareto-lognormal, complex distribution
+
+These are now excluded by default.
+
+Benchmark Results
+^^^^^^^^^^^^^^^^^
+
+The v1.6.1 optimizations provide significant performance improvements:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 20 20
+
+   * - Test
+     - Before (v1.6.0)
+     - After (v1.6.1)
+     - Improvement
+   * - Fit all distributions (10K rows)
+     - 24.4s
+     - 8.7s
+     - **64% faster**
+   * - Fit 1M rows
+     - 23.3s
+     - 7.6s
+     - **67% faster**
+   * - Fit 100K rows
+     - 19.5s
+     - 9.8s
+     - **50% faster**
+   * - Lazy AIC-only workflow
+     - 18.9s
+     - 2.8s
+     - **85% faster**
+
+The overall benchmark suite runtime dropped from **90 minutes to 47 minutes** (48% faster).
+
+.. image:: _static/slow_dist_optimization.png
+   :alt: Slow distribution optimization comparison
+   :width: 100%
+
+Distribution-Aware Partitioning
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When fitting distributions in parallel across Spark partitions, some distributions
+take 3-5× longer than others. Without intervention, these "slow" distributions can
+cluster in a single partition, creating a straggler effect.
+
+v1.6.1 implements two optimizations:
+
+1. **Distribution interleaving**: Slow distributions are spread evenly among fast
+   ones before creating the Spark DataFrame, ensuring they're distributed across
+   partitions.
+
+2. **Weighted partition calculation**: Slow distributions count 3× when calculating
+   the optimal partition count, ensuring adequate parallelism.
+
+The slow distributions (100-160ms vs ~32ms median) include:
+
+.. code-block:: python
+
+   SLOW_DISTRIBUTIONS = {
+       "powerlognorm",   # ~160ms
+       "norminvgauss",   # ~150ms
+       "t",              # ~144ms
+       "pearson3",       # ~141ms
+       "exponweib",      # ~136ms
+       "johnsonsb",      # ~133ms
+       "jf_skew_t",      # ~125ms
+       "fisk",           # ~120ms
+       "gengamma",       # ~120ms
+       "johnsonsu",      # ~106ms
+       "burr",           # ~105ms
+       "burr12",         # ~105ms
+       "truncweibull_min",  # ~104ms
+       "invweibull",     # ~92ms
+       "rice",           # ~91ms
+       "genexpon",       # ~89ms
+   }
+
+These distributions are **not excluded**—they are available for fitting. The
+partitioning optimizations ensure they're processed efficiently in parallel.
+
+Fitting All Distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you need to fit all scipy distributions (including the extremely slow ones),
+you can override the default exclusions:
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter
+
+   # Fit ALL scipy continuous distributions (including slow ones)
+   fitter = DistributionFitter(spark, excluded_distributions=())
+   results = fitter.fit(df, "value")
+
+.. note::
+
+   With distribution-aware partitioning, fitting all distributions takes ~10s
+   on a 10-core machine (vs ~25s with fixed partitioning). The slow distributions
+   (``tukeylambda``, ``nct``, ``dpareto_lognorm``) are spread across partitions
+   and processed in parallel, minimizing straggler effects.
+
+   Use ``excluded_distributions=()`` only when you specifically need results
+   for the extremely slow distributions.

@@ -47,6 +47,30 @@ class DistributionRegistry:
         "recipinvgauss",  # Can be slow
         "vonmises",  # Can be slow on fitting
         "vonmises_line",  # Can be slow on fitting
+        "tukeylambda",  # Extremely slow (~7s) - ill-conditioned optimization
+        "nct",  # Very slow (~1.4s) - non-central t distribution
+        "dpareto_lognorm",  # Slow (~0.5s) - double Pareto-lognormal
+    }
+
+    # Distributions that are included but noticeably slower (~3-5x average).
+    # Used for partition weighting when fitting with all distributions.
+    SLOW_DISTRIBUTIONS: Set[str] = {
+        "powerlognorm",  # ~160ms
+        "norminvgauss",  # ~150ms
+        "t",  # ~144ms
+        "pearson3",  # ~141ms
+        "exponweib",  # ~136ms
+        "johnsonsb",  # ~133ms
+        "jf_skew_t",  # ~125ms
+        "fisk",  # ~120ms
+        "gengamma",  # ~120ms
+        "johnsonsu",  # ~106ms
+        "burr",  # ~105ms
+        "burr12",  # ~105ms
+        "truncweibull_min",  # ~104ms
+        "invweibull",  # ~92ms
+        "rice",  # ~91ms
+        "genexpon",  # ~89ms
     }
 
     # All scipy continuous distributions

@@ -47,10 +47,12 @@ def extract_scaling_data(results: dict) -> dict:
         "dist_count": {"counts": [], "times": [], "stddevs": []},
         "multi_column": {"labels": [], "times": [], "stddevs": []},
         "lazy_metrics": {"labels": [], "times": [], "stddevs": []},
+        "slow_dist_opt": {"labels": [], "times": [], "stddevs": []},  # v1.6.1
     }
 
     for benchmark in results.get("benchmarks", []):
         name = benchmark["name"]
+        fullname = benchmark.get("fullname", name)  # For class-based matching
         mean_time = benchmark["stats"]["mean"]
         stddev = benchmark["stats"]["stddev"]
 
@@ -85,7 +87,7 @@ def extract_scaling_data(results: dict) -> dict:
             data["dist_count"]["counts"].append(50)
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
-        elif "all_distributions" in name and "discrete" not in name:
+        elif "all_distributions" in name and "discrete" not in name and "SlowDistributionOptimizations" not in fullname:
             data["dist_count"]["counts"].append(100)
             data["dist_count"]["times"].append(mean_time)
             data["dist_count"]["stddevs"].append(stddev)
@@ -117,6 +119,17 @@ def extract_scaling_data(results: dict) -> dict:
             data["lazy_metrics"]["labels"].append("Lazy\n(+ materialize)")
             data["lazy_metrics"]["times"].append(mean_time)
             data["lazy_metrics"]["stddevs"].append(stddev)
+
+        # Parse slow distribution optimization benchmarks (v1.6.1)
+        if "SlowDistributionOptimizations" in fullname:
+            if "default_exclusions" in name:
+                data["slow_dist_opt"]["labels"].append("Default Exclusions\n(20 excluded)")
+                data["slow_dist_opt"]["times"].append(mean_time)
+                data["slow_dist_opt"]["stddevs"].append(stddev)
+            elif "all_distributions" in name:
+                data["slow_dist_opt"]["labels"].append("All Distributions\n(0 excluded)")
+                data["slow_dist_opt"]["times"].append(mean_time)
+                data["slow_dist_opt"]["stddevs"].append(stddev)
 
     return data
 
@@ -272,9 +285,9 @@ def generate_distribution_count_chart(data: dict, output_path: Path) -> None:
     ax.set_ylim(bottom=0)
 
     # Add annotation explaining the jump at high distribution counts
-    if len(counts) >= 4 and times[-1] > times[-2] * 3:
+    if len(counts) >= 4 and times[-1] > times[-2] * 1.5:
         ax.annotate(
-            "Slow distributions\n(levy_stable, etc.)",
+            "Slow distributions\n(burr, t, johnsonsb, etc.)",
             xy=(counts[-1], times[-1]),
             xytext=(counts[-1] - 30, times[-1] * 0.65),
             fontsize=10,
@@ -428,6 +441,84 @@ def generate_lazy_metrics_chart(data: dict, output_path: Path) -> None:
     print(f"Saved: {output_path}")
 
 
+def generate_slow_dist_opt_chart(data: dict, output_path: Path) -> None:
+    """Generate slow distribution optimization comparison chart (v1.6.1)."""
+    labels = data["slow_dist_opt"]["labels"]
+    times = np.array(data["slow_dist_opt"]["times"])
+    stddevs = np.array(data["slow_dist_opt"]["stddevs"])
+
+    if len(labels) < 2:
+        print("Not enough data points for slow distribution optimization chart")
+        return
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Bar colors: green for default (fast), red for all (slow)
+    colors = ["#16a34a", "#dc2626"]
+
+    # Create bars
+    x = np.arange(len(labels))
+    bars = ax.bar(x, times, yerr=stddevs, capsize=8, color=colors, edgecolor="black", linewidth=1.5)
+
+    # Add value labels on bars
+    for bar, time in zip(bars, times):
+        height = bar.get_height()
+        ax.annotate(
+            f"{time:.2f}s",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 5),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=12,
+            fontweight="bold",
+        )
+
+    # Calculate speedup
+    if len(times) >= 2:
+        slowdown = times[1] / times[0]
+        savings_pct = (1 - times[0] / times[1]) * 100
+
+        ax.annotate(
+            f"Default is {slowdown:.1f}× faster\n({savings_pct:.0f}% time saved)",
+            xy=(0.5, max(times) * 0.5),
+            fontsize=14,
+            ha="center",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="wheat", alpha=0.8),
+        )
+
+    # Formatting
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=11)
+    ax.set_ylabel("Fit Time (seconds)", fontsize=12)
+    ax.set_title(
+        "Slow Distribution Optimization (v1.6.1)\n(100K rows, distribution-aware partitioning)",
+        fontsize=14,
+        fontweight="bold",
+    )
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Add explanation
+    ax.text(
+        0.98,
+        0.95,
+        "Excluded: tukeylambda (~7s),\nnct (~1.4s), dpareto_lognorm (~0.5s)",
+        transform=ax.transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+    )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_path}")
+
+
 def generate_summary_table(data: dict, results: dict, output_path: Path) -> None:
     """Generate a markdown summary table of benchmark results."""
     # Extract machine info
@@ -547,6 +638,38 @@ def generate_summary_table(data: dict, results: dict, output_path: Path) -> None
                 ]
             )
 
+    # Slow distribution optimization section (v1.6.1)
+    if data["slow_dist_opt"]["labels"]:
+        lines.extend(
+            [
+                "",
+                "## Slow Distribution Optimization (v1.6.1)",
+                "",
+                "| Mode | Fit Time (mean) | Std Dev |",
+                "|------|-----------------|---------|",
+            ]
+        )
+
+        sdo_labels = data["slow_dist_opt"]["labels"]
+        sdo_times = data["slow_dist_opt"]["times"]
+        sdo_stddevs = data["slow_dist_opt"]["stddevs"]
+
+        for label, time, std in zip(sdo_labels, sdo_times, sdo_stddevs):
+            label_clean = label.replace("\n", " ")
+            lines.append(f"| {label_clean} | {time:.3f}s | ±{std:.3f}s |")
+
+        if len(sdo_times) >= 2:
+            slowdown = sdo_times[1] / sdo_times[0]
+            savings_pct = (1 - sdo_times[0] / sdo_times[1]) * 100
+            lines.extend(
+                [
+                    "",
+                    f"**Default exclusions:** {slowdown:.1f}× faster ({savings_pct:.0f}% time saved)",
+                    "",
+                    "New exclusions in v1.6.1: `tukeylambda` (~7s), `nct` (~1.4s), `dpareto_lognorm` (~0.5s)",
+                ]
+            )
+
     lines.append("")
 
     with open(output_path, "w") as f:
@@ -585,6 +708,7 @@ def main():
     generate_data_size_chart(data, args.output_dir / "scaling_data_size.png")
     generate_distribution_count_chart(data, args.output_dir / "scaling_dist_count.png")
     generate_multi_column_chart(data, args.output_dir / "multi_column_efficiency.png")
+    generate_slow_dist_opt_chart(data, args.output_dir / "slow_dist_optimization.png")
     # Note: lazy_metrics chart removed - wall-clock comparison doesn't capture the
     # real benefit (skipping 95% of computations). See docs/performance.rst for details.
     generate_summary_table(data, results, args.output_dir / "benchmark_summary.md")
