@@ -37,6 +37,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    :caption: Contents:
 
    quickstart
+   usecases
    bounded
    sampling
    serialization
