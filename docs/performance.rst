@@ -68,8 +68,8 @@ pluggable compute backends:
 This design means **fit time scales sub-linearly with data size** —
 the histogram computation is O(N) but very fast, while distribution fitting is O(1).
 
-.. image:: _static/scaling_data_size.png
-   :alt: Fit time vs data size
+.. image:: _static/backend_data_size.png
+   :alt: Backend comparison: data size scaling
    :width: 100%
 
 Time Complexity
@@ -111,8 +111,8 @@ Where:
 This is why ``columns=[...]`` is faster than C separate ``column=`` calls:
 the O(N) data operations are shared.
 
-.. image:: _static/scaling_dist_count.png
-   :alt: Fit time vs distribution count
+.. image:: _static/backend_dist_count.png
+   :alt: Backend comparison: distribution count scaling
    :width: 100%
 
 Memory Footprint
@@ -184,6 +184,20 @@ Fit time is **sub-linear** with data size due to the histogram-based approach:
     1,000,000    | ~5.0s     | ~1.0×
 
 A 40× increase in data results in only ~1.0× increase in time (vs 40× if O(N)).
+
+.. note::
+
+   **Why times appear nearly flat:** The histogram-based architecture means that actual
+   fitting operates on a fixed-size working set (~100 bins, ~10K samples), not the raw data.
+   The slight variations in the table above are primarily due to:
+
+   1. **Warmup effects**: JIT compilation and cache warming
+   2. **Benchmark noise**: Random variation between runs
+   3. **Histogram computation**: The O(N) step is very fast (~100ms for 1M rows)
+
+   The dominant cost is fitting ~90 distributions, which takes 2-5 seconds regardless
+   of input data size. This is why all three backends (Spark, Ray+pandas, Ray Dataset)
+   show similar near-flat scaling behavior.
 
 .. note::
    v2.0.0 provides 35% faster fitting across all data sizes compared to v1.7.x,
@@ -389,10 +403,13 @@ To run benchmarks locally and generate updated charts:
 
 .. code-block:: bash
 
-    # Run all benchmarks
+    # Run Spark benchmarks
     make benchmark
 
-    # Generate scaling charts
+    # Run Ray benchmarks (requires ray installed)
+    make benchmark-ray
+
+    # Generate scaling charts (including Spark vs Ray comparison)
     make benchmark-charts
 
 Benchmark results are saved to ``.benchmarks/`` and charts to ``docs/_static/``.
@@ -401,6 +418,182 @@ Benchmark results are saved to ``.benchmarks/`` and charts to ``docs/_static/``.
 
    Benchmarks are excluded from normal CI runs. They are intended for
    local performance analysis and documentation updates.
+
+Ray Backend Performance
+-----------------------
+
+The ``RayBackend`` provides an alternative to Spark for distributed distribution fitting.
+This section compares performance characteristics between backends.
+
+When to Use Which Backend
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Factor
+     - Use SparkBackend
+     - Use RayBackend
+   * - Startup overhead
+     - Higher (~1-2s JVM init)
+     - Lower (~0.2-0.5s)
+   * - Data location
+     - Already in Spark DataFrames
+     - Pandas or Ray Datasets
+   * - Cluster type
+     - Existing Spark infrastructure
+     - Ray clusters, Kubernetes
+   * - Data scale
+     - 100M+ rows (distributed histograms)
+     - 10K-10M rows (pandas workflows)
+   * - ML pipelines
+     - Spark ML workflows
+     - Ray Tune/Train/Serve
+
+Benchmark Comparison
+^^^^^^^^^^^^^^^^^^^^
+
+The following benchmarks were run on a local development machine (Apple M-series, 10 cores).
+Results will vary based on hardware, but the relative differences are instructive:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 20 25
+
+   * - Test
+     - Spark
+     - Ray + pandas
+     - Difference
+   * - 1M rows (90 dists)
+     - 5.05s
+     - 2.74s
+     - Ray **1.8× faster**
+   * - 100K rows (90 dists)
+     - 6.65s
+     - 2.87s
+     - Ray **2.3× faster**
+   * - 25K rows (90 dists)
+     - 4.78s
+     - 2.79s
+     - Ray **1.7× faster**
+   * - 5 distributions (10K rows)
+     - 0.46s
+     - 0.09s
+     - Ray **5.1× faster**
+   * - 20 distributions (10K rows)
+     - 0.87s
+     - 0.28s
+     - Ray **3.1× faster**
+   * - 50 distributions (10K rows)
+     - 1.46s
+     - 0.61s
+     - Ray **2.4× faster**
+
+**Key Observations:**
+
+1. **Startup overhead dominates small workloads**: The 5-distribution test shows Ray is 5× faster
+   because Spark's JVM initialization overhead (~400ms) dominates the ~90ms of actual fitting.
+
+2. **Gap narrows with more work**: As distribution count increases, the fitting time dominates
+   and the relative difference decreases (from 5× to ~2×).
+
+3. **Local mode favors Ray**: These benchmarks run in local mode. In a distributed cluster
+   setting, Spark's overhead is amortized across more executors.
+
+.. note::
+
+   These benchmarks compare **typical usage patterns**:
+
+   - **Spark**: SparkBackend with Spark DataFrames (local[*] mode)
+   - **Ray + pandas**: RayBackend with pandas DataFrames (in-memory)
+
+   For a distributed comparison, see the "Ray Dataset Benchmarks" below which
+   uses ``ray.data.Dataset`` for a fairer comparison with Spark DataFrames.
+
+   Both backends use identical scipy fitting algorithms, so **fit quality is identical**.
+
+Ray Dataset Benchmarks
+^^^^^^^^^^^^^^^^^^^^^^
+
+For distributed workloads, RayBackend also supports Ray Datasets. These benchmarks
+show the overhead of Ray's distributed histogram computation via ``map_batches()``:
+
+.. code-block:: bash
+
+   # Run Ray benchmarks (includes both pandas and Dataset tests)
+   make benchmark-ray
+
+   # Generate updated charts
+   make benchmark-charts
+
+The comparison chart will automatically show a 3-way comparison when Ray Dataset
+results are available:
+
+- **Spark DataFrame** — Distributed histogram via Bucketizer + groupBy
+- **Ray + pandas** — In-memory histogram (fastest for small-medium data)
+- **Ray Dataset** — Distributed histogram via map_batches (fair comparison with Spark)
+
+**Key insight:** The vertical separation between backends shows framework overhead,
+not algorithmic differences. All backends use identical scipy fitting.
+
+Scaling Characteristics
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Both backends show similar scaling behavior because they use identical scipy fitting
+algorithms. The difference is in framework overhead:
+
+**Data Size Scaling:**
+
+Both backends show sub-linear scaling with data size due to the histogram-based approach.
+The fitting time is dominated by the scipy optimization, not data processing.
+
+**Distribution Count Scaling:**
+
+Both backends show linear scaling with distribution count (O(D)) since each distribution
+is fitted independently in parallel.
+
+**Startup Overhead:**
+
+Ray typically has lower startup overhead than Spark, making it faster for small-to-medium
+workloads. For large clusters or very large datasets, the overhead difference becomes
+negligible relative to total runtime.
+
+.. image:: _static/backend_data_size.png
+   :alt: Backend comparison: data size scaling
+   :width: 100%
+
+.. image:: _static/backend_dist_count.png
+   :alt: Backend comparison: distribution count scaling
+   :width: 100%
+
+.. image:: _static/backend_overhead.png
+   :alt: Why Ray is faster: lower startup overhead
+   :width: 100%
+
+.. include:: _static/benchmark_comparison.rst
+
+Running Ray Benchmarks
+^^^^^^^^^^^^^^^^^^^^^^
+
+To compare backends on your hardware:
+
+.. code-block:: bash
+
+    # Install Ray support
+    pip install spark-bestfit[ray]
+
+    # Run Ray benchmarks
+    make benchmark-ray
+
+    # Run Spark benchmarks (for comparison)
+    make benchmark
+
+    # Generate comparison charts
+    make benchmark-charts
+
+The chart generation script automatically creates comparison plots when both
+Spark and Ray benchmark results are available.
 
 Lazy Metrics (v1.5.0)
 ---------------------
@@ -538,6 +731,10 @@ is emitted:
 
 Why Lazy Metrics Matters
 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. image:: _static/lazy_metrics.png
+   :alt: Lazy metrics performance comparison
+   :width: 100%
 
 The value of lazy metrics isn't measured in wall-clock speedup for a single fit—it's
 about **skipping work you don't need** across your entire workflow.
@@ -886,7 +1083,12 @@ v2.0.0 Performance Improvements
 -------------------------------
 
 Version 2.0.0 delivers significant performance improvements through architectural
-changes and schema optimizations:
+changes and schema optimizations. The chart below shows the cumulative improvements
+across versions:
+
+.. image:: _static/version_history.png
+   :alt: Spark performance improvements across versions
+   :width: 100%
 
 Benchmark Comparison
 ^^^^^^^^^^^^^^^^^^^^

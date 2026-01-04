@@ -1,4 +1,4 @@
-# Spark Benchmark Results Summary
+# Ray + pandas Benchmark Results Summary
 
 ## Test Environment
 
@@ -8,48 +8,47 @@
 | Cores | 10 |
 | OS | Darwin |
 | Python | 3.13.11 |
-| Spark | local[*] (single node) |
+| Backend | Ray + pandas |
 
 > **Note:** These benchmarks were run on a local development machine.
 > Absolute times will vary based on hardware. The key insight is the
 > **scaling characteristics**: sub-linear for data size, O(D) for distribution count.
 
-## Spark Data Size Scaling
+## Ray + pandas Data Size Scaling
 
 | Data Size | Fit Time (mean) | Std Dev |
 |-----------|-----------------|---------|
-| 25,000 | 4.780s | ±0.047s |
-| 100,000 | 6.645s | ±0.140s |
-| 500,000 | 5.899s | ±0.055s |
-| 1,000,000 | 5.049s | ±0.035s |
+| 25,000 | 2.757s | ±0.030s |
+| 100,000 | 2.846s | ±0.038s |
+| 500,000 | 3.054s | ±0.030s |
+| 1,000,000 | 2.704s | ±0.030s |
 
-## Spark Distribution Count Scaling
+## Ray + pandas Distribution Count Scaling
 
 | # Distributions | Fit Time (mean) | Std Dev |
 |-----------------|-----------------|---------|
-| 5 | 0.459s | ±0.012s |
-| 20 | 0.869s | ±0.023s |
-| 50 | 1.461s | ±0.036s |
-| 90 | 5.706s | ±0.045s |
-| 107 | 6.567s | ±0.039s |
+| 5 | 0.086s | ±0.006s |
+| 20 | 0.265s | ±0.013s |
+| 50 | 0.576s | ±0.016s |
+| 90 | 2.766s | ±0.043s |
+| 107 | 2.910s | ±0.030s |
 
-## Spark Multi-Column Efficiency
+## Ray + pandas Multi-Column Efficiency
 
 | Approach | Fit Time (mean) | Std Dev |
 |----------|-----------------|---------|
-| 3 Separate Fits | 2.693s | ±0.052s |
-| 1 Multi-Column Fit | 2.685s | ±0.044s |
+| 3 Separate Fits | 0.742s | ±0.018s |
+| 1 Multi-Column Fit | 0.746s | ±0.021s |
 
-**Speedup:** 1.0× faster (0% time saved)
+**Speedup:** 1.0× faster (-1% time saved)
 
 ## Lazy Metrics Performance (v1.5.0+)
 
 | Mode | Fit Time (mean) | Std Dev | Speedup |
 |------|-----------------|---------|---------|
-| Eager (all metrics) | 6.616s | ±0.085s | baseline |
-| Lazy (AIC only) | 2.019s | ±0.051s | -69% |
-| Lazy (+ KS on-demand) | 2.072s | ±0.045s | -69% |
-| Lazy (+ materialize) | 4.705s | ±0.048s | -29% |
+| Eager (all metrics) | 2.886s | ±0.037s | baseline |
+| Lazy (AIC only) | 0.886s | ±0.016s | -69% |
+| Lazy (+ KS on-demand) | 0.924s | ±0.015s | -68% |
 
 **AIC-only workflow:** ~69% faster than eager fitting
 

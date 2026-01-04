@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-charts validate-notebooks
+.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-ray benchmark-all benchmark-charts validate-notebooks
 
 .DEFAULT_GOAL := help
 
@@ -53,8 +53,13 @@ setup: install-dev ## Initial setup for development
 	@echo "Development environment setup complete"
 	@echo "Run 'make test' to verify everything works"
 
-benchmark: ## Run performance benchmarks (not run in CI)
-	PYTHONPATH=src pytest tests/benchmarks/ -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=latest --benchmark-save-data
+benchmark: ## Run Spark performance benchmarks (not run in CI)
+	PYTHONPATH=src pytest tests/benchmarks/test_benchmark_scaling.py -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=spark-latest --benchmark-save-data
+
+benchmark-ray: ## Run Ray performance benchmarks (requires ray installed)
+	PYTHONPATH=src pytest tests/benchmarks/test_benchmark_ray.py -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=ray-latest --benchmark-save-data
+
+benchmark-all: benchmark benchmark-ray ## Run both Spark and Ray benchmarks
 
 benchmark-charts: ## Generate scaling charts from benchmark results
 	python scripts/generate_scaling_charts.py

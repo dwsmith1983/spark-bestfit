@@ -8,13 +8,28 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-**Modern Spark distribution fitting library with efficient parallel processing**
+**Modern distribution fitting library with pluggable backends (Spark, Ray, Local)**
 
-Efficiently fit ~90 scipy.stats distributions to your data using Spark's parallel processing with optimized Pandas UDFs and broadcast variables.
+Efficiently fit ~90 scipy.stats distributions to your data using parallel processing. Supports Apache Spark for production clusters, Ray for ML workflows, or local execution for development.
+
+## Why "spark-bestfit"?
+
+The library was originally built for Apache Spark, hence the name. Starting with **v2.0.0**, we added a pluggable backend architecture that supports multiple execution engines:
+
+- **SparkBackend** (default) — For production Spark clusters and large datasets (100M+ rows)
+- **RayBackend** — For Ray clusters, ML pipelines, and Kubernetes deployments
+- **LocalBackend** — For development, testing, and small datasets
+
+The name remains `spark-bestfit` for:
+1. **Backward compatibility** — Existing code works unchanged
+2. **Primary use case** — Spark remains the best choice for very large datasets
+3. **Package identity** — Renaming would break imports and documentation links
+
+All backends use identical scipy fitting algorithms, so **fit quality is identical** regardless of backend choice.
 
 ## Features
 
-- **Parallel Processing**: Fits distributions in parallel using Spark
+- **Parallel Processing**: Fits distributions in parallel using Spark, Ray, or local threads
 - **Multi-Column Fitting**: Fit multiple columns efficiently in a single operation
 - **~90 Continuous Distributions**: Access to nearly all scipy.stats continuous distributions (110 total, 20 slow ones excluded by default)
 - **16 Discrete Distributions**: Fit count data with Poisson, negative binomial, geometric, and more
