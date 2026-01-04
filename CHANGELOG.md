@@ -2,6 +2,61 @@
 
 <!-- version list -->
 
+## v2.0.0 (2026-01-04)
+
+### Bug Fixes
+
+- Improve backend parity, exception handling, and thread safety
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+- **docs**: Update usecases.rst references to features/ subdirectory
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+### Features
+
+- Abstract sampling module to use backend protocol
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+- Add ExecutionBackend protocol for multi-backend support
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+- Add RayBackend for distributed fitting on Ray clusters
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+- Add unified progress_callback support across all backends
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+- Extend backend protocol for copula and histogram support
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+- V2.0.0 - Multi-backend architecture with Ray support
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+### Performance Improvements
+
+- **schema**: Flatten data_summary MapType to individual columns
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+### Refactoring
+
+- Split core.py into separate fitter modules
+  ([#86](https://github.com/dwsmith1983/spark-bestfit/pull/86),
+  [`282df3b`](https://github.com/dwsmith1983/spark-bestfit/commit/282df3b905851612cecf7562e421c9eee60e1079))
+
+### Breaking Changes
+
+- **schema**: Data_summary dict replaced with individual attributes
+
+
 ## v1.7.2 (2026-01-02)
 
 ### Bug Fixes
