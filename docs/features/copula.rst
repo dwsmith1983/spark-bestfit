@@ -151,29 +151,8 @@ Sampling performance comparison (3-column copula, local mode):
 **Key findings:**
 
 - ``return_uniform=True`` is ~24% faster than statsmodels (same output format)
-- Full marginal transforms add ~28× overhead due to scipy's PPF using iterative root-finding
+- Full marginal transforms add ~28x overhead due to scipy's PPF using iterative root-finding
 - Use ``return_uniform=True`` when you don't need the exact marginal distributions
-
-Correlation computation (pandas vs Spark ML):
-
-.. list-table::
-   :header-rows: 1
-
-   * - N Rows
-     - pandas (ms)
-     - Spark ML (ms)
-   * - 10,000
-     - 2
-     - 195
-   * - 100,000
-     - 19
-     - 458
-   * - 1,000,000
-     - 241
-     - 3,120
-
-Spark has overhead in local mode, but the value is **memory scale** - handling data
-that doesn't fit in pandas. For 100M+ rows, Spark is the only option.
 
 Serialization
 -------------
@@ -198,8 +177,8 @@ The JSON format includes metadata for debugging:
 
     {
       "schema_version": "1.0",
-      "spark_bestfit_version": "1.3.0",
-      "created_at": "2025-12-30T20:00:00Z",
+      "spark_bestfit_version": "2.0.0",
+      "created_at": "2026-01-04T20:00:00Z",
       "type": "gaussian_copula",
       "column_names": ["price", "quantity", "revenue"],
       "correlation_matrix": [[1.0, 0.8, 0.9], ...],
@@ -218,8 +197,8 @@ The Gaussian copula sampling process:
 2. **Sample phase**:
 
    a. Generate multivariate normal samples with the correlation matrix
-   b. Transform each normal sample → uniform via Φ (standard normal CDF)
-   c. Transform each uniform → target marginal via PPF (inverse CDF)
+   b. Transform each normal sample -> uniform via phi (standard normal CDF)
+   c. Transform each uniform -> target marginal via PPF (inverse CDF)
 
 This ensures that:
 

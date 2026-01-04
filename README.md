@@ -14,54 +14,34 @@ Efficiently fit ~90 scipy.stats distributions to your data using parallel proces
 
 ## Why "spark-bestfit"?
 
-The library was originally built for Apache Spark, hence the name. Starting with **v2.0.0**, we added a pluggable backend architecture that supports multiple execution engines:
+The library was originally built for Apache Spark, hence the name. v2.0 added a pluggable backend architecture supporting multiple execution engines:
 
-- **SparkBackend** (default) — For production Spark clusters and large datasets (100M+ rows)
-- **RayBackend** — For Ray clusters, ML pipelines, and Kubernetes deployments
-- **LocalBackend** — For development, testing, and small datasets
+- **SparkBackend** — Production clusters and large datasets (100M+ rows)
+- **RayBackend** — Ray clusters, ML pipelines, and Kubernetes deployments
+- **LocalBackend** — Development, testing, and small datasets
 
-The name remains `spark-bestfit` for:
-1. **Backward compatibility** — Existing code works unchanged
-2. **Primary use case** — Spark remains the best choice for very large datasets
-3. **Package identity** — Renaming would break imports and documentation links
+**Why keep the name?**
+1. **Backward compatibility** — Existing code using `DistributionFitter(spark)` works unchanged
+2. **Primary use case** — Spark remains the best choice for very large datasets (100M+ rows)
+3. **Package identity** — Renaming would break imports, PyPI links, and documentation
 
-All backends use identical scipy fitting algorithms, so **fit quality is identical** regardless of backend choice.
+All backends use identical scipy fitting, so **fit quality is identical** regardless of backend choice.
 
 ## Features
 
 - **Parallel Processing**: Fits distributions in parallel using Spark, Ray, or local threads
-- **Multi-Column Fitting**: Fit multiple columns efficiently in a single operation
-- **~90 Continuous Distributions**: Access to nearly all scipy.stats continuous distributions (110 total, 20 slow ones excluded by default)
+- **~90 Continuous Distributions**: Nearly all scipy.stats continuous distributions
 - **16 Discrete Distributions**: Fit count data with Poisson, negative binomial, geometric, and more
-- **Bounded Distribution Fitting**: Fit truncated distributions with natural bounds (e.g., percentages 0-100, ages 0-120)
-- **Histogram-Based Fitting**: Efficient fitting using histogram representation
-- **Multiple Metrics**: Compare fits using K-S statistic, A-D statistic, SSE, AIC, and BIC
-- **Statistical Validation**: Kolmogorov-Smirnov and Anderson-Darling tests for goodness-of-fit
+- **Multiple Metrics**: K-S statistic, A-D statistic, SSE, AIC, and BIC
 - **Confidence Intervals**: Bootstrap confidence intervals for fitted parameters
-- **Progress Tracking**: Monitor long-running fits with customizable callbacks
-- **Distributed Sampling**: Generate millions of samples using Spark's parallelism
-- **Gaussian Copula**: Correlated multi-column sampling at scale via Spark ML
-- **Fit Quality Warnings**: Automatic warnings for poor fits with detailed diagnostics
-- **Lazy Metric Evaluation**: Skip expensive KS/AD computation; compute on-demand when needed
-- **Smart Pre-filtering**: Skip incompatible distributions based on data characteristics (30-70% faster)
+- **Bounded Fitting**: Fit truncated distributions with natural bounds
+- **Multi-Column Fitting**: Fit multiple columns efficiently in a single operation
+- **Lazy Metrics**: Skip expensive KS/AD computation; compute on-demand
+- **Smart Pre-filtering**: Skip incompatible distributions based on data shape
+- **Gaussian Copula**: Correlated multi-column sampling at scale
+- **Distributed Sampling**: Generate millions of samples using cluster parallelism
 - **Model Serialization**: Save and load fitted distributions to JSON or pickle
-- **Results API**: Filter, sort, and export results easily
-- **Visualization**: Built-in plotting for distribution comparison, Q-Q plots and P-P plots
-- **Flexible Configuration**: Customize bins, sampling, and distribution selection
-
-## Scope & Limitations
-
-spark-bestfit is designed for **batch processing** of statistical distribution fitting on Spark DataFrames.
-
-**What it does well:**
-- Fit ~90 continuous and 16 discrete scipy.stats distributions in parallel
-- Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
-- Generate publication-ready visualizations (histograms, Q-Q plots, P-P plots)
-- Compute bootstrap confidence intervals for parameters
-
-**Known limitations:**
-- No real-time/streaming support (batch processing only)
-- See [Roadmap](#roadmap) for planned features
+- **Visualization**: Built-in plotting for distribution comparison, Q-Q and P-P plots
 
 ## Installation
 
@@ -69,15 +49,15 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 pip install spark-bestfit
 ```
 
-This installs spark-bestfit without PySpark. You are responsible for providing a compatible Spark environment (see Compatibility Matrix below).
+This installs spark-bestfit without PySpark. You provide a compatible Spark environment.
 
-**With PySpark included** (for users without a managed Spark environment):
+**With PySpark included:**
 
 ```bash
 pip install spark-bestfit[spark]
 ```
 
-**With Ray support** (for Ray clusters and ML workflows):
+**With Ray support:**
 
 ```bash
 pip install spark-bestfit[ray]
@@ -94,17 +74,15 @@ spark = SparkSession.builder.getOrCreate()
 
 # Generate sample data
 data = np.random.normal(loc=50, scale=10, size=10_000)
-
-# Create fitter
-fitter = DistributionFitter(spark)
 df = spark.createDataFrame([(float(x),) for x in data], ["value"])
 
 # Fit distributions
+fitter = DistributionFitter(spark)
 results = fitter.fit(df, column="value")
 
-# Get best fit (by K-S statistic, the default)
+# Get best fit
 best = results.best(n=1)[0]
-print(f"Best: {best.distribution} (KS={best.ks_statistic:.4f}, p={best.pvalue:.4f})")
+print(f"Best: {best.distribution} (KS={best.ks_statistic:.4f})")
 
 # Plot
 fitter.plot(best, df, "value", title="Best Fit Distribution")
@@ -117,137 +95,58 @@ fitter.plot(best, df, "value", title="Best Fit Distribution")
 | **3.5.x** | 3.11, 3.12 | 1.24+ (< 2.0) | 1.5+ | 12.0 - 16.x |
 | **4.x** | 3.12, 3.13 | 2.0+ | 2.2+ | 17.0+ |
 
-> **Note**: Spark 3.5.x does not support NumPy 2.0. If using Spark 3.5 with Python 3.12, ensure `setuptools` is installed (provides `distutils`).
+> **Note**: Spark 3.5.x does not support NumPy 2.0.
 
-## Backend Support (v2.0.0+)
-
-spark-bestfit uses a pluggable backend architecture for distributed computation:
+## Backend Support
 
 | Backend | Use Case | Install |
 |---------|----------|---------|
-| **SparkBackend** | Production clusters, large datasets | Default |
-| **LocalBackend** | Unit testing, development | Default |
+| **SparkBackend** | Production clusters, large datasets | PySpark required (BYO or `[spark]`) |
+| **LocalBackend** | Unit testing, development | Included |
 | **RayBackend** | Ray clusters, ML workflows | `pip install spark-bestfit[ray]` |
 
-### Using Backends
-
 ```python
-from spark_bestfit import DistributionFitter, SparkBackend, LocalBackend
+from spark_bestfit import DistributionFitter, SparkBackend, RayBackend, LocalBackend
 
-# Default: SparkBackend (same as before)
+# SparkBackend (default, backward compatible)
 fitter = DistributionFitter(spark)
 
-# Explicit SparkBackend
-backend = SparkBackend(spark)
-fitter = DistributionFitter(backend=backend)
+# Explicit backend
+fitter = DistributionFitter(backend=SparkBackend(spark))
 
-# LocalBackend for testing (no Spark required, uses pandas DataFrames)
-backend = LocalBackend(max_workers=4)
-fitter = DistributionFitter(backend=backend)
+# LocalBackend for testing (no Spark required)
+fitter = DistributionFitter(backend=LocalBackend())
 
-import pandas as pd
-df = pd.DataFrame({"value": [1.0, 2.0, 3.0, ...]})
-results = fitter.fit(df, column="value")
+# RayBackend for Ray clusters
+fitter = DistributionFitter(backend=RayBackend())
 ```
 
-### RayBackend
+> See [Backend Guide](https://spark-bestfit.readthedocs.io/en/latest/backends.html) for detailed configuration.
 
-For Ray clusters and ML workflows (requires `pip install spark-bestfit[ray]`):
+## Working with Results
 
 ```python
-from spark_bestfit import DistributionFitter, RayBackend
-import pandas as pd
+# Get top fits by different metrics
+best_ks = results.best(n=1)[0]                    # K-S statistic (default)
+best_aic = results.best(n=1, metric="aic")[0]     # AIC
+best_ad = results.best(n=1, metric="ad_statistic")[0]  # A-D statistic
 
-# Auto-initializes Ray if not already running
-backend = RayBackend()
-fitter = DistributionFitter(backend=backend)
+# Filter by goodness-of-fit
+good_fits = results.filter(ks_threshold=0.05)
+significant = results.filter(pvalue_threshold=0.05)
 
-# Works with pandas DataFrames
-df = pd.DataFrame({"value": np.random.normal(50, 10, 10000)})
-results = fitter.fit(df, column="value")
+# Use fitted distribution
+samples = best.sample(size=10000)
+pdf_values = best.pdf(x_array)
+percentile_95 = best.ppf(0.95)
 
-# Also works with Ray Datasets (distributed)
-import ray
-ds = ray.data.from_pandas(df)
-results = fitter.fit(ds, column="value")
-
-# Connect to existing Ray cluster
-backend = RayBackend(address="auto")  # Auto-detect cluster
-backend = RayBackend(address="ray://cluster:10001")  # Explicit address
-
-# Limit resources
-backend = RayBackend(num_cpus=8)
+# Quality diagnostics
+report = results.quality_report()
+if report["warnings"]:
+    print(f"Warnings: {report['warnings']}")
 ```
 
-**RayBackend Features:**
-- Hybrid support for both `pandas.DataFrame` and `ray.data.Dataset` inputs
-- Distributed aggregation for histograms and correlations (no raw data collection)
-- Vectorized Pearson correlation using sufficient statistics
-- Smart partition calculation with slow-distribution weighting
-- Works with GaussianCopula for distributed sample generation
-
-> **Backward Compatible**: Existing code using `DistributionFitter(spark)` continues to work unchanged.
-
-## API Overview
-
-### Fitting Distributions
-
-```python
-from spark_bestfit import DistributionFitter
-
-fitter = DistributionFitter(spark, random_seed=123)
-results = fitter.fit(
-    df,
-    column="value",
-    bins=100,                    # Number of histogram bins
-    support_at_zero=True,        # Only fit non-negative distributions
-    enable_sampling=True,        # Enable adaptive sampling
-    sample_fraction=0.3,         # Sample 30% of data
-    max_distributions=50,        # Limit distributions to fit
-)
-```
-
-### Multi-Column Fitting
-
-Fit multiple columns efficiently in a single operation:
-
-```python
-from spark_bestfit import DistributionFitter
-
-# Create DataFrame with multiple columns
-df = spark.createDataFrame([
-    (1.0, 10.0, 100.0),
-    (2.0, 20.0, 200.0),
-    # ...
-], ["col_a", "col_b", "col_c"])
-
-fitter = DistributionFitter(spark)
-
-# Fit all columns in one call - shares Spark overhead
-results = fitter.fit(df, columns=["col_a", "col_b", "col_c"])
-
-# Get results for a specific column
-col_a_results = results.for_column("col_a")
-best_a = col_a_results.best(n=1)[0]
-
-# Get best distribution per column
-best_per_col = results.best_per_column(n=1)
-for col_name, fits in best_per_col.items():
-    print(f"{col_name}: {fits[0].distribution} (KS={fits[0].ks_statistic:.4f})")
-
-# List all columns in results
-print(results.column_names)  # ['col_a', 'col_b', 'col_c']
-```
-
-Multi-column fitting provides convenience and cleaner code by:
-- Performing a single `df.count()` call for all columns
-- Sharing the data sample across all fitting operations
-- Returning unified results with `best_per_column()` accessor
-
-> **Note:** As of v2.0.0, the performance difference between multi-column and separate fits is
-> negligible (~0.3%) due to reduced per-operation overhead. Use whichever API is more convenient.
-
-### Bounded Distribution Fitting
+## Bounded Distribution Fitting
 
 Fit distributions with natural constraints (percentages, ages, prices):
 
@@ -259,8 +158,8 @@ results = fitter.fit(df, column="percentage", bounded=True)
 results = fitter.fit(
     df, column="price",
     bounded=True,
-    lower_bound=0.0,      # Prices can't be negative
-    upper_bound=1000.0,   # Max price cap
+    lower_bound=0.0,
+    upper_bound=1000.0,
 )
 
 # Samples automatically respect bounds
@@ -268,376 +167,116 @@ best = results.best(n=1)[0]
 samples = best.sample(1000)  # All within [0, 1000]
 ```
 
-> See [Bounded Fitting](https://spark-bestfit.readthedocs.io/en/latest/bounded.html) for details.
+## Discrete Distributions
 
-### Working with Results
-
-```python
-# Get top 5 distributions (by K-S statistic, the default)
-top_5 = results.best(n=5)
-
-# Get best by other metrics
-best_sse = results.best(n=1, metric="sse")[0]
-best_aic = results.best(n=1, metric="aic")[0]
-best_ad = results.best(n=1, metric="ad_statistic")[0]
-
-# Filter by goodness-of-fit
-good_fits = results.filter(ks_threshold=0.05)        # K-S statistic < 0.05
-significant = results.filter(pvalue_threshold=0.05)  # p-value > 0.05
-good_ad = results.filter(ad_threshold=1.0)           # A-D statistic < 1.0
-
-# Convert to pandas for analysis
-df_pandas = results.df.toPandas()
-
-# Use fitted distribution
-samples = best.sample(size=10000)  # Generate samples
-pdf_values = best.pdf(x_array)     # Evaluate PDF
-cdf_values = best.cdf(x_array)     # Evaluate CDF
-
-# Access all goodness-of-fit metrics
-print(f"K-S: {best.ks_statistic}, p-value: {best.pvalue}")
-print(f"A-D: {best.ad_statistic}, A-D p-value: {best.ad_pvalue}")
-
-# Get quality report for fit diagnostics
-report = results.quality_report()
-if report["warnings"]:
-    print(f"Warnings: {report['warnings']}")
-
-# Warn automatically for poor fits
-best = results.best(n=1, warn_if_poor=True)[0]
-```
-
-> **Note**: Anderson-Darling p-values are only available for 5 distributions (norm, expon,
-> logistic, gumbel_r, gumbel_l) where scipy has critical value tables. For other distributions,
-> `ad_pvalue` will be `None` but `ad_statistic` is still valid for ranking fits.
-
-### Lazy Metrics (v1.5.0+)
-
-For faster fitting when you only need AIC/BIC for model selection, use lazy metrics:
-
-```python
-# Fast fitting: skip expensive KS/AD computation
-results = fitter.fit(df, column="value", lazy_metrics=True)
-
-# Get best by AIC - fast, no KS/AD computed
-best_aic = results.best(n=1, metric="aic")[0]
-print(best_aic.ks_statistic)  # None (not computed yet)
-
-# Get best by KS - triggers ON-DEMAND computation!
-best_ks = results.best(n=1, metric="ks_statistic")[0]
-print(best_ks.ks_statistic)  # Computed value! (only for top candidates)
-
-# Materialize all metrics before unpersisting source DataFrame
-materialized = results.materialize()
-df.unpersist()  # Safe - all metrics now computed
-```
-
-**Performance**: ~60% speedup for AIC/BIC workflows, ~50% speedup even when requesting best by KS.
-
-> See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for details.
-
-### Pre-filtering Distributions (v1.6.0+)
-
-Skip incompatible distributions before fitting based on data characteristics:
-
-```python
-# Enable pre-filtering (safe mode - only filters obviously incompatible distributions)
-results = fitter.fit(df, column="value", prefilter=True)
-
-# Aggressive mode - also filters by kurtosis for heavy-tailed data
-results = fitter.fit(df, column="value", prefilter="aggressive")
-```
-
-**How it works** (filters by SHAPE, not location):
-1. **Skewness sign (~95% reliable)**: Skips positive-skew-only distributions (like `expon`, `gamma`) for clearly left-skewed data
-2. **Kurtosis (aggressive mode, ~80% reliable)**: Skips low-kurtosis distributions for heavy-tailed data
-
-Note: We don't filter by support bounds because scipy's `loc` parameter can shift any distribution to cover any data range.
-
-**Performance**: 20-50% fewer distributions to fit for skewed data, with automatic fallback if filtering removes all candidates.
-
-### Progress Tracking
-
-Monitor long-running fits with the built-in `console_progress()` utility:
-
-```python
-from spark_bestfit.progress import console_progress
-
-results = fitter.fit(df, column="value", progress_callback=console_progress())
-print()  # Newline after completion
-# Output: Progress: 45/100 tasks (45.0%)
-```
-
-For custom callbacks or tqdm integration:
-
-```python
-# Custom callback
-def on_progress(completed: int, total: int, percent: float) -> None:
-    print(f"\rFitting: {completed}/{total} ({percent:.1f}%)", end="", flush=True)
-
-results = fitter.fit(df, column="value", progress_callback=on_progress)
-
-# tqdm integration
-from tqdm import tqdm
-
-pbar = None
-
-def tqdm_callback(completed: int, total: int, percent: float) -> None:
-    global pbar
-    if pbar is None:
-        pbar = tqdm(total=total, desc="Fitting")
-    pbar.n = completed
-    pbar.refresh()
-
-results = fitter.fit(df, column="value", progress_callback=tqdm_callback)
-if pbar:
-    pbar.close()
-```
-
-> **Note**: Progress percentages may fluctuate during fitting as new Spark stages add tasks.
-> See [Progress Tracking](https://spark-bestfit.readthedocs.io/en/latest/progress.html) for details.
-
-### Parameter Confidence Intervals
-
-```python
-# Compute 95% bootstrap confidence intervals
-ci = best.confidence_intervals(df, column="value", alpha=0.05, n_bootstrap=1000, random_seed=42)
-
-# Display with parameter names
-print(f"Distribution: {best.distribution}")
-for param, (lower, upper) in ci.items():
-    print(f"  {param}: [{lower:.4f}, {upper:.4f}]")
-```
-
-### Distributed Sampling
-
-Generate large samples using Spark's distributed computing:
-
-```python
-# Generate 1 million samples distributed across the cluster
-samples_df = best.sample_spark(n=1_000_000, spark=spark)
-samples_df.show(5)
-
-# With reproducibility
-samples_df = best.sample_spark(n=1_000_000, spark=spark, random_seed=42)
-
-# Control partitioning
-samples_df = best.sample_spark(
-    n=1_000_000,
-    spark=spark,
-    num_partitions=16,
-    column_name="generated_values"
-)
-```
-
-> **Tip**: Use `sample_spark()` for very large samples (>10M) to leverage cluster parallelism.
-> For smaller samples, `sample(size=N)` returns a local NumPy array and is more efficient.
-> See [Distributed Sampling](https://spark-bestfit.readthedocs.io/en/latest/sampling.html) for benchmarks.
-
-### Gaussian Copula
-
-Generate correlated multi-column samples that preserve both marginal distributions and correlation structure:
-
-```python
-from spark_bestfit import DistributionFitter, GaussianCopula
-
-# Fit multiple columns
-fitter = DistributionFitter(spark)
-results = fitter.fit(df, columns=["price", "quantity", "revenue"])
-
-# Fit copula - correlation computed via Spark ML (scales to billions of rows)
-copula = GaussianCopula.fit(results, df)
-
-# Local sampling (small scale)
-samples = copula.sample(n=10_000)  # Returns Dict[str, np.ndarray]
-
-# Fast uniform sampling (skips marginal transforms, ~24% faster than statsmodels)
-uniform_samples = copula.sample(n=10_000_000, return_uniform=True)
-
-# Distributed sampling (large scale) - scales to 100M+ samples
-samples_df = copula.sample_spark(n=100_000_000)
-
-# Serialize for later use
-copula.save("copula.json")
-loaded = GaussianCopula.load("copula.json")
-```
-
-**When to use spark-bestfit copula** (vs statsmodels):
-
-| Scenario | statsmodels | spark-bestfit |
-|----------|-------------|---------------|
-| Data < 10M rows | Faster (use this) | Slower (Spark overhead) |
-| Data > 100M rows | Crashes (OOM) | **Works** (distributed) |
-| Data already in Spark | Requires `.toPandas()` | **Native** (no conversion) |
-| 100M+ samples needed | May OOM | **`sample_spark()`** distributed |
-
-> See [Gaussian Copula](https://spark-bestfit.readthedocs.io/en/latest/copula.html) for details.
-
-### Custom Plotting
-
-```python
-fitter.plot(
-    best,
-    df,
-    "value",
-    figsize=(16, 10),
-    dpi=300,
-    histogram_alpha=0.6,
-    pdf_linewidth=3,
-    title="Distribution Fit",
-    xlabel="Value",
-    ylabel="Density",
-    save_path="output/distribution.png",
-)
-```
-
-### Q-Q Plots
-
-```python
-# Create Q-Q plot for goodness-of-fit assessment
-fitter.plot_qq(
-    best,
-    df,
-    "value",
-    max_points=1000,           # Sample size for plotting
-    title="Q-Q Plot",
-    save_path="output/qq_plot.png",
-)
-```
-
-### P-P Plots
-
-```python
-# Create P-P plot for goodness-of-fit assessment
-fitter.plot_pp(
-    best,
-    df,
-    "value",
-    max_points=1000,           # Sample size for plotting
-    title="P-P Plot",
-    save_path="output/pp_plot.png",
-)
-```
-
-### Discrete Distributions
-
-For count data (integers), use `DiscreteDistributionFitter`:
+For count data (integers):
 
 ```python
 from spark_bestfit import DiscreteDistributionFitter
-import numpy as np
-
-# Generate count data
-data = np.random.poisson(lam=7, size=10_000)
-df = spark.createDataFrame([(int(x),) for x in data], ["counts"])
 
 # Fit discrete distributions
 fitter = DiscreteDistributionFitter(spark)
 results = fitter.fit(df, column="counts")
 
-# Get best fit - use AIC for model selection (recommended for discrete)
+# Use AIC for model selection (recommended for discrete)
 best = results.best(n=1, metric="aic")[0]
-print(f"Best: {best.distribution} (AIC={best.aic:.2f})")
-
-# Plot fitted PMF
-fitter.plot(best, df, "counts", title="Best Discrete Fit")
-
-# Bounded fitting (e.g., counts in range [0, 100])
-results = fitter.fit(df, column="counts", bounded=True, lower_bound=0, upper_bound=100)
 ```
 
-**Metric Selection for Discrete Distributions:**
-
-| Metric | Use Case |
-|--------|----------|
-| `aic` | **Recommended** - Proper model selection criterion with complexity penalty |
-| `bic` | Similar to AIC but stronger penalty for complex models |
-| `ks_statistic` | Valid for ranking fits, but p-values are not reliable for discrete data |
-| `ad_statistic` | Valid for ranking fits (not computed for discrete distributions) |
-| `sse` | Simple comparison metric |
-
-> **Note**: The K-S and A-D tests assume continuous distributions. For discrete data, the K-S
-> statistic can still rank fits, but p-values are conservative and should not be used for
-> hypothesis testing. A-D statistics are not computed for discrete distributions.
-> Use AIC/BIC for proper model selection.
-
-### Excluding Distributions
-
-```python
-from spark_bestfit import DistributionFitter, DEFAULT_EXCLUDED_DISTRIBUTIONS
-
-# View default exclusions
-print(DEFAULT_EXCLUDED_DISTRIBUTIONS)
-
-# Include a specific distribution by removing it from exclusions
-exclusions = tuple(d for d in DEFAULT_EXCLUDED_DISTRIBUTIONS if d != "wald")
-fitter = DistributionFitter(spark, excluded_distributions=exclusions)
-
-# Or exclude nothing (fit all distributions - may be slow)
-fitter = DistributionFitter(spark, excluded_distributions=())
-```
-
-### Model Serialization
-
-Save fitted distributions to disk and reload them later for inference:
+## Model Serialization
 
 ```python
 from spark_bestfit import DistributionFitResult
 
-# Save the best fit to JSON (human-readable, recommended)
+# Save to JSON (human-readable, recommended)
 best.save("model.json")
-
-# Or save to pickle (faster, binary)
-best.save("model.pkl", format="pickle")
 
 # Load and use later - no Spark needed for inference!
 loaded = DistributionFitResult.load("model.json")
 samples = loaded.sample(size=1000)
-percentile_95 = loaded.ppf(0.95)
 ```
 
-> **Tip**: JSON format includes version metadata and is recommended for most use cases.
-> See [Serialization](https://spark-bestfit.readthedocs.io/en/latest/serialization.html) for details.
+## Gaussian Copula
+
+Generate correlated multi-column samples:
+
+```python
+from spark_bestfit import GaussianCopula
+
+# Fit copula from multi-column results
+copula = GaussianCopula.fit(results, df)
+
+# Local sampling
+samples = copula.sample(n=10_000)
+
+# Distributed sampling (100M+ samples)
+samples_df = copula.sample_spark(n=100_000_000)
+```
+
+## Performance Tips
+
+**Lazy metrics** for faster model selection:
+
+```python
+# Skip expensive KS/AD computation during fitting
+results = fitter.fit(df, column="value", lazy_metrics=True)
+
+# Fast model selection by AIC
+best = results.best(n=1, metric="aic")[0]
+
+# KS computed on-demand only for top candidates
+best_ks = results.best(n=1, metric="ks_statistic")[0]
+```
+
+**Pre-filtering** for skewed data:
+
+```python
+# Skip incompatible distributions (20-50% faster)
+results = fitter.fit(df, column="value", prefilter=True)
+```
+
+> See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for benchmarks.
+
+## Scope & Limitations
+
+**What it does well:**
+- Fit ~90 continuous and 16 discrete scipy.stats distributions in parallel
+- Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
+- Generate publication-ready visualizations
+- Compute bootstrap confidence intervals
+
+**Known limitations:**
+- No real-time/streaming support (batch processing only)
+- See [Roadmap](#roadmap) for planned features
 
 ## Roadmap
 
-spark-bestfit enables downstream use cases (simulations, ML, analytics) by providing distribution fitting primitives.
-
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **2.1.0** | API Polish & Performance | User-defined distributions, FitterConfig builder, copula optimizations |
+| **2.1.0** | API Polish & Performance | User-defined distributions, FitterConfig builder |
 | **3.0.0** | Advanced | Mixture models, streaming support, right-censored data |
 
-### Future: Scipy New Distribution API
-
-Scipy is developing a [new distribution infrastructure](https://docs.scipy.org/doc/scipy/tutorial/stats/rv_infrastructure.html) that offers true vectorization (10-100x faster for large array operations). The current `rv_continuous` API uses Python loops internally.
-
-**Impact on spark-bestfit:**
-- Core fitting performance is unaffected (the bottleneck is `dist.fit()`, not array operations)
-- User-facing operations like `sample(1_000_000)` would benefit significantly
-- We'll migrate when scipy's new API covers 50+ distributions (currently ~10)
-
-**Migration plan:**
-- v1.x: Current scipy API with custom `TruncatedFrozenDist` implementation
-- v2.0: Abstract `DistributionWrapper` interface supporting both APIs
-- v3.0: Drop legacy API when scipy deprecates it
-
-See the [GitHub milestones](https://github.com/dwsmith1983/spark-bestfit/milestones) for detailed issue tracking.
+See [GitHub milestones](https://github.com/dwsmith1983/spark-bestfit/milestones) for details.
 
 ## Documentation
 
-Full documentation is available at [spark-bestfit.readthedocs.io](https://spark-bestfit.readthedocs.io/en/latest/).
+Full documentation at [spark-bestfit.readthedocs.io](https://spark-bestfit.readthedocs.io/en/latest/):
+
+- [Quickstart Guide](https://spark-bestfit.readthedocs.io/en/latest/quickstart.html)
+- [Backend Guide](https://spark-bestfit.readthedocs.io/en/latest/backends.html)
+- [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html)
+- [API Reference](https://spark-bestfit.readthedocs.io/en/latest/api.html)
+- [Migration Guide](https://spark-bestfit.readthedocs.io/en/latest/migration.html)
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
+Contributions welcome! See [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feat/amazing-feature`)
+2. Create feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to branch (`git push origin feat/amazing-feature`)
 5. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) for details.
