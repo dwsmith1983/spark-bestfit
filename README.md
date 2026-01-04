@@ -515,8 +515,8 @@ spark-bestfit enables downstream use cases (simulations, ML, analytics) by provi
 
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **2.0.0** | Custom Distributions | User-defined distribution classes, scipy new API support, core refactoring |
-| **2.1.0** | Multivariate | Optional multivariate distribution fitting (MVN, MVt) |
+| **2.0.0** | Multi-Backend & Custom Distributions | Ray backend support, user-defined distribution classes, core refactoring |
+| **2.1.0** | API Polish & Performance | Multivariate fitting, FitterConfig builder, copula optimizations |
 | **3.0.0** | Advanced | Mixture models, streaming support, right-censored data |
 
 ### Future: Scipy New Distribution API
