@@ -1101,6 +1101,170 @@ class TestCopulaBackend:
         assert abs(sample_corr - 0.8) < 0.15  # Should be close to 0.8
 
 
+class TestSamplingBackend:
+    """Tests for sampling module with backend abstraction."""
+
+    def test_sample_distributed_local_shape(self):
+        """sample_distributed with LocalBackend returns correct shape."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = LocalBackend()
+        result = sample_distributed(
+            distribution="norm",
+            parameters=[0.0, 1.0],
+            n=100,
+            backend=backend,
+            random_seed=42,
+        )
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 100
+        assert "sample" in result.columns
+
+    def test_sample_distributed_local_custom_column(self):
+        """sample_distributed respects custom column name."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = LocalBackend()
+        result = sample_distributed(
+            distribution="norm",
+            parameters=[0.0, 1.0],
+            n=50,
+            backend=backend,
+            column_name="my_samples",
+            random_seed=42,
+        )
+
+        assert "my_samples" in result.columns
+        assert "sample" not in result.columns
+
+    def test_sample_distributed_local_statistics(self):
+        """sample_distributed produces samples with correct statistics."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = LocalBackend()
+        result = sample_distributed(
+            distribution="norm",
+            parameters=[100.0, 15.0],  # mean=100, std=15
+            n=1000,
+            backend=backend,
+            random_seed=42,
+        )
+
+        # Mean should be close to 100
+        assert abs(result["sample"].mean() - 100) < 5.0
+        # Std should be close to 15
+        assert abs(result["sample"].std() - 15) < 3.0
+
+    def test_sample_distributed_local_reproducibility(self):
+        """sample_distributed is reproducible with same seed."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = LocalBackend()
+
+        result1 = sample_distributed(
+            distribution="expon",
+            parameters=[0.0, 2.0],
+            n=50,
+            backend=backend,
+            random_seed=42,
+        )
+        result2 = sample_distributed(
+            distribution="expon",
+            parameters=[0.0, 2.0],
+            n=50,
+            backend=backend,
+            random_seed=42,
+        )
+
+        np.testing.assert_array_almost_equal(
+            result1["sample"].values, result2["sample"].values
+        )
+
+    def test_sample_distributed_spark_shape(self, spark):
+        """sample_distributed with SparkBackend returns correct shape."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = SparkBackend(spark)
+        result = sample_distributed(
+            distribution="norm",
+            parameters=[0.0, 1.0],
+            n=100,
+            backend=backend,
+            num_partitions=2,
+            random_seed=42,
+        )
+
+        pdf = result.toPandas()
+        assert len(pdf) == 100
+        assert "sample" in pdf.columns
+
+    def test_sample_distributed_spark_statistics(self, spark):
+        """sample_distributed with SparkBackend produces correct statistics."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = SparkBackend(spark)
+        result = sample_distributed(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            n=1000,
+            backend=backend,
+            num_partitions=4,
+            random_seed=42,
+        )
+
+        pdf = result.toPandas()
+        # Mean should be close to 50
+        assert abs(pdf["sample"].mean() - 50) < 5.0
+        # Std should be close to 10
+        assert abs(pdf["sample"].std() - 10) < 3.0
+
+    def test_sample_spark_backward_compatible(self, spark):
+        """sample_spark (backward compat) still works."""
+        from spark_bestfit.sampling import sample_spark
+
+        result = sample_spark(
+            distribution="norm",
+            parameters=[0.0, 1.0],
+            n=50,
+            spark=spark,
+            random_seed=42,
+        )
+
+        pdf = result.toPandas()
+        assert len(pdf) == 50
+        assert "sample" in pdf.columns
+
+    def test_sample_distributed_different_distributions(self):
+        """sample_distributed works with various scipy distributions."""
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = LocalBackend()
+
+        # Test exponential
+        result_exp = sample_distributed(
+            distribution="expon",
+            parameters=[0.0, 1.0],
+            n=100,
+            backend=backend,
+            random_seed=42,
+        )
+        assert len(result_exp) == 100
+        assert result_exp["sample"].min() >= 0  # Exponential is non-negative
+
+        # Test uniform
+        result_unif = sample_distributed(
+            distribution="uniform",
+            parameters=[0.0, 10.0],  # loc=0, scale=10 -> U(0,10)
+            n=100,
+            backend=backend,
+            random_seed=42,
+        )
+        assert len(result_unif) == 100
+        assert result_unif["sample"].min() >= 0
+        assert result_unif["sample"].max() <= 10
+
+
 class TestBackendEdgeCasesExtended:
     """Extended edge case tests for backend methods."""
 
