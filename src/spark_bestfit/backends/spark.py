@@ -211,7 +211,8 @@ class SparkBackend:
             column: Column name
 
         Returns:
-            Dict with keys: 'min', 'max', 'count'
+            Dict with keys: 'min', 'max', 'count'. Values may be None for
+            empty DataFrames or columns with all null values.
         """
         stats = df.agg(
             F.min(column).alias("min"),
@@ -220,8 +221,8 @@ class SparkBackend:
         ).first()
 
         return {
-            "min": float(stats["min"]),
-            "max": float(stats["max"]),
+            "min": float(stats["min"]) if stats["min"] is not None else None,
+            "max": float(stats["max"]) if stats["max"] is not None else None,
             "count": int(stats["count"]),
         }
 
@@ -288,3 +289,189 @@ class SparkBackend:
         effective_count = len(distributions) + slow_count * 2
         total_cores = self.get_parallelism()
         return min(effective_count, total_cores * 2)
+
+    # =========================================================================
+    # Copula and Histogram Methods (v2.0)
+    # =========================================================================
+
+    @staticmethod
+    def compute_correlation(
+        df: DataFrame,
+        columns: List[str],
+        method: str = "spearman",
+    ) -> np.ndarray:
+        """Compute correlation matrix using Spark ML.
+
+        Uses distributed computation via Spark ML's Correlation, enabling
+        correlation computation on DataFrames with billions of rows without
+        collecting data to the driver.
+
+        Args:
+            df: Spark DataFrame
+            columns: List of column names to compute correlation for
+            method: Correlation method ('spearman' or 'pearson')
+
+        Returns:
+            Correlation matrix as numpy array of shape (n_columns, n_columns)
+        """
+        from pyspark.ml.feature import VectorAssembler
+        from pyspark.ml.stat import Correlation
+
+        # Assemble columns into a vector
+        assembler = VectorAssembler(
+            inputCols=columns,
+            outputCol="_corr_features",
+            handleInvalid="skip",  # Skip rows with nulls
+        )
+        vector_df = assembler.transform(df).select("_corr_features")
+
+        # Compute correlation using Spark ML
+        corr_result = Correlation.corr(vector_df, "_corr_features", method=method)
+
+        # Extract correlation matrix from result
+        corr_matrix = corr_result.head()[0].toArray()
+
+        return corr_matrix
+
+    @staticmethod
+    def compute_histogram(
+        df: DataFrame,
+        column: str,
+        bin_edges: np.ndarray,
+    ) -> Tuple[np.ndarray, int]:
+        """Compute histogram using distributed Bucketizer and groupBy.
+
+        This is the key optimization: uses Spark ML's Bucketizer to assign
+        each row to a bin, then uses groupBy to count rows per bin. All
+        computation happens in the cluster without collecting data.
+
+        Args:
+            df: Spark DataFrame
+            column: Column to histogram
+            bin_edges: Array of bin edge values (n_bins + 1 values)
+
+        Returns:
+            Tuple of (bin_counts, total_count) where bin_counts is an array
+            of counts for each bin
+        """
+        from pyspark.ml.feature import Bucketizer
+
+        # Create temp column name to avoid conflicts
+        temp_col = f"__{column}_bin_temp__"
+
+        # Use Bucketizer to assign bin IDs
+        bucketizer = Bucketizer(
+            splits=bin_edges.tolist(),
+            inputCol=column,
+            outputCol=temp_col,
+            handleInvalid="keep",  # Keep invalid values in a special bin
+        )
+
+        # Transform and aggregate
+        bucketed = bucketizer.transform(df)
+        histogram = bucketed.groupBy(temp_col).count().withColumnRenamed(temp_col, "bin_id")
+
+        # Collect ONLY the aggregated histogram (small data)
+        hist_data = histogram.orderBy("bin_id").collect()
+
+        # Extract counts (fill missing bins with zeros)
+        bin_counts = np.zeros(len(bin_edges) - 1)
+        total_count = 0
+        for row in hist_data:
+            bin_id = row["bin_id"]
+            count = row["count"]
+            # Skip None bin_id (can occur with handleInvalid="keep" for out-of-range values)
+            if bin_id is not None:
+                bin_id = int(bin_id)
+                if 0 <= bin_id < len(bin_counts):
+                    bin_counts[bin_id] = count
+                    total_count += count
+
+        return bin_counts, total_count
+
+    def generate_samples(
+        self,
+        n: int,
+        generator_func: Callable[[int, int, Optional[int]], Dict[str, np.ndarray]],
+        column_names: List[str],
+        num_partitions: Optional[int] = None,
+        random_seed: Optional[int] = None,
+    ) -> DataFrame:
+        """Generate samples distributed across Spark partitions.
+
+        Uses mapInPandas to generate samples in each partition, enabling
+        generation of millions of samples distributed across the cluster.
+
+        Args:
+            n: Total number of samples to generate
+            generator_func: Function(n_samples, partition_id, seed) -> Dict[col, array]
+                that generates samples for one partition
+            column_names: Names of columns in output
+            num_partitions: Number of partitions (None = default parallelism)
+            random_seed: Base random seed (partition_id added for uniqueness)
+
+        Returns:
+            Spark DataFrame with generated samples
+        """
+        import pandas as pd
+        from pyspark.sql.types import DoubleType, IntegerType, StructField, StructType
+
+        if num_partitions is None:
+            num_partitions = self.get_parallelism()
+
+        # Calculate samples per partition
+        base_samples = n // num_partitions
+        remainder = n % num_partitions
+
+        # Create partition info DataFrame
+        partition_data = []
+        for i in range(num_partitions):
+            samples_for_partition = base_samples + (1 if i < remainder else 0)
+            if samples_for_partition > 0:
+                partition_data.append((i, samples_for_partition))
+
+        partition_df = self.spark.createDataFrame(
+            partition_data,
+            StructType(
+                [
+                    StructField("partition_id", IntegerType(), False),
+                    StructField("n_samples", IntegerType(), False),
+                ]
+            ),
+        )
+
+        # Repartition to ensure parallelism
+        partition_df = partition_df.repartition(len(partition_data))
+
+        # Define output schema
+        output_fields = [StructField(col, DoubleType(), False) for col in column_names]
+        output_schema = StructType(output_fields)
+
+        # Create the mapInPandas function
+        def generate_partition_samples(iterator):
+            """Generate samples for each partition."""
+            for pdf in iterator:
+                if len(pdf) == 0:
+                    continue
+
+                for idx in range(len(pdf)):
+                    n_samples = int(pdf.iloc[idx]["n_samples"])
+                    partition_id = int(pdf.iloc[idx]["partition_id"])
+
+                    # Compute seed for this partition
+                    seed = None
+                    if random_seed is not None:
+                        seed = random_seed + partition_id
+
+                    # Generate samples using the provided function
+                    samples = generator_func(n_samples, partition_id, seed)
+
+                    yield pd.DataFrame(samples)
+
+        # Apply the generator
+        result_df = partition_df.mapInPandas(
+            generate_partition_samples,
+            schema=output_schema,
+        )
+
+        return result_df

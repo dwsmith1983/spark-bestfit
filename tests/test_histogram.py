@@ -86,51 +86,46 @@ class TestHistogramComputer:
         assert len(y_hist) == len(custom_bins) - 1
         assert len(bin_edges) == len(custom_bins)  # Returns the custom edges
 
-    def test_compute_histogram_distributed_no_collect(self, spark_session, small_dataset):
-        """Test that histogram stays distributed (doesn't collect raw data)."""
-        computer = HistogramComputer()
+    def test_compute_histogram_via_backend(self, spark_session, small_dataset):
+        """Test that histogram is computed via backend abstraction."""
+        from spark_bestfit.backends.spark import SparkBackend
 
-        # This should NOT collect raw data, only aggregated histogram
+        backend = SparkBackend(spark_session)
+        computer = HistogramComputer(backend)
+
+        # Compute histogram via backend
         bin_edges = np.linspace(0, 100, 51)
-        histogram_df = computer._compute_histogram_distributed(small_dataset, "value", bin_edges)
+        bin_counts, total = backend.compute_histogram(small_dataset, "value", bin_edges)
 
-        # Result should be a DataFrame with (bin_id, count)
-        assert "bin_id" in histogram_df.columns
-        assert "count" in histogram_df.columns
-
-        # Should have at most len(bin_edges) - 1 rows (some bins may be empty)
-        assert histogram_df.count() <= len(bin_edges) - 1
+        # Result should be numpy arrays with correct shape
+        assert len(bin_counts) == 50  # 51 edges = 50 bins
+        assert total > 0  # Should have counted some data
+        assert np.sum(bin_counts) == total
 
     def test_compute_statistics(self, spark_session, small_dataset):
-        """Test computing basic statistics."""
+        """Test computing basic statistics via backend."""
         computer = HistogramComputer()
         stats = computer.compute_statistics(small_dataset, "value")
 
-        # Should have all statistics
+        # Should have basic statistics from backend
         assert "min" in stats
         assert "max" in stats
-        assert "mean" in stats
-        assert "stddev" in stats
         assert "count" in stats
 
         # Values should be reasonable for normal(50, 10) data
-        assert stats["mean"] is not None
-        assert 45 < stats["mean"] < 55  # Close to 50
-
-        assert stats["stddev"] is not None
-        assert 8 < stats["stddev"] < 12  # Close to 10
-
+        assert stats["min"] is not None
+        assert stats["max"] is not None
         assert stats["count"] == small_dataset.count()
 
     def test_compute_statistics_types(self, spark_session, small_dataset):
-        """Test that statistics are returned as floats."""
+        """Test that statistics are returned as numeric types."""
         computer = HistogramComputer()
         stats = computer.compute_statistics(small_dataset, "value")
 
-        # All should be floats or None
+        # All should be numeric (float or int) or None
         for key, value in stats.items():
             if value is not None:
-                assert isinstance(value, float)
+                assert isinstance(value, (float, int))
 
     def test_histogram_no_data_loss(self, spark_session, small_dataset):
         """Test that histogram captures all data (no bins with zero when they shouldn't be)."""

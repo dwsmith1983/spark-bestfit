@@ -190,3 +190,77 @@ class ExecutionBackend(Protocol):
             Backend-specific DataFrame
         """
         ...
+
+    # =========================================================================
+    # Copula and Histogram Methods (v2.0)
+    # =========================================================================
+
+    def compute_correlation(
+        self,
+        df: Any,
+        columns: List[str],
+        method: str = "spearman",
+    ) -> np.ndarray:
+        """Compute correlation matrix for specified columns.
+
+        Used by GaussianCopula to compute the correlation structure.
+        For Spark, this uses distributed Spark ML computation (no .toPandas()).
+        For local, this uses pandas correlation.
+
+        Args:
+            df: Backend-specific DataFrame
+            columns: List of column names to compute correlation for
+            method: Correlation method ('spearman' or 'pearson')
+
+        Returns:
+            Correlation matrix as numpy array of shape (n_columns, n_columns)
+        """
+        ...
+
+    def compute_histogram(
+        self,
+        df: Any,
+        column: str,
+        bin_edges: np.ndarray,
+    ) -> Tuple[np.ndarray, int]:
+        """Compute histogram bin counts using distributed aggregation.
+
+        Used by HistogramComputer for efficient distributed histogram
+        computation without collecting raw data.
+
+        Args:
+            df: Backend-specific DataFrame
+            column: Column name to compute histogram for
+            bin_edges: Array of bin edge values (n_bins + 1 values)
+
+        Returns:
+            Tuple of (bin_counts, total_count) where bin_counts is an array
+            of counts for each bin
+        """
+        ...
+
+    def generate_samples(
+        self,
+        n: int,
+        generator_func: Callable[[int, int, Optional[int]], Dict[str, np.ndarray]],
+        column_names: List[str],
+        num_partitions: Optional[int] = None,
+        random_seed: Optional[int] = None,
+    ) -> Any:
+        """Generate samples distributed across partitions.
+
+        Used by GaussianCopula.sample_spark() for distributed sample
+        generation. Each partition generates a subset of samples.
+
+        Args:
+            n: Total number of samples to generate
+            generator_func: Function(n_samples, partition_id, seed) -> Dict[col, array]
+                that generates samples for one partition
+            column_names: Names of columns in output
+            num_partitions: Number of partitions (None = backend default)
+            random_seed: Base random seed (partition_id added for uniqueness)
+
+        Returns:
+            Backend-specific DataFrame with generated samples
+        """
+        ...

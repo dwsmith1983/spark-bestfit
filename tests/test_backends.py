@@ -641,3 +641,551 @@ class TestBackendWithFitter:
         # Fit should work
         results = fitter.fit(spark_df, column="counts", max_distributions=3)
         assert len(results.best(n=1, metric="aic")) == 1
+
+
+class TestBackendCorrelation:
+    """Tests for compute_correlation method."""
+
+    @pytest.fixture
+    def correlated_data(self):
+        """Generate correlated data for testing."""
+        np.random.seed(42)
+        n = 500
+        # Generate correlated data: x and y have high positive correlation
+        x = np.random.normal(0, 1, n)
+        y = 0.8 * x + 0.2 * np.random.normal(0, 1, n)  # Correlated with x
+        z = np.random.normal(0, 1, n)  # Uncorrelated
+        return pd.DataFrame({"x": x, "y": y, "z": z})
+
+    def test_spark_compute_correlation_shape(self, spark, correlated_data):
+        """SparkBackend.compute_correlation returns correct shape."""
+        backend = SparkBackend(spark)
+        spark_df = spark.createDataFrame(correlated_data)
+
+        corr = backend.compute_correlation(spark_df, ["x", "y", "z"], method="spearman")
+
+        assert corr.shape == (3, 3)
+        # Diagonal should be 1.0 (self-correlation)
+        np.testing.assert_array_almost_equal(np.diag(corr), [1.0, 1.0, 1.0], decimal=5)
+
+    def test_spark_compute_correlation_values(self, spark, correlated_data):
+        """SparkBackend.compute_correlation captures correlation structure."""
+        backend = SparkBackend(spark)
+        spark_df = spark.createDataFrame(correlated_data)
+
+        corr = backend.compute_correlation(spark_df, ["x", "y", "z"], method="spearman")
+
+        # x and y should have high positive correlation (> 0.7)
+        assert corr[0, 1] > 0.7
+        # x and z should have low correlation (< 0.2)
+        assert abs(corr[0, 2]) < 0.2
+
+    def test_spark_compute_correlation_pearson(self, spark, correlated_data):
+        """SparkBackend.compute_correlation supports pearson method."""
+        backend = SparkBackend(spark)
+        spark_df = spark.createDataFrame(correlated_data)
+
+        corr = backend.compute_correlation(spark_df, ["x", "y"], method="pearson")
+
+        assert corr.shape == (2, 2)
+        # Should still capture the correlation
+        assert corr[0, 1] > 0.7
+
+    def test_local_compute_correlation_shape(self, correlated_data):
+        """LocalBackend.compute_correlation returns correct shape."""
+        backend = LocalBackend()
+
+        corr = backend.compute_correlation(correlated_data, ["x", "y", "z"], method="spearman")
+
+        assert corr.shape == (3, 3)
+        np.testing.assert_array_almost_equal(np.diag(corr), [1.0, 1.0, 1.0], decimal=5)
+
+    def test_local_compute_correlation_values(self, correlated_data):
+        """LocalBackend.compute_correlation captures correlation structure."""
+        backend = LocalBackend()
+
+        corr = backend.compute_correlation(correlated_data, ["x", "y", "z"], method="spearman")
+
+        # x and y should have high positive correlation (> 0.7)
+        assert corr[0, 1] > 0.7
+        # x and z should have low correlation (< 0.2)
+        assert abs(corr[0, 2]) < 0.2
+
+    def test_correlation_backends_compatible(self, spark, correlated_data):
+        """SparkBackend and LocalBackend produce similar correlation matrices."""
+        spark_backend = SparkBackend(spark)
+        local_backend = LocalBackend()
+        spark_df = spark.createDataFrame(correlated_data)
+
+        spark_corr = spark_backend.compute_correlation(spark_df, ["x", "y"], method="spearman")
+        local_corr = local_backend.compute_correlation(correlated_data, ["x", "y"], method="spearman")
+
+        # Correlation values should be very close
+        np.testing.assert_array_almost_equal(spark_corr, local_corr, decimal=2)
+
+
+class TestBackendHistogram:
+    """Tests for compute_histogram method."""
+
+    @pytest.fixture
+    def histogram_data(self):
+        """Generate data for histogram testing."""
+        np.random.seed(42)
+        return pd.DataFrame({"value": np.random.normal(50, 10, 1000)})
+
+    def test_spark_compute_histogram_shape(self, spark, histogram_data):
+        """SparkBackend.compute_histogram returns correct shape."""
+        backend = SparkBackend(spark)
+        spark_df = spark.createDataFrame(histogram_data)
+
+        bin_edges = np.linspace(0, 100, 21)  # 20 bins
+        bin_counts, total = backend.compute_histogram(spark_df, "value", bin_edges)
+
+        assert len(bin_counts) == 20
+        assert total == len(histogram_data)
+
+    def test_spark_compute_histogram_sum(self, spark, histogram_data):
+        """SparkBackend.compute_histogram bin counts sum to total."""
+        backend = SparkBackend(spark)
+        spark_df = spark.createDataFrame(histogram_data)
+
+        # Use bin edges that cover the full data range (0-100 covers normal(50,10))
+        bin_edges = np.linspace(0, 100, 11)  # 10 bins
+        bin_counts, total = backend.compute_histogram(spark_df, "value", bin_edges)
+
+        # Bins should capture all data
+        assert sum(bin_counts) == total
+        assert total == len(histogram_data)
+
+    def test_local_compute_histogram_shape(self, histogram_data):
+        """LocalBackend.compute_histogram returns correct shape."""
+        backend = LocalBackend()
+
+        bin_edges = np.linspace(0, 100, 21)
+        bin_counts, total = backend.compute_histogram(histogram_data, "value", bin_edges)
+
+        assert len(bin_counts) == 20
+        assert total == len(histogram_data)
+
+    def test_local_compute_histogram_captures_distribution(self, histogram_data):
+        """LocalBackend.compute_histogram captures distribution shape."""
+        backend = LocalBackend()
+
+        # Use bins covering full range
+        bin_edges = np.linspace(0, 100, 13)  # 12 bins
+        bin_counts, total = backend.compute_histogram(histogram_data, "value", bin_edges)
+
+        # Center bins (around 50) should have more counts than edge bins (normal distribution)
+        center_bins = bin_counts[5:7]  # Bins around 50
+        edge_bins = np.concatenate([bin_counts[:2], bin_counts[-2:]])
+
+        assert sum(center_bins) > sum(edge_bins)
+
+    def test_histogram_backends_compatible(self, spark, histogram_data):
+        """SparkBackend and LocalBackend produce similar histogram counts."""
+        spark_backend = SparkBackend(spark)
+        local_backend = LocalBackend()
+        spark_df = spark.createDataFrame(histogram_data)
+
+        # Use bin edges that cover full data range
+        bin_edges = np.linspace(0, 100, 11)
+
+        spark_counts, spark_total = spark_backend.compute_histogram(spark_df, "value", bin_edges)
+        local_counts, local_total = local_backend.compute_histogram(histogram_data, "value", bin_edges)
+
+        # Totals should be equal
+        assert spark_total == local_total
+        # Bin counts should be equal
+        np.testing.assert_array_equal(spark_counts, local_counts)
+
+
+class TestBackendGenerateSamples:
+    """Tests for generate_samples method."""
+
+    def test_spark_generate_samples_shape(self, spark):
+        """SparkBackend.generate_samples returns correct number of samples."""
+        backend = SparkBackend(spark)
+
+        def generator(n_samples, partition_id, seed):
+            rng = np.random.default_rng(seed)
+            return {"col1": rng.normal(0, 1, n_samples), "col2": rng.normal(0, 1, n_samples)}
+
+        result = backend.generate_samples(
+            n=100,
+            generator_func=generator,
+            column_names=["col1", "col2"],
+            num_partitions=2,
+            random_seed=42,
+        )
+
+        # Collect and verify
+        pdf = result.toPandas()
+        assert len(pdf) == 100
+        assert list(pdf.columns) == ["col1", "col2"]
+
+    def test_spark_generate_samples_reproducibility(self, spark):
+        """SparkBackend.generate_samples is reproducible with same seed."""
+        backend = SparkBackend(spark)
+
+        def generator(n_samples, partition_id, seed):
+            rng = np.random.default_rng(seed)
+            return {"value": rng.normal(0, 1, n_samples)}
+
+        result1 = backend.generate_samples(
+            n=50, generator_func=generator, column_names=["value"], num_partitions=1, random_seed=42
+        )
+        result2 = backend.generate_samples(
+            n=50, generator_func=generator, column_names=["value"], num_partitions=1, random_seed=42
+        )
+
+        pdf1 = result1.toPandas()
+        pdf2 = result2.toPandas()
+        np.testing.assert_array_almost_equal(pdf1["value"].values, pdf2["value"].values)
+
+    def test_local_generate_samples_shape(self):
+        """LocalBackend.generate_samples returns correct number of samples."""
+        backend = LocalBackend()
+
+        def generator(n_samples, partition_id, seed):
+            rng = np.random.default_rng(seed)
+            return {"col1": rng.normal(0, 1, n_samples), "col2": rng.normal(0, 1, n_samples)}
+
+        result = backend.generate_samples(
+            n=100,
+            generator_func=generator,
+            column_names=["col1", "col2"],
+            random_seed=42,
+        )
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 100
+        assert list(result.columns) == ["col1", "col2"]
+
+    def test_local_generate_samples_reproducibility(self):
+        """LocalBackend.generate_samples is reproducible with same seed."""
+        backend = LocalBackend()
+
+        def generator(n_samples, partition_id, seed):
+            rng = np.random.default_rng(seed)
+            return {"value": rng.normal(0, 1, n_samples)}
+
+        result1 = backend.generate_samples(
+            n=50, generator_func=generator, column_names=["value"], random_seed=42
+        )
+        result2 = backend.generate_samples(
+            n=50, generator_func=generator, column_names=["value"], random_seed=42
+        )
+
+        np.testing.assert_array_almost_equal(result1["value"].values, result2["value"].values)
+
+    def test_generate_samples_statistical_properties(self, spark):
+        """SparkBackend.generate_samples produces samples with correct statistics."""
+        backend = SparkBackend(spark)
+
+        # Generate samples from known distribution
+        def generator(n_samples, partition_id, seed):
+            rng = np.random.default_rng(seed)
+            return {"value": rng.normal(loc=100, scale=15, size=n_samples)}
+
+        result = backend.generate_samples(
+            n=1000,
+            generator_func=generator,
+            column_names=["value"],
+            num_partitions=4,
+            random_seed=42,
+        )
+
+        pdf = result.toPandas()
+
+        # Mean should be close to 100
+        assert abs(pdf["value"].mean() - 100) < 3.0
+        # Std should be close to 15
+        assert abs(pdf["value"].std() - 15) < 3.0
+
+
+class TestHistogramComputerBackend:
+    """Tests for HistogramComputer with backend abstraction."""
+
+    def test_histogram_computer_with_local_backend(self):
+        """HistogramComputer works with LocalBackend."""
+        from spark_bestfit.histogram import HistogramComputer
+
+        backend = LocalBackend()
+        computer = HistogramComputer(backend)
+
+        # Create test data
+        np.random.seed(42)
+        df = pd.DataFrame({"value": np.random.normal(50, 10, 500)})
+
+        y_hist, bin_edges = computer.compute_histogram(df, "value", bins=20)
+
+        assert len(y_hist) == 20
+        assert len(bin_edges) == 21
+        # Histogram should be normalized (area approximately 1)
+        bin_widths = np.diff(bin_edges)
+        area = np.sum(y_hist * bin_widths)
+        assert abs(area - 1.0) < 0.01
+
+    def test_histogram_computer_with_spark_backend(self, spark):
+        """HistogramComputer works with SparkBackend."""
+        from spark_bestfit.histogram import HistogramComputer
+
+        backend = SparkBackend(spark)
+        computer = HistogramComputer(backend)
+
+        # Create test data
+        np.random.seed(42)
+        data = np.random.normal(50, 10, 500)
+        spark_df = spark.createDataFrame([(float(x),) for x in data], ["value"])
+
+        y_hist, bin_edges = computer.compute_histogram(spark_df, "value", bins=20)
+
+        assert len(y_hist) == 20
+        assert len(bin_edges) == 21
+
+    def test_histogram_computer_backward_compatible(self, spark):
+        """HistogramComputer works without explicit backend (backward compat)."""
+        from spark_bestfit.histogram import HistogramComputer
+
+        # Create without backend (should auto-create SparkBackend)
+        computer = HistogramComputer()
+
+        # Create test data
+        np.random.seed(42)
+        data = np.random.normal(50, 10, 500)
+        spark_df = spark.createDataFrame([(float(x),) for x in data], ["value"])
+
+        y_hist, bin_edges = computer.compute_histogram(spark_df, "value", bins=20)
+
+        assert len(y_hist) == 20
+
+
+class TestCopulaBackend:
+    """Tests for GaussianCopula with backend abstraction."""
+
+    @pytest.fixture
+    def copula_marginals(self):
+        """Create marginals for copula testing."""
+        from spark_bestfit.results import DistributionFitResult
+
+        # Create marginals for two columns
+        return {
+            "col1": DistributionFitResult(
+                distribution="norm",
+                parameters=[50.0, 10.0],
+                sse=0.01,
+                column_name="col1",
+            ),
+            "col2": DistributionFitResult(
+                distribution="norm",
+                parameters=[100.0, 20.0],
+                sse=0.01,
+                column_name="col2",
+            ),
+        }
+
+    def test_copula_correlation_with_local_backend(self, copula_marginals):
+        """GaussianCopula can use LocalBackend for correlation computation."""
+        from spark_bestfit.copula import GaussianCopula
+
+        backend = LocalBackend()
+
+        # Create correlated pandas data
+        np.random.seed(42)
+        n = 200
+        x = np.random.normal(50, 10, n)
+        y = 0.6 * x + 0.8 * np.random.normal(100, 20, n)
+        df = pd.DataFrame({"col1": x, "col2": y})
+
+        # Compute correlation using backend
+        corr_matrix = backend.compute_correlation(df, ["col1", "col2"], method="spearman")
+
+        # Create copula directly
+        copula = GaussianCopula(
+            column_names=["col1", "col2"],
+            marginals=copula_marginals,
+            correlation_matrix=corr_matrix,
+        )
+
+        assert copula.column_names == ["col1", "col2"]
+        assert copula.correlation_matrix.shape == (2, 2)
+        # Correlation should capture positive relationship
+        assert copula.correlation_matrix[0, 1] > 0.3
+
+    def test_copula_sample_distributed_local(self, copula_marginals):
+        """GaussianCopula.sample_distributed works with LocalBackend."""
+        from spark_bestfit.copula import GaussianCopula
+
+        backend = LocalBackend()
+
+        # Create correlation matrix
+        np.random.seed(42)
+        corr_matrix = np.array([[1.0, 0.5], [0.5, 1.0]])
+
+        # Create copula directly
+        copula = GaussianCopula(
+            column_names=["col1", "col2"],
+            marginals=copula_marginals,
+            correlation_matrix=corr_matrix,
+        )
+
+        # Generate samples
+        samples_df = copula.sample_distributed(n=100, backend=backend, random_seed=42)
+
+        assert isinstance(samples_df, pd.DataFrame)
+        assert len(samples_df) == 100
+        assert list(samples_df.columns) == ["col1", "col2"]
+
+    def test_copula_sample_spark_backward_compatible(self, spark, copula_marginals):
+        """GaussianCopula.sample_spark works (backward compat)."""
+        from spark_bestfit.copula import GaussianCopula
+
+        # Create copula directly with known correlation
+        corr_matrix = np.array([[1.0, 0.5], [0.5, 1.0]])
+        copula = GaussianCopula(
+            column_names=["col1", "col2"],
+            marginals=copula_marginals,
+            correlation_matrix=corr_matrix,
+        )
+
+        # Use sample_spark (backward compat method)
+        samples_df = copula.sample_spark(n=50, spark=spark, random_seed=42)
+
+        # Should return Spark DataFrame
+        pdf = samples_df.toPandas()
+        assert len(pdf) == 50
+        assert list(pdf.columns) == ["col1", "col2"]
+
+    def test_copula_sample_statistics(self, copula_marginals):
+        """GaussianCopula samples have correct marginal statistics."""
+        from spark_bestfit.copula import GaussianCopula
+
+        backend = LocalBackend()
+
+        # Create copula with known parameters
+        corr_matrix = np.array([[1.0, 0.3], [0.3, 1.0]])
+        copula = GaussianCopula(
+            column_names=["col1", "col2"],
+            marginals=copula_marginals,
+            correlation_matrix=corr_matrix,
+        )
+
+        # Generate many samples
+        samples_df = copula.sample_distributed(n=1000, backend=backend, random_seed=42)
+
+        # col1 marginal is norm(50, 10), col2 is norm(100, 20)
+        assert abs(samples_df["col1"].mean() - 50) < 3.0
+        assert abs(samples_df["col1"].std() - 10) < 3.0
+        assert abs(samples_df["col2"].mean() - 100) < 5.0
+        assert abs(samples_df["col2"].std() - 20) < 5.0
+
+    def test_copula_sample_preserves_correlation(self, copula_marginals):
+        """GaussianCopula samples preserve correlation structure."""
+        from spark_bestfit.copula import GaussianCopula
+
+        backend = LocalBackend()
+
+        # Create copula with known high correlation
+        corr_matrix = np.array([[1.0, 0.8], [0.8, 1.0]])
+        copula = GaussianCopula(
+            column_names=["col1", "col2"],
+            marginals=copula_marginals,
+            correlation_matrix=corr_matrix,
+        )
+
+        # Generate samples
+        samples_df = copula.sample_distributed(n=1000, backend=backend, random_seed=42)
+
+        # Verify samples have similar correlation to the input
+        sample_corr = samples_df[["col1", "col2"]].corr(method="spearman").values[0, 1]
+        assert abs(sample_corr - 0.8) < 0.15  # Should be close to 0.8
+
+
+class TestBackendEdgeCasesExtended:
+    """Extended edge case tests for backend methods."""
+
+    def test_correlation_matrix_symmetry(self, spark):
+        """Correlation matrix should be symmetric."""
+        backend = SparkBackend(spark)
+
+        np.random.seed(42)
+        df = pd.DataFrame({
+            "a": np.random.normal(0, 1, 100),
+            "b": np.random.normal(0, 1, 100),
+            "c": np.random.normal(0, 1, 100),
+        })
+        spark_df = spark.createDataFrame(df)
+
+        corr = backend.compute_correlation(spark_df, ["a", "b", "c"], method="spearman")
+
+        # Verify symmetry: corr[i,j] == corr[j,i]
+        np.testing.assert_array_almost_equal(corr, corr.T, decimal=10)
+
+    def test_correlation_detects_negative_correlation(self, spark):
+        """Correlation should detect negative relationships."""
+        backend = SparkBackend(spark)
+
+        np.random.seed(42)
+        n = 300
+        x = np.random.normal(0, 1, n)
+        y = -0.9 * x + 0.1 * np.random.normal(0, 1, n)  # Strong negative correlation
+        df = pd.DataFrame({"x": x, "y": y})
+        spark_df = spark.createDataFrame(df)
+
+        corr = backend.compute_correlation(spark_df, ["x", "y"], method="spearman")
+
+        # Should detect negative correlation
+        assert corr[0, 1] < -0.7
+
+    def test_generate_samples_different_seeds_differ(self, spark):
+        """Different seeds should produce different samples."""
+        backend = SparkBackend(spark)
+
+        def generator(n_samples, partition_id, seed):
+            rng = np.random.default_rng(seed)
+            return {"value": rng.normal(0, 1, n_samples)}
+
+        result1 = backend.generate_samples(
+            n=50, generator_func=generator, column_names=["value"],
+            num_partitions=1, random_seed=42
+        )
+        result2 = backend.generate_samples(
+            n=50, generator_func=generator, column_names=["value"],
+            num_partitions=1, random_seed=999
+        )
+
+        pdf1 = result1.toPandas()
+        pdf2 = result2.toPandas()
+
+        # Values should be different (not identical)
+        assert not np.allclose(pdf1["value"].values, pdf2["value"].values)
+
+    def test_histogram_handles_data_at_boundaries(self):
+        """Histogram correctly handles data exactly at bin boundaries."""
+        backend = LocalBackend()
+
+        # Data with values exactly at bin edges
+        df = pd.DataFrame({"value": [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]})
+        bin_edges = np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0])
+
+        bin_counts, total = backend.compute_histogram(df, "value", bin_edges)
+
+        # All values should be counted
+        assert total == 6
+        assert sum(bin_counts) == 6
+
+    def test_local_correlation_handles_missing_values(self):
+        """LocalBackend correlation handles NaN values correctly."""
+        backend = LocalBackend()
+
+        df = pd.DataFrame({
+            "x": [1.0, 2.0, 3.0, np.nan, 5.0],
+            "y": [2.0, 4.0, 6.0, 8.0, np.nan],
+        })
+
+        # Should not crash, and should compute on available pairs
+        corr = backend.compute_correlation(df, ["x", "y"], method="pearson")
+
+        assert corr.shape == (2, 2)
+        # With perfect linear data (ignoring NaN), correlation should be high
+        assert corr[0, 1] > 0.9

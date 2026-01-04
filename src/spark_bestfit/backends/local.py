@@ -244,3 +244,75 @@ class LocalBackend:
             Pandas DataFrame
         """
         return pd.DataFrame(data, columns=columns)
+
+    # =========================================================================
+    # Copula and Histogram Methods (v2.0)
+    # =========================================================================
+
+    @staticmethod
+    def compute_correlation(
+        df: pd.DataFrame,
+        columns: List[str],
+        method: str = "spearman",
+    ) -> np.ndarray:
+        """Compute correlation matrix using pandas.
+
+        Args:
+            df: Pandas DataFrame
+            columns: List of column names to compute correlation for
+            method: Correlation method ('spearman' or 'pearson')
+
+        Returns:
+            Correlation matrix as numpy array of shape (n_columns, n_columns)
+        """
+        return df[columns].corr(method=method).values
+
+    @staticmethod
+    def compute_histogram(
+        df: pd.DataFrame,
+        column: str,
+        bin_edges: np.ndarray,
+    ) -> Tuple[np.ndarray, int]:
+        """Compute histogram bin counts using numpy.
+
+        Args:
+            df: Pandas DataFrame
+            column: Column to histogram
+            bin_edges: Array of bin edge values (n_bins + 1 values)
+
+        Returns:
+            Tuple of (bin_counts, total_count) where bin_counts is an array
+            of counts for each bin
+        """
+        data = df[column].dropna().values
+        bin_counts, _ = np.histogram(data, bins=bin_edges)
+        total_count = int(bin_counts.sum())
+        return bin_counts.astype(float), total_count
+
+    def generate_samples(
+        self,
+        n: int,
+        generator_func: Callable[[int, int, Optional[int]], Dict[str, np.ndarray]],
+        column_names: List[str],
+        num_partitions: Optional[int] = None,
+        random_seed: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Generate samples locally.
+
+        Unlike SparkBackend, this generates all samples in a single call
+        since there's no distributed cluster to leverage.
+
+        Args:
+            n: Total number of samples to generate
+            generator_func: Function(n_samples, partition_id, seed) -> Dict[col, array]
+                that generates samples for one partition
+            column_names: Names of columns in output (for interface compatibility)
+            num_partitions: Ignored (no partitioning in local mode)
+            random_seed: Random seed for reproducibility
+
+        Returns:
+            Pandas DataFrame with generated samples
+        """
+        # Generate all samples in one call (partition_id=0)
+        samples = generator_func(n, 0, random_seed)
+        return pd.DataFrame(samples)
