@@ -2,22 +2,25 @@
 
 import logging
 from functools import reduce
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import NumericType
 
 from spark_bestfit.discrete_fitting import (
+    DISCRETE_FIT_RESULT_SCHEMA,
     compute_discrete_histogram,
-    create_discrete_fitting_udf,
     create_discrete_sample_data,
+    fit_single_discrete_distribution,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_stats
 from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
 from spark_bestfit.utils import get_spark_session
+
+if TYPE_CHECKING:
+    from spark_bestfit.protocols import ExecutionBackend
 
 logger = logging.getLogger(__name__)
 
@@ -63,20 +66,40 @@ class DiscreteDistributionFitter:
         spark: Optional[SparkSession] = None,
         excluded_distributions: Optional[Tuple[str, ...]] = None,
         random_seed: int = 42,
+        backend: Optional["ExecutionBackend"] = None,
     ):
         """Initialize DiscreteDistributionFitter.
 
         Args:
             spark: SparkSession. If None, uses the active session.
+                Ignored if ``backend`` is provided.
             excluded_distributions: Distributions to exclude from fitting.
                 Defaults to DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS.
                 Pass an empty tuple ``()`` to include ALL scipy discrete distributions.
             random_seed: Random seed for reproducible sampling.
+            backend: Optional execution backend (v2.0). If None, creates a
+                SparkBackend from the spark session. Allows plugging in
+                alternative backends like LocalBackend for testing.
 
         Raises:
             RuntimeError: If no SparkSession provided and no active session exists
         """
-        self.spark: SparkSession = get_spark_session(spark)
+        # Initialize backend (lazy import to avoid circular dependency)
+        if backend is not None:
+            self._backend = backend
+            # Extract SparkSession from SparkBackend if available
+            if hasattr(backend, "spark"):
+                self.spark = backend.spark
+            else:
+                # For non-Spark backends, we still need a SparkSession for DataFrame ops
+                self.spark = get_spark_session(spark)
+        else:
+            self.spark = get_spark_session(spark)
+            # Lazy import to avoid circular dependency
+            from spark_bestfit.backends.spark import SparkBackend
+
+            self._backend = SparkBackend(self.spark)
+
         self.excluded_distributions = (
             excluded_distributions if excluded_distributions is not None else DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
         )
@@ -307,52 +330,43 @@ class DiscreteDistributionFitter:
         x_values, empirical_pmf = compute_discrete_histogram(data_sample)
         logger.info(f"  PMF for '{column}': {len(x_values)} unique values (range: {x_values.min()}-{x_values.max()})")
 
-        # Broadcast histogram and data
-        histogram_bc = self.spark.sparkContext.broadcast((x_values, empirical_pmf))
-        data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
-
         # Compute data stats for provenance (once per column)
         data_stats = compute_data_stats(data_sample.astype(float))
 
-        try:
-            # Interleave slow distributions for better partition balance
-            # (Currently no slow discrete distributions, but maintains consistency)
-            # Lazy import to avoid circular dependency with core.py
-            from spark_bestfit.core import _interleave_distributions
+        # Interleave slow distributions for better partition balance
+        # (Currently no slow discrete distributions, but maintains consistency)
+        # Lazy import to avoid circular dependency with core.py
+        from spark_bestfit.core import _interleave_distributions
 
-            distributions = _interleave_distributions(distributions)
+        distributions = _interleave_distributions(distributions)
 
-            # Create DataFrame of distributions
-            dist_df = self.spark.createDataFrame([(dist,) for dist in distributions], ["distribution_name"])
+        # Execute parallel fitting via backend (v2.0 abstraction)
+        # Backend handles: broadcast, partitioning, UDF application, collection
+        results = self._backend.parallel_fit(
+            distributions=distributions,
+            histogram=(x_values, empirical_pmf),
+            data_sample=data_sample,
+            fit_func=fit_single_discrete_distribution,
+            column_name=column,
+            data_stats=data_stats,
+            num_partitions=num_partitions,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            lazy_metrics=lazy_metrics,
+            is_discrete=True,
+        )
 
-            # Determine partitioning
-            n_partitions = num_partitions or self._calculate_partitions(distributions)
-            dist_df = dist_df.repartition(n_partitions)
+        # Convert results to DataFrame
+        if results:
+            results_df = self.spark.createDataFrame(results, schema=DISCRETE_FIT_RESULT_SCHEMA)
+        else:
+            # Empty results - create empty DataFrame with schema
+            results_df = self.spark.createDataFrame([], schema=DISCRETE_FIT_RESULT_SCHEMA)
 
-            # Apply discrete fitting UDF
-            fitting_udf = create_discrete_fitting_udf(
-                histogram_bc,
-                data_sample_bc,
-                column_name=column,
-                data_stats=data_stats,
-                lower_bound=lower_bound,
-                upper_bound=upper_bound,
-                lazy_metrics=lazy_metrics,
-            )
-            results_df = dist_df.select(fitting_udf(F.col("distribution_name")).alias("result")).select("result.*")
+        num_results = len(results)
+        logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")
 
-            # Filter failed fits
-            results_df = results_df.filter(F.col("sse") < float(np.inf))
-
-            num_results = results_df.count()
-            logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")
-
-            return results_df
-
-        finally:
-            # Release broadcast variables (see note in _fit_column for why unpersist)
-            histogram_bc.unpersist()
-            data_sample_bc.unpersist()
+        return results_df
 
     @staticmethod
     def _validate_inputs(
@@ -387,8 +401,8 @@ class DiscreteDistributionFitter:
         if sample_fraction is not None and not 0.0 < sample_fraction <= 1.0:
             raise ValueError(f"sample_fraction must be in (0, 1], got {sample_fraction}")
 
+    @staticmethod
     def _validate_bounds(
-        self,
         lower_bound: Optional[Union[float, Dict[str, float]]],
         upper_bound: Optional[Union[float, Dict[str, float]]],
         target_columns: List[str],
@@ -433,8 +447,8 @@ class DiscreteDistributionFitter:
                         f"lower_bound ({col_lower}) must be less than upper_bound ({col_upper}) for column '{col}'"
                     )
 
+    @staticmethod
     def _resolve_bounds(
-        self,
         df: DataFrame,
         target_columns: List[str],
         lower_bound: Optional[Union[float, Dict[str, float]]],
@@ -553,7 +567,7 @@ class DiscreteDistributionFitter:
         slow_count = sum(1 for d in distributions if d in slow_set)
         # Slow distributions count 3x (1 base + 2 extra)
         effective_count = len(distributions) + slow_count * 2
-        total_cores = self.spark.sparkContext.defaultParallelism
+        total_cores = self._backend.get_parallelism()
         return min(effective_count, total_cores * 2)
 
     def plot(

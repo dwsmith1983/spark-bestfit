@@ -24,6 +24,8 @@ Example:
 """
 
 from spark_bestfit._version import __version__
+from spark_bestfit.backends.local import LocalBackend
+from spark_bestfit.backends.spark import SparkBackend
 from spark_bestfit.copula import GaussianCopula
 from spark_bestfit.core import (
     DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS,
@@ -33,6 +35,7 @@ from spark_bestfit.core import (
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
+from spark_bestfit.protocols import ExecutionBackend
 from spark_bestfit.results import DistributionFitResult, FitResults, MetricName
 from spark_bestfit.serialization import SerializationError
 from spark_bestfit.utils import get_spark_session
@@ -45,6 +48,10 @@ __all__ = [
     "DistributionFitter",
     "DiscreteDistributionFitter",
     "GaussianCopula",
+    # Backends (v2.0)
+    "ExecutionBackend",
+    "SparkBackend",
+    "LocalBackend",
     # Progress tracking
     "ProgressTracker",
     "ProgressCallback",
