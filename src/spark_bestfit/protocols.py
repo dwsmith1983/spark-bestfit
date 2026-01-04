@@ -31,9 +31,9 @@ class ExecutionBackend(Protocol):
     - Resource information (parallelism)
 
     Implementations:
-        - SparkBackend: Apache Spark via Pandas UDFs
-        - LocalBackend: concurrent.futures for testing
-        - RayBackend: Ray distributed computing (planned for v2.0)
+        - SparkBackend: Apache Spark via Pandas UDFs (default)
+        - LocalBackend: concurrent.futures for testing/development
+        - RayBackend: Ray distributed computing (v2.0)
     """
 
     def broadcast(self, data: Any) -> Any:

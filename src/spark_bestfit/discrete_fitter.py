@@ -91,8 +91,8 @@ class DiscreteDistributionFitter:
             if hasattr(backend, "spark"):
                 self.spark = backend.spark
             else:
-                # For non-Spark backends, we still need a SparkSession for DataFrame ops
-                self.spark = get_spark_session(spark)
+                # For non-Spark backends (LocalBackend, RayBackend), no SparkSession needed
+                self.spark = None
         else:
             self.spark = get_spark_session(spark)
             # Lazy import to avoid circular dependency
@@ -214,7 +214,14 @@ class DiscreteDistributionFitter:
         self._validate_bounds(lower_bound, upper_bound, target_columns)
 
         # Get row count (single operation for all columns)
-        row_count = df.count()
+        # Handle Spark DataFrame, Ray Dataset, and pandas DataFrame
+        if hasattr(df, "sparkSession"):
+            row_count = df.count()
+        elif hasattr(df, "select_columns") and hasattr(df, "count"):
+            # Ray Dataset - use count() method
+            row_count = df.count()
+        else:
+            row_count = len(df)
         if row_count == 0:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
@@ -236,9 +243,9 @@ class DiscreteDistributionFitter:
         if max_distributions is not None and max_distributions > 0:
             distributions = distributions[:max_distributions]
 
-        # Start progress tracking if callback provided
+        # Start progress tracking if callback provided (Spark only)
         tracker = None
-        if progress_callback is not None:
+        if progress_callback is not None and self.spark is not None:
             from spark_bestfit.progress import ProgressTracker
 
             tracker = ProgressTracker(self.spark, progress_callback)
@@ -277,11 +284,19 @@ class DiscreteDistributionFitter:
                         is_discrete=True,  # Discrete distributions
                     )
 
-            # Union all results using reduce for cleaner query plan
-            combined_df = reduce(DataFrame.union, all_results_dfs)
+            # Union all results - handle both Spark and pandas DataFrames
+            if self.spark is not None:
+                # Spark: union DataFrames
+                combined_df = reduce(DataFrame.union, all_results_dfs)
+                combined_df = combined_df.cache()
+                total_results = combined_df.count()
+            else:
+                # Non-Spark backend: concatenate pandas DataFrames
+                import pandas as pd
 
-            combined_df = combined_df.cache()
-            total_results = combined_df.count()
+                combined_df = pd.concat(all_results_dfs, ignore_index=True)
+                total_results = len(combined_df)
+
             logger.info(
                 f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
             )
@@ -321,8 +336,10 @@ class DiscreteDistributionFitter:
         # Create integer data sample for fitting
         sample_size = min(FITTING_SAMPLE_SIZE, row_count)
         fraction = min(sample_size / row_count, 1.0)
-        sample_df = df_sample.select(column).sample(fraction=fraction, seed=self.random_seed)
-        data_sample = sample_df.toPandas()[column].values.astype(int)
+        # Use backend's sample_column which handles both Spark and pandas
+        data_sample = self._backend.sample_column(df_sample, column, fraction=fraction, seed=self.random_seed).astype(
+            int
+        )
         data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
         logger.info(f"  Data sample for '{column}': {len(data_sample)} values")
 
@@ -357,11 +374,17 @@ class DiscreteDistributionFitter:
         )
 
         # Convert results to DataFrame
-        if results:
-            results_df = self.spark.createDataFrame(results, schema=DISCRETE_FIT_RESULT_SCHEMA)
+        if self.spark is not None:
+            # Spark backend
+            if results:
+                results_df = self.spark.createDataFrame(results, schema=DISCRETE_FIT_RESULT_SCHEMA)
+            else:
+                results_df = self.spark.createDataFrame([], schema=DISCRETE_FIT_RESULT_SCHEMA)
         else:
-            # Empty results - create empty DataFrame with schema
-            results_df = self.spark.createDataFrame([], schema=DISCRETE_FIT_RESULT_SCHEMA)
+            # Non-Spark backend: use pandas DataFrame
+            import pandas as pd
+
+            results_df = pd.DataFrame(results) if results else pd.DataFrame()
 
         num_results = len(results)
         logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")
@@ -391,12 +414,44 @@ class DiscreteDistributionFitter:
         if max_distributions == 0:
             raise ValueError("max_distributions cannot be 0")
 
-        if column not in df.columns:
-            raise ValueError(f"Column '{column}' not found in DataFrame. Available columns: {df.columns}")
+        # Get columns list - handle Spark, pandas, and Ray Dataset
+        if hasattr(df, "select_columns") and hasattr(df, "schema"):
+            # Ray Dataset - use schema() method to get column names
+            columns_list = df.schema().names
+        elif hasattr(df, "schema") and hasattr(df.schema, "__iter__"):
+            # Spark DataFrame
+            columns_list = df.columns
+        else:
+            # pandas DataFrame (or similar)
+            columns_list = list(df.columns)
 
-        col_type = df.schema[column].dataType
-        if not isinstance(col_type, NumericType):
-            raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
+        if column not in columns_list:
+            raise ValueError(f"Column '{column}' not found in DataFrame. Available columns: {columns_list}")
+
+        # Handle type checking for Spark, pandas, and Ray Dataset
+        if hasattr(df, "select_columns") and hasattr(df, "schema"):
+            # Ray Dataset - check schema for numeric type
+            schema = df.schema()
+            col_idx = schema.names.index(column)
+            col_type = schema.types[col_idx]
+            # Ray DataType has string repr like 'double', 'int64', etc.
+            type_str = str(col_type).lower()
+            numeric_types = ("int", "float", "double", "decimal")
+            if not any(t in type_str for t in numeric_types):
+                raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
+        elif hasattr(df, "schema") and hasattr(df.schema, "__getitem__"):
+            # Spark DataFrame
+            col_type = df.schema[column].dataType
+            if not isinstance(col_type, NumericType):
+                raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
+        else:
+            # pandas DataFrame (or similar)
+            import pandas as pd
+
+            if hasattr(df, "dtypes"):
+                col_dtype = df[column].dtype
+                if not pd.api.types.is_numeric_dtype(col_dtype):
+                    raise TypeError(f"Column '{column}' must be numeric, got {col_dtype}")
 
         if sample_fraction is not None and not 0.0 < sample_fraction <= 1.0:
             raise ValueError(f"sample_fraction must be in (0, 1], got {sample_fraction}")
@@ -547,7 +602,12 @@ class DiscreteDistributionFitter:
             fraction = min(max_sample_size / row_count, 0.35)
 
         logger.info(f"Sampling {fraction * 100:.1f}% of data ({int(row_count * fraction)} rows)")
-        return df.sample(fraction=fraction, seed=self.random_seed)
+        # Handle both Spark and pandas DataFrames
+        if hasattr(df, "sparkSession"):
+            return df.sample(fraction=fraction, seed=self.random_seed)
+        else:
+            # pandas DataFrame
+            return df.sample(frac=fraction, random_state=self.random_seed)
 
     def _calculate_partitions(self, distributions: List[str]) -> int:
         """Calculate optimal Spark partition count for distribution fitting.
@@ -617,8 +677,16 @@ class DiscreteDistributionFitter:
         from spark_bestfit.plotting import plot_discrete_distribution
 
         # Get data sample
-        sample_df = df.select(column).sample(fraction=min(10000 / df.count(), 1.0), seed=self.random_seed)
-        data = sample_df.toPandas()[column].values.astype(int)
+        # Handle Spark DataFrame, Ray Dataset, and pandas DataFrame
+        if hasattr(df, "sparkSession"):
+            row_count = df.count()
+        elif hasattr(df, "select_columns") and hasattr(df, "count"):
+            # Ray Dataset - use count() method
+            row_count = df.count()
+        else:
+            row_count = len(df)
+        fraction = min(10000 / row_count, 1.0)
+        data = self._backend.sample_column(df, column, fraction=fraction, seed=self.random_seed).astype(int)
 
         return plot_discrete_distribution(
             result=result,

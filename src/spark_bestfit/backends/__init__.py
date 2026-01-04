@@ -5,6 +5,7 @@ distribution fitting:
 
 - SparkBackend: Apache Spark using Pandas UDFs (default)
 - LocalBackend: Thread-based local execution for testing
+- RayBackend: Ray cluster execution (optional, requires ray)
 
 Example:
     >>> from spark_bestfit.backends.spark import SparkBackend
@@ -18,9 +19,22 @@ For testing without Spark:
     >>> from spark_bestfit.backends.local import LocalBackend
     >>> backend = LocalBackend()
     >>> fitter = DistributionFitter(backend=backend)
+
+For Ray clusters:
+    >>> from spark_bestfit.backends.ray import RayBackend
+    >>> backend = RayBackend()  # Auto-initializes Ray
+    >>> fitter = DistributionFitter(backend=backend)
 """
 
 from spark_bestfit.backends.local import LocalBackend
 from spark_bestfit.backends.spark import SparkBackend
 
 __all__ = ["SparkBackend", "LocalBackend"]
+
+# Conditional Ray import (only if ray is installed)
+try:
+    from spark_bestfit.backends.ray import RayBackend  # noqa: F401
+
+    __all__.append("RayBackend")
+except ImportError:
+    pass  # Ray not installed, RayBackend not available
