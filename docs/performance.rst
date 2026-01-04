@@ -15,13 +15,55 @@ including scaling behavior, memory footprint, and tuning recommendations.
 Architecture Overview
 ---------------------
 
-spark-bestfit uses a **histogram-based approach** that provides significant
-performance advantages over naive distribution fitting:
+spark-bestfit uses a **histogram-based approach** with a **pluggable backend architecture**
+that provides significant performance advantages over naive distribution fitting:
 
-1. **Compute histogram once**: A single Spark aggregation computes the data histogram
-2. **Broadcast small data**: Only the histogram (~8KB) and a data sample are broadcast to executors
-3. **Parallel fitting**: Pandas UDFs fit distributions in parallel across partitions
-4. **No data collection**: Raw data never leaves the executors
+1. **Compute histogram once**: A single distributed aggregation computes the data histogram
+2. **Broadcast small data**: Only the histogram (~8KB) and a data sample are broadcast to workers
+3. **Parallel fitting**: Distributions are fitted in parallel across partitions
+4. **No data collection**: Raw data never leaves the workers
+5. **Backend abstraction** (v2.0.0+): Swap between Spark, Local, or Ray backends
+
+Backend Architecture (v2.0.0)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+As of v2.0.0, spark-bestfit uses an ``ExecutionBackend`` protocol that enables
+pluggable compute backends:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Backend
+     - Use Case
+     - Install
+   * - ``SparkBackend``
+     - Production clusters, large datasets
+     - Default (included)
+   * - ``LocalBackend``
+     - Unit testing, development, small datasets
+     - Default (included)
+   * - ``RayBackend``
+     - Ray clusters, ML pipelines
+     - ``pip install spark-bestfit[ray]`` (planned)
+
+.. code-block:: python
+
+    from spark_bestfit import DistributionFitter, SparkBackend, LocalBackend
+
+    # Default: SparkBackend (same as before)
+    fitter = DistributionFitter(spark)
+
+    # Explicit SparkBackend
+    backend = SparkBackend(spark)
+    fitter = DistributionFitter(backend=backend)
+
+    # LocalBackend for testing (no Spark required)
+    import pandas as pd
+    backend = LocalBackend(max_workers=4)
+    fitter = DistributionFitter(backend=backend)
+    df = pd.DataFrame({"value": [1.0, 2.0, 3.0, ...]})
+    results = fitter.fit(df, column="value")
 
 This design means **fit time scales sub-linearly with data size** —
 the histogram computation is O(N) but very fast, while distribution fitting is O(1).
@@ -136,12 +178,16 @@ Fit time is **sub-linear** with data size due to the histogram-based approach:
 
     Data Size    | Fit Time  | Scaling Factor
     -------------|-----------|------------------
-    25,000       | ~7.3s     | 1.0× (baseline)
-    100,000      | ~9.8s     | ~1.3×
-    500,000      | ~9.0s     | ~1.2×
-    1,000,000    | ~7.6s     | ~1.0×
+    25,000       | ~4.8s     | 1.0× (baseline)
+    100,000      | ~6.6s     | ~1.4×
+    500,000      | ~5.9s     | ~1.2×
+    1,000,000    | ~5.0s     | ~1.0×
 
 A 40× increase in data results in only ~1.0× increase in time (vs 40× if O(N)).
+
+.. note::
+   v2.0.0 provides 35% faster fitting across all data sizes compared to v1.7.x,
+   primarily from the flattened result schema and improved broadcast lifecycle.
 
 Distribution Count Scaling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -153,47 +199,51 @@ distributions are computationally expensive:
 
     # Distributions | Fit Time  | Time per Distribution
     ----------------|-----------|----------------------
-    5               | ~0.5s     | ~110ms (fast dists)
-    20              | ~1.1s     | ~53ms (fast dists)
-    50              | ~2.0s     | ~40ms (fast dists)
-    90 (default)    | ~8.8s     | ~98ms (includes slow dists)
-    107 (near-all)  | ~10.3s    | ~96ms (excludes only 3 extremely slow)
+    5               | ~0.46s    | ~92ms (fast dists)
+    20              | ~0.87s    | ~43ms (fast dists)
+    50              | ~1.46s    | ~29ms (fast dists)
+    90 (default)    | ~5.7s     | ~63ms (includes slow dists)
+    107 (near-all)  | ~6.6s     | ~61ms (excludes only 3 extremely slow)
 
-The first ~50 distributions are fast (~40-50ms each). The remaining distributions
+The first ~50 distributions are fast (~30ms each). The remaining distributions
 include slower ones like ``burr``, ``t``, and ``johnsonsb`` (~100-160ms each).
 See :ref:`slow-distribution-optimizations` for details.
 
 Multi-Column Efficiency
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Fitting multiple columns in a single call is more efficient than fitting each
-column separately. The efficiency gains come from shared Spark overhead:
+Multi-column fitting provides convenience and cleaner code:
 
 - Single ``df.count()`` call for all columns
 - Shared data sampling across columns
-- Single broadcast setup per fit operation
-
-.. image:: _static/multi_column_efficiency.png
-   :alt: Multi-column fitting efficiency
-   :width: 100%
-
-**Recommendation**: When fitting the same distributions to multiple columns,
-always use ``columns=[...]`` instead of separate ``column=`` calls.
+- Unified results with ``best_per_column()`` accessor
 
 .. code-block:: python
 
-    # Efficient: single call for all columns
+    # Multi-column: single call for all columns
     results = fitter.fit(df, columns=["col1", "col2", "col3"])
+    best_per_col = results.best_per_column(n=1)
 
-    # Less efficient: 3 separate calls
+    # Separate: 3 individual calls
     results1 = fitter.fit(df, column="col1")
     results2 = fitter.fit(df, column="col2")
     results3 = fitter.fit(df, column="col3")
 
 .. note::
-   Multi-column fitting scales well with data size. In benchmarks, fitting 3 columns
-   with 100K rows each took similar time to 10K rows (~4.5s vs ~4.9s), demonstrating
-   the sub-linear scaling benefits of the histogram-based approach.
+   **v2.0.0 Update**: The performance difference between multi-column and separate
+   fits is now negligible (~0.3%). The v2.0.0 optimizations reduced per-operation
+   overhead so much that both approaches converge to the same performance. Use
+   whichever API is more convenient for your workflow.
+
+   .. code-block:: text
+
+       Approach           | v1.7.2  | v2.0.0  | Change
+       -------------------|---------|---------|--------
+       3 Separate Fits    | 3.65s   | 2.69s   | -26%
+       1 Multi-Column Fit | 3.08s   | 2.69s   | -13%
+       Speedup            | 18%     | ~0%     | —
+
+   The optimization that previously mattered (shared overhead) is now negligible.
 
 Spark Configuration
 -------------------
@@ -726,34 +776,34 @@ These are now excluded by default.
 Benchmark Results
 ^^^^^^^^^^^^^^^^^
 
-The v1.7.0 optimizations provide significant performance improvements:
+The v1.7.0+ optimizations provide significant performance improvements:
 
 .. list-table::
    :header-rows: 1
    :widths: 40 20 20 20
 
    * - Test
-     - Before (v1.6.0)
-     - After (v1.7.0)
+     - v1.6.0
+     - v2.0.0
      - Improvement
    * - Fit all distributions (10K rows)
      - 24.4s
-     - 8.7s
-     - **64% faster**
+     - 6.6s
+     - **73% faster**
    * - Fit 1M rows
      - 23.3s
-     - 7.6s
-     - **67% faster**
+     - 5.0s
+     - **78% faster**
    * - Fit 100K rows
      - 19.5s
-     - 9.8s
-     - **50% faster**
+     - 6.6s
+     - **66% faster**
    * - Lazy AIC-only workflow
      - 18.9s
-     - 2.8s
-     - **85% faster**
+     - 2.0s
+     - **89% faster**
 
-The overall benchmark suite runtime dropped from **90 minutes to 47 minutes** (48% faster).
+The overall benchmark suite runtime dropped from **90 minutes to 33 minutes** (63% faster).
 
 Distribution-Aware Partitioning
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -828,6 +878,114 @@ the exclusions:
 .. note::
 
    With distribution-aware partitioning, fitting 107 distributions (excluding
-   only the 3 extremely slow ones) takes ~10.3s on a 10-core machine. The slow
+   only the 3 extremely slow ones) takes ~6.6s on a 10-core machine. The slow
    distributions (``burr``, ``t``, ``johnsonsb``, etc.) are spread across
    partitions and processed in parallel, minimizing straggler effects.
+
+v2.0.0 Performance Improvements
+-------------------------------
+
+Version 2.0.0 delivers significant performance improvements through architectural
+changes and schema optimizations:
+
+Benchmark Comparison
+^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 20 20
+
+   * - Test
+     - v1.7.2
+     - v2.0.0
+     - Improvement
+   * - ``test_continuous_fit_10k``
+     - 0.803s
+     - 0.626s
+     - **22% faster**
+   * - ``test_discrete_fit_10k``
+     - 1.191s
+     - 0.897s
+     - **25% faster**
+   * - ``test_discrete_all_distributions``
+     - 2.830s
+     - 1.887s
+     - **33% faster**
+   * - ``test_fit_1m_rows``
+     - 7.803s
+     - 5.049s
+     - **35% faster**
+   * - ``test_fit_default_distributions``
+     - 8.874s
+     - 5.706s
+     - **36% faster**
+   * - ``test_fit_eager_all_metrics``
+     - 10.417s
+     - 6.616s
+     - **36% faster**
+   * - ``test_fit_lazy_aic_only``
+     - 2.833s
+     - 2.019s
+     - **29% faster**
+
+**Overall test suite improvement**: 33 minutes (v2.0.0) vs 45 minutes (v1.7.x) — 27% faster.
+
+Key Optimizations
+^^^^^^^^^^^^^^^^^
+
+1. **Flattened Result Schema (~30% serialization speedup)**
+
+   The ``data_summary`` field was changed from ``MapType`` to individual columns:
+
+   .. code-block:: text
+
+      # Before (v1.7.x) - MapType is slow to serialize
+      data_summary: Map<String, Double>
+
+      # After (v2.0.0) - Flat columns are 30% faster
+      data_min: Double
+      data_max: Double
+      data_mean: Double
+      data_stddev: Double
+      data_count: Long
+
+   Arrow serialization for flat columns is significantly faster than for ``MapType``,
+   and this affects every fit result.
+
+2. **Improved Broadcast Lifecycle**
+
+   Broadcast variables are now properly cleaned up in ``finally`` blocks:
+
+   .. code-block:: python
+
+      # v2.0.0 pattern
+      try:
+          histogram_bc = backend.broadcast(histogram)
+          sample_bc = backend.broadcast(data_sample)
+          # ... fitting ...
+      finally:
+          backend.destroy_broadcast(histogram_bc)
+          backend.destroy_broadcast(sample_bc)
+
+   This reduces memory pressure and garbage collection overhead.
+
+3. **Backend Abstraction**
+
+   The ``ExecutionBackend`` protocol provides cleaner code paths with fewer
+   intermediate objects. While primarily an architectural improvement, the
+   streamlined code also contributes to performance.
+
+Why Multi-Column Speedup Disappeared
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In v1.7.x, multi-column fitting was ~18% faster than separate fits because
+it shared Spark overhead (``df.count()``, sampling). The v2.0.0 optimizations
+reduced that overhead so dramatically that:
+
+- v2.0.0 **separate** fits (2.69s for 3 columns) are now faster than
+  v1.7.x **together** fits (3.08s)
+- Both approaches converge to the same ~2.7s baseline
+- The optimization became unnecessary because the baseline is now optimized
+
+This is a positive outcome—users no longer need to use multi-column fitting
+for performance. Use whichever API is more convenient.

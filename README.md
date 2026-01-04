@@ -98,6 +98,39 @@ fitter.plot(best, df, "value", title="Best Fit Distribution")
 
 > **Note**: Spark 3.5.x does not support NumPy 2.0. If using Spark 3.5 with Python 3.12, ensure `setuptools` is installed (provides `distutils`).
 
+## Backend Support (v2.0.0+)
+
+spark-bestfit uses a pluggable backend architecture for distributed computation:
+
+| Backend | Use Case | Install |
+|---------|----------|---------|
+| **SparkBackend** | Production clusters, large datasets | Default |
+| **LocalBackend** | Unit testing, development | Default |
+| **RayBackend** | Ray clusters, ML workflows | `pip install spark-bestfit[ray]` (planned) |
+
+### Using Backends
+
+```python
+from spark_bestfit import DistributionFitter, SparkBackend, LocalBackend
+
+# Default: SparkBackend (same as before)
+fitter = DistributionFitter(spark)
+
+# Explicit SparkBackend
+backend = SparkBackend(spark)
+fitter = DistributionFitter(backend=backend)
+
+# LocalBackend for testing (no Spark required, uses pandas DataFrames)
+backend = LocalBackend(max_workers=4)
+fitter = DistributionFitter(backend=backend)
+
+import pandas as pd
+df = pd.DataFrame({"value": [1.0, 2.0, 3.0, ...]})
+results = fitter.fit(df, column="value")
+```
+
+> **Backward Compatible**: Existing code using `DistributionFitter(spark)` continues to work unchanged.
+
 ## API Overview
 
 ### Fitting Distributions
@@ -149,13 +182,13 @@ for col_name, fits in best_per_col.items():
 print(results.column_names)  # ['col_a', 'col_b', 'col_c']
 ```
 
-Multi-column fitting is more efficient than fitting columns separately because it:
-- Performs a single `df.count()` call for all columns
-- Shares the data sample across all fitting operations
-- Minimizes Spark job overhead
+Multi-column fitting provides convenience and cleaner code by:
+- Performing a single `df.count()` call for all columns
+- Sharing the data sample across all fitting operations
+- Returning unified results with `best_per_column()` accessor
 
-> **Benchmark:** Fitting 3 columns together is ~1.3× faster than 3 separate fits (4.8s vs 6.5s).
-> See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for details.
+> **Note:** As of v2.0.0, the performance difference between multi-column and separate fits is
+> negligible (~0.3%) due to reduced per-operation overhead. Use whichever API is more convenient.
 
 ### Bounded Distribution Fitting
 
