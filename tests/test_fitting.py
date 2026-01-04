@@ -10,6 +10,7 @@ from spark_bestfit.fitting import (
     bootstrap_confidence_intervals,
     compute_ad_pvalue,
     compute_ad_statistic,
+    compute_data_stats,
     compute_information_criteria,
     compute_ks_statistic,
     compute_pdf_range,
@@ -94,8 +95,11 @@ class TestFitSingleDistribution:
 
         # Should attempt to fit (may succeed or fail)
         assert result["distribution"] == "norm"
-        # Either succeeds or returns inf
-        assert result["sse"] >= 0 or result["sse"] == np.inf
+        # SSE must be finite positive or infinity (not NaN)
+        assert np.isfinite(result["sse"]) or result["sse"] == np.inf
+        # If fit succeeded, verify we got parameters
+        if np.isfinite(result["sse"]):
+            assert len(result["parameters"]) >= 2  # norm has loc, scale
 
 class TestEvaluatePDF:
     """Tests for PDF evaluation."""
@@ -262,13 +266,14 @@ class TestFitSingleDistributionEdgeCases:
     def test_fit_returns_correct_structure(self, normal_data):
         """Test that fit returns dict with all required keys."""
         y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
+        data_stats = compute_data_stats(normal_data)
 
-
-        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist)
+        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist, data_stats=data_stats)
 
         required_keys = {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
-            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
+            "data_min", "data_max", "data_mean", "data_stddev", "data_count",
             "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
         }
         assert set(result.keys()) == required_keys

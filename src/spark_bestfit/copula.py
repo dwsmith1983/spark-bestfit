@@ -1,8 +1,8 @@
 """Gaussian Copula for correlated multi-column sampling.
 
 This module provides scalable copula modeling that works on massive DataFrames:
-- Correlation computed via Spark ML (no .toPandas() required)
-- Distributed sampling via sample_spark() for millions of correlated samples
+- Correlation computed via backend (Spark ML, pandas, or other backends)
+- Distributed sampling via sample_distributed() for millions of correlated samples
 
 Example:
     >>> from spark_bestfit import DistributionFitter, GaussianCopula
@@ -11,12 +11,12 @@ Example:
     >>> fitter = DistributionFitter(spark)
     >>> results = fitter.fit(df, columns=["price", "quantity", "revenue"])
     >>>
-    >>> # Fit copula - correlation computed via Spark ML
-    >>> copula = GaussianCopula.fit(results, df)
+    >>> # Fit copula - correlation computed via backend
+    >>> copula = GaussianCopula.fit(results, df, backend=fitter._backend)
     >>>
     >>> # Generate correlated samples
     >>> samples = copula.sample(n=10000)  # Dict[str, np.ndarray]
-    >>> samples_df = copula.sample_spark(n=1_000_000, spark=spark)
+    >>> samples_df = copula.sample_distributed(n=1_000_000, backend=backend)
 """
 
 import json
@@ -24,22 +24,17 @@ import pickle
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
-import pandas as pd
 import scipy.stats as st
-from pyspark.ml.feature import VectorAssembler
-from pyspark.ml.stat import Correlation
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.types import DoubleType, IntegerType, StructField, StructType
 
 from spark_bestfit._version import __version__
 from spark_bestfit.results import DistributionFitResult, MetricName
 from spark_bestfit.serialization import SCHEMA_VERSION, SerializationError, detect_format
-from spark_bestfit.utils import get_spark_session
 
 if TYPE_CHECKING:
+    from spark_bestfit.protocols import ExecutionBackend
     from spark_bestfit.results import FitResults
 
 
@@ -50,9 +45,9 @@ class GaussianCopula:
     Preserves both the marginal distributions (from fitting) and the
     correlation structure (from the original data) when generating samples.
 
-    This implementation is designed for big data:
-    - Correlation is computed via Spark ML, not .toPandas()
-    - sample_spark() generates distributed samples across the cluster
+    This implementation supports multiple backends:
+    - SparkBackend: Correlation via Spark ML (no .toPandas()), distributed sampling
+    - LocalBackend: Correlation via pandas, local parallel sampling
 
     Attributes:
         column_names: List of column names in order
@@ -60,9 +55,9 @@ class GaussianCopula:
         correlation_matrix: Spearman correlation matrix as numpy array
 
     Example:
-        >>> copula = GaussianCopula.fit(results, df)
+        >>> copula = GaussianCopula.fit(results, df, backend=fitter._backend)
         >>> samples = copula.sample(n=10000)
-        >>> samples_df = copula.sample_spark(n=1_000_000, spark=spark)
+        >>> samples_df = copula.sample_distributed(n=1_000_000, backend=backend)
     """
 
     column_names: List[str]
@@ -85,20 +80,24 @@ class GaussianCopula:
     def fit(
         cls,
         results: "FitResults",
-        df: DataFrame,
+        df: Any,
         columns: Optional[List[str]] = None,
         metric: MetricName = "ks_statistic",
+        backend: Optional["ExecutionBackend"] = None,
     ) -> "GaussianCopula":
         """Fit a Gaussian copula from multi-column fit results.
 
-        Computes the Spearman correlation matrix using Spark ML's distributed
-        computation - no .toPandas() required, scales to billions of rows.
+        Computes the Spearman correlation matrix using the provided backend.
+        For SparkBackend, this uses Spark ML's distributed computation and
+        scales to billions of rows without .toPandas().
 
         Args:
             results: FitResults from DistributionFitter.fit() with multiple columns
-            df: Original Spark DataFrame used for fitting (for correlation computation)
+            df: DataFrame used for fitting (Spark DataFrame or pandas DataFrame)
             columns: Columns to include. Defaults to all columns in results.
             metric: Metric to use for selecting best distribution per column
+            backend: Execution backend. If None, creates SparkBackend (for
+                backward compatibility with Spark DataFrames).
 
         Returns:
             Fitted GaussianCopula instance
@@ -108,7 +107,7 @@ class GaussianCopula:
 
         Example:
             >>> results = fitter.fit(df, columns=["price", "quantity", "revenue"])
-            >>> copula = GaussianCopula.fit(results, df)
+            >>> copula = GaussianCopula.fit(results, df, backend=fitter._backend)
         """
         # Determine columns to use
         if columns is None:
@@ -136,44 +135,20 @@ class GaussianCopula:
                 raise ValueError(f"No fit results for column '{col}'")
             marginals[col] = best[0]
 
-        # Compute Spearman correlation via Spark ML (scales to billions of rows)
-        correlation_matrix = cls._compute_correlation_spark(df, columns)
+        # Create default backend if not provided (backward compatibility)
+        if backend is None:
+            from spark_bestfit.backends.spark import SparkBackend
+
+            backend = SparkBackend()
+
+        # Compute Spearman correlation via backend
+        correlation_matrix = backend.compute_correlation(df, columns, method="spearman")
 
         return cls(
             column_names=list(columns),
             marginals=marginals,
             correlation_matrix=correlation_matrix,
         )
-
-    @staticmethod
-    def _compute_correlation_spark(df: DataFrame, columns: List[str]) -> np.ndarray:
-        """Compute Spearman correlation matrix using Spark ML.
-
-        This method uses distributed computation and doesn't require .toPandas(),
-        enabling correlation computation on DataFrames with billions of rows.
-
-        Args:
-            df: Spark DataFrame
-            columns: Columns to compute correlation for
-
-        Returns:
-            Correlation matrix as numpy array
-        """
-        # Assemble columns into a vector
-        assembler = VectorAssembler(
-            inputCols=columns,
-            outputCol="_copula_features",
-            handleInvalid="skip",  # Skip rows with nulls
-        )
-        vector_df = assembler.transform(df).select("_copula_features")
-
-        # Compute Spearman correlation using Spark ML
-        corr_result = Correlation.corr(vector_df, "_copula_features", method="spearman")
-
-        # Extract correlation matrix from result
-        corr_matrix = corr_result.head()[0].toArray()
-
-        return corr_matrix
 
     def _get_frozen_dist(self, col: str) -> st.rv_continuous:
         """Get a frozen (pre-parameterized) scipy distribution for a column.
@@ -253,18 +228,112 @@ class GaussianCopula:
 
         return result
 
-    def sample_spark(
+    def sample_distributed(
         self,
         n: int,
-        spark: Optional[SparkSession] = None,
+        backend: "ExecutionBackend",
         num_partitions: Optional[int] = None,
         random_seed: Optional[int] = None,
         return_uniform: bool = False,
-    ) -> DataFrame:
-        """Generate correlated samples using Spark distributed computing.
+    ) -> Any:
+        """Generate correlated samples using distributed computing.
 
         This is the key differentiator - generates millions of correlated samples
-        across the cluster, leveraging Spark's parallelism.
+        across the cluster, leveraging the backend's parallelism.
+
+        Args:
+            n: Total number of samples to generate
+            backend: Execution backend (SparkBackend, LocalBackend, etc.)
+            num_partitions: Number of partitions. Defaults to backend parallelism.
+            random_seed: Random seed for reproducibility
+            return_uniform: If True, return uniform [0,1] samples without
+                marginal transformation. This is faster. Default False returns
+                samples transformed to the fitted marginal distributions.
+
+        Returns:
+            Backend-specific DataFrame with one column per marginal
+            (Spark DataFrame for SparkBackend, pandas DataFrame for LocalBackend)
+
+        Example:
+            >>> samples_df = copula.sample_distributed(n=100_000_000, backend=backend)
+            >>> samples_df.show(5)  # For Spark
+        """
+        # Prepare data for serialization to workers
+        corr_matrix = self.correlation_matrix
+        marginal_data: Dict[str, Dict[str, Any]] = {
+            col: {
+                "distribution": m.distribution,
+                "parameters": m.parameters,
+            }
+            for col, m in self.marginals.items()
+        }
+        column_names = self.column_names
+
+        def generate_copula_samples(
+            n_samples: int,
+            partition_id: int,
+            seed: Optional[int],
+        ) -> Dict[str, np.ndarray]:
+            """Generate correlated samples for a partition.
+
+            This function is passed to the backend's generate_samples method.
+            It's designed to be serializable and run on workers.
+            """
+            # Pre-create frozen distributions (only if doing marginal transforms)
+            frozen_dists: Dict[str, st.rv_continuous] = {}
+            if not return_uniform:
+                for col in column_names:
+                    m_info = marginal_data[col]
+                    dist = getattr(st, m_info["distribution"])
+                    frozen_dists[col] = dist(*m_info["parameters"])
+
+            # Create RNG with partition-specific seed
+            rng = np.random.default_rng(seed)
+
+            # Generate multivariate normal samples
+            mvn_samples = rng.multivariate_normal(
+                mean=np.zeros(len(column_names)),
+                cov=corr_matrix,
+                size=n_samples,
+            )
+
+            # Transform normal -> uniform (vectorized for all columns at once)
+            uniform_samples = st.norm.cdf(mvn_samples)
+
+            # Fast path: return uniform samples without marginal transform
+            if return_uniform:
+                return {col: uniform_samples[:, i] for i, col in enumerate(column_names)}
+
+            # Transform through frozen distributions for each column
+            result_data: Dict[str, np.ndarray] = {}
+            for i, col in enumerate(column_names):
+                result_data[col] = frozen_dists[col].ppf(uniform_samples[:, i])
+
+            return result_data
+
+        # Use backend to generate samples distributed across partitions
+        return backend.generate_samples(
+            n=n,
+            generator_func=generate_copula_samples,
+            column_names=column_names,
+            num_partitions=num_partitions,
+            random_seed=random_seed,
+        )
+
+    def sample_spark(
+        self,
+        n: int,
+        spark: Optional[Any] = None,
+        num_partitions: Optional[int] = None,
+        random_seed: Optional[int] = None,
+        return_uniform: bool = False,
+    ) -> Any:
+        """Generate correlated samples using Spark distributed computing.
+
+        .. deprecated::
+            Use :meth:`sample_distributed` with a SparkBackend instead.
+
+        This is a backward-compatible wrapper around sample_distributed().
 
         Args:
             n: Total number of samples to generate
@@ -282,108 +351,16 @@ class GaussianCopula:
             >>> samples_df = copula.sample_spark(n=100_000_000, spark=spark)
             >>> samples_df.show(5)
         """
-        spark = get_spark_session(spark)
-        if num_partitions is None:
-            num_partitions = spark.sparkContext.defaultParallelism
+        from spark_bestfit.backends.spark import SparkBackend
 
-        # Calculate samples per partition
-        base_samples = n // num_partitions
-        remainder = n % num_partitions
-
-        # Create partition info DataFrame
-        partition_data = []
-        for i in range(num_partitions):
-            samples_for_partition = base_samples + (1 if i < remainder else 0)
-            if samples_for_partition > 0:
-                partition_data.append((i, samples_for_partition))
-
-        partition_df = spark.createDataFrame(
-            partition_data,
-            StructType(
-                [
-                    StructField("partition_id", IntegerType(), False),
-                    StructField("n_samples", IntegerType(), False),
-                ]
-            ),
+        backend = SparkBackend(spark)
+        return self.sample_distributed(
+            n=n,
+            backend=backend,
+            num_partitions=num_partitions,
+            random_seed=random_seed,
+            return_uniform=return_uniform,
         )
-
-        # Repartition to ensure each row goes to its own partition
-        partition_df = partition_df.repartition(len(partition_data))
-
-        # Define output schema with one column per marginal
-        output_fields = [StructField(col, DoubleType(), False) for col in self.column_names]
-        output_schema = StructType(output_fields)
-
-        # Prepare data for serialization to workers
-        corr_matrix = self.correlation_matrix.tolist()
-        marginal_data: Dict[str, Dict[str, Any]] = {
-            col: {
-                "distribution": m.distribution,
-                "parameters": m.parameters,
-            }
-            for col, m in self.marginals.items()
-        }
-        column_names = self.column_names
-
-        def generate_correlated_samples(
-            iterator: Iterator[pd.DataFrame],
-        ) -> Iterator[pd.DataFrame]:
-            """Generate correlated samples for each partition."""
-            # Pre-create frozen distributions once per worker (cached)
-            # Only needed if we're doing marginal transforms
-            frozen_dists: Dict[str, st.rv_continuous] = {}
-            if not return_uniform:
-                for col in column_names:
-                    m_info = marginal_data[col]
-                    dist = getattr(st, m_info["distribution"])
-                    frozen_dists[col] = dist(*m_info["parameters"])
-
-            # Pre-convert correlation matrix once
-            corr_np = np.array(corr_matrix)
-
-            for pdf in iterator:
-                if len(pdf) == 0:
-                    continue
-
-                # Process all rows in the partition at once (vectorized, no iterrows)
-                for idx in range(len(pdf)):
-                    n_samples = int(pdf.iloc[idx]["n_samples"])
-                    partition_id = int(pdf.iloc[idx]["partition_id"])
-
-                    # Create unique seed for this partition
-                    if random_seed is not None:
-                        rng = np.random.default_rng(random_seed + partition_id)
-                    else:
-                        rng = np.random.default_rng()
-
-                    # Generate multivariate normal samples
-                    mvn_samples = rng.multivariate_normal(
-                        mean=np.zeros(len(column_names)),
-                        cov=corr_np,
-                        size=n_samples,
-                    )
-
-                    # Transform normal -> uniform (vectorized for all columns at once)
-                    uniform_samples = st.norm.cdf(mvn_samples)
-
-                    # Fast path: return uniform samples without marginal transform
-                    if return_uniform:
-                        result_data = {col: uniform_samples[:, i] for i, col in enumerate(column_names)}
-                    else:
-                        # Transform through frozen distributions for each column
-                        result_data = {}
-                        for i, col in enumerate(column_names):
-                            result_data[col] = frozen_dists[col].ppf(uniform_samples[:, i])
-
-                    yield pd.DataFrame(result_data)
-
-        # Apply the UDF
-        result_df = partition_df.mapInPandas(
-            generate_correlated_samples,
-            schema=output_schema,
-        )
-
-        return result_df
 
     def save(
         self,

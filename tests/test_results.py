@@ -435,7 +435,8 @@ class TestDistributionFitResultEdgeCases:
 
         assert set(d.keys()) == {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
-            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
+            "data_min", "data_max", "data_mean", "data_stddev", "data_count",
             "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
         }
         assert d["distribution"] == "gamma"

@@ -1,15 +1,17 @@
 spark-bestfit
 ==============
 
-Modern Spark distribution fitting library with efficient parallel processing.
+Modern distribution fitting library with pluggable backends (Spark, Ray, Local).
 
 Automatically fit ~90 scipy.stats continuous distributions and 16 discrete distributions
-to your data using Apache Spark's distributed computing power, with optimized Pandas UDFs.
+to your data using parallel processing. Supports Apache Spark for production clusters,
+Ray for ML workflows, or local execution for development.
 
 **Supported Versions:**
 
 - Python 3.11 - 3.13
 - Apache Spark 3.5.x and 4.x
+- Ray 2.x (optional)
 - See :doc:`quickstart` for the full compatibility matrix
 
 Scope & Limitations
@@ -24,26 +26,41 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 - Provide robust goodness-of-fit metrics (KS, A-D, AIC, BIC, SSE)
 - Generate publication-ready visualizations (histograms, Q-Q plots, P-P plots)
 - Compute bootstrap confidence intervals for parameters
+- Scale to 100M+ rows with Spark or Ray backends
 
 **Known limitations:**
 
 - No real-time/streaming support (batch processing only)
-- Custom distribution support planned for 1.3.0
+- User-defined distributions planned for v2.1.0
 - Parameters and metrics use 32-bit floats (~7 significant digits) for Spark serialization
   efficiency. Very small values (e.g., p-values < 1e-7) may lose precision.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Getting Started
 
    quickstart
+   backends
    usecases
-   bounded
-   sampling
-   serialization
-   copula
-   progress
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Features
+
+   features/bounded
+   features/sampling
+   features/serialization
+   features/copula
+   features/progress
+   features/lazy-metrics
+   features/prefiltering
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
    performance
+   migration
    api
 
 Indices and tables

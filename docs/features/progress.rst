@@ -1,7 +1,7 @@
 Progress Tracking
 =================
 
-spark-bestfit v1.2.0 introduces progress tracking for distribution fitting operations.
+spark-bestfit supports progress tracking for distribution fitting operations.
 This allows you to monitor long-running jobs and provide feedback to users.
 
 Quick Start
@@ -206,7 +206,7 @@ Progress values may appear to fluctuate during fitting::
 This is expected behavior:
 
 - **Total increases**: Each distribution fit triggers Spark stages. As new stages
-  start, the total task count grows (85 → 156 → 216 in the example above).
+  start, the total task count grows (85 -> 156 -> 216 in the example above).
 
 - **Percentage can decrease**: When a new stage starts, the denominator increases
   before its tasks complete, temporarily lowering the percentage.

@@ -70,7 +70,12 @@ def serialize_to_dict(result: "DistributionFitResult") -> Dict[str, Any]:
             "ad_statistic": result.ad_statistic,
             "ad_pvalue": result.ad_pvalue,
         },
-        "data_summary": result.data_summary,
+        # Flat data stats (v2.0: replaced data_summary dict)
+        "data_min": result.data_min,
+        "data_max": result.data_max,
+        "data_mean": result.data_mean,
+        "data_stddev": result.data_stddev,
+        "data_count": result.data_count,
         # Bounds for truncated distribution fitting (v1.4.0)
         "lower_bound": result.lower_bound,
         "upper_bound": result.upper_bound,
@@ -128,7 +133,11 @@ def deserialize_from_dict(data: Dict[str, Any]) -> "DistributionFitResult":
         pvalue=metrics.get("pvalue"),
         ad_statistic=metrics.get("ad_statistic"),
         ad_pvalue=metrics.get("ad_pvalue"),
-        data_summary=data.get("data_summary"),
+        data_min=data.get("data_min"),
+        data_max=data.get("data_max"),
+        data_mean=data.get("data_mean"),
+        data_stddev=data.get("data_stddev"),
+        data_count=data.get("data_count"),
         lower_bound=data.get("lower_bound"),
         upper_bound=data.get("upper_bound"),
     )

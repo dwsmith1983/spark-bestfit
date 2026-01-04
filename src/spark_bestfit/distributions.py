@@ -218,7 +218,8 @@ class DiscreteDistributionRegistry:
         self._excluded = custom_exclusions if custom_exclusions is not None else self.DEFAULT_EXCLUSIONS.copy()
         self._param_configs = self._build_param_configs()
 
-    def _build_param_configs(self) -> Dict[str, Dict[str, Any]]:
+    @staticmethod
+    def _build_param_configs() -> Dict[str, Dict[str, Any]]:
         """Build parameter configurations for each discrete distribution.
 
         Each config contains:

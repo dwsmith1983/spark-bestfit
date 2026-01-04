@@ -22,7 +22,7 @@ to calculate Value-at-Risk (VaR) and other risk metrics.
 - Distributed sampling for scenario generation
 - ``lazy_metrics=True`` for performance
 
-**Notebook:** `examples/usecase_monte_carlo.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/usecase_monte_carlo.ipynb>`_
+**Notebook:** `examples/spark/usecase_monte_carlo.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_monte_carlo.ipynb>`_
 
 .. code-block:: python
 
@@ -57,7 +57,7 @@ enables generating statistically similar synthetic datasets.
 - Serialization for saving/loading fitted models
 - Distributed sampling at scale
 
-**Notebook:** `examples/usecase_synthetic_data.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/usecase_synthetic_data.ipynb>`_
+**Notebook:** `examples/spark/usecase_synthetic_data.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_synthetic_data.ipynb>`_
 
 .. code-block:: python
 
@@ -90,7 +90,7 @@ with proper uncertainty quantification.
 - Bootstrap confidence intervals
 - ``lazy_metrics=True`` for quick model selection
 
-**Notebook:** `examples/usecase_ab_testing.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/usecase_ab_testing.ipynb>`_
+**Notebook:** `examples/spark/usecase_ab_testing.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_ab_testing.ipynb>`_
 
 .. code-block:: python
 
@@ -127,7 +127,7 @@ capturing extreme loss events.
 - Bounded fitting for capped policies
 - Q-Q plots for tail behavior validation
 
-**Notebook:** `examples/usecase_insurance.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/usecase_insurance.ipynb>`_
+**Notebook:** `examples/spark/usecase_insurance.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_insurance.ipynb>`_
 
 .. code-block:: python
 
@@ -163,7 +163,7 @@ from this distribution?" The Kolmogorov-Smirnov (KS) test provides formal hypoth
 - ``metric='ad_statistic'`` for tail-sensitive validation
 - ``fit.pvalue`` for hypothesis test interpretation
 
-**Notebook:** `examples/usecase_model_validation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/usecase_model_validation.ipynb>`_
+**Notebook:** `examples/spark/usecase_model_validation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_model_validation.ipynb>`_
 
 .. code-block:: python
 
@@ -202,7 +202,7 @@ and simulate scenarios.
 - ``lazy_metrics=False`` to validate distributional assumptions
 - ``get_scipy_dist()`` to sample from fitted distributions in simulations
 
-**Notebook:** `examples/usecase_simulation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/usecase_simulation.ipynb>`_
+**Notebook:** `examples/spark/usecase_simulation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_simulation.ipynb>`_
 
 .. code-block:: python
 
@@ -257,6 +257,6 @@ See Also
 --------
 
 - :doc:`quickstart` - Basic usage and installation
-- :doc:`copula` - Detailed copula documentation
-- :doc:`sampling` - Distributed sampling guide
-- :doc:`bounded` - Bounded distribution fitting
+- :doc:`/features/copula` - Detailed copula documentation
+- :doc:`/features/sampling` - Distributed sampling guide
+- :doc:`/features/bounded` - Bounded distribution fitting

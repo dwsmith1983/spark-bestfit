@@ -1,9 +1,9 @@
 Serialization
 =============
 
-spark-bestfit v1.3.0 introduces serialization support for saving and loading fitted distributions.
-This allows you to persist fitted models to disk and reload them later for inference, without
-needing to re-fit the distributions.
+spark-bestfit supports serialization for saving and loading fitted distributions.
+This allows you to persist fitted models to disk and reload them later for inference,
+without needing to re-fit the distributions.
 
 Quick Start
 -----------
@@ -64,8 +64,8 @@ The JSON format includes metadata for versioning and debugging:
 
     {
       "schema_version": "1.0",
-      "spark_bestfit_version": "1.3.0",
-      "created_at": "2025-12-30T15:30:00.123456+00:00",
+      "spark_bestfit_version": "2.0.0",
+      "created_at": "2026-01-04T15:30:00.123456+00:00",
       "distribution": "gamma",
       "parameters": [2.0, 0.0, 5.0],
       "column_name": "response_time",
@@ -290,54 +290,5 @@ To save multiple distributions from the same fitting session:
 API Reference
 -------------
 
-DistributionFitResult.save
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    def save(
-        self,
-        path: Union[str, Path],
-        format: Optional[Literal["json", "pickle"]] = None,
-        indent: Optional[int] = 2,
-    ) -> None:
-        """Save the fit result to a file.
-
-        Args:
-            path: File path to save to.
-            format: Serialization format. If None, detected from extension.
-            indent: JSON indentation (default 2). Use None for compact output.
-                   Ignored for pickle format.
-
-        Raises:
-            SerializationError: If format cannot be determined.
-        """
-
-DistributionFitResult.load
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    @classmethod
-    def load(cls, path: Union[str, Path]) -> "DistributionFitResult":
-        """Load a fit result from a file.
-
-        Args:
-            path: File path to load from.
-
-        Returns:
-            Loaded DistributionFitResult instance.
-
-        Raises:
-            FileNotFoundError: If file does not exist.
-            SerializationError: If file cannot be parsed or contains invalid data.
-        """
-
-SerializationError
-~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    class SerializationError(Exception):
-        """Error during serialization or deserialization of fit results."""
-        pass
+See :meth:`spark_bestfit.results.DistributionFitResult.save` and
+:meth:`spark_bestfit.results.DistributionFitResult.load` for full API documentation.
