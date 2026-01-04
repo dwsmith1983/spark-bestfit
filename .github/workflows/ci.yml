@@ -9,6 +9,8 @@ on:
 jobs:
   # Detect which paths changed to conditionally run jobs
   changes:
+    # Skip release commits - they only update version/changelog, already tested via PR
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     runs-on: ubuntu-latest
     outputs:
       src: ${{ steps.filter.outputs.src }}
@@ -33,6 +35,7 @@ jobs:
               - 'pyproject.toml'
 
   pre-commit:
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
