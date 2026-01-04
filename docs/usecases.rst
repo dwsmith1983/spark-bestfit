@@ -257,6 +257,6 @@ See Also
 --------
 
 - :doc:`quickstart` - Basic usage and installation
-- :doc:`copula` - Detailed copula documentation
-- :doc:`sampling` - Distributed sampling guide
-- :doc:`bounded` - Bounded distribution fitting
+- :doc:`/features/copula` - Detailed copula documentation
+- :doc:`/features/sampling` - Distributed sampling guide
+- :doc:`/features/bounded` - Bounded distribution fitting
