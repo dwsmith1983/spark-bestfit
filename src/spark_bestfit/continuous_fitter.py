@@ -10,7 +10,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import NumericType
 
 from spark_bestfit.distributions import DistributionRegistry
-from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_summary, create_fitting_udf
+from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_stats, create_fitting_udf
 from spark_bestfit.histogram import HistogramComputer
 from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
 from spark_bestfit.utils import get_spark_session
@@ -345,8 +345,8 @@ class DistributionFitter:
 
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
-        # Compute data summary for provenance (once per column)
-        data_summary = compute_data_summary(data_sample)
+        # Compute data stats for provenance (once per column)
+        data_stats = compute_data_stats(data_sample)
 
         try:
             # Interleave slow distributions for better partition balance
@@ -367,7 +367,7 @@ class DistributionFitter:
                 histogram_bc,
                 data_sample_bc,
                 column_name=column,
-                data_summary=data_summary,
+                data_stats=data_stats,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
                 lazy_metrics=lazy_metrics,

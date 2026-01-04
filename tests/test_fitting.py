@@ -10,6 +10,7 @@ from spark_bestfit.fitting import (
     bootstrap_confidence_intervals,
     compute_ad_pvalue,
     compute_ad_statistic,
+    compute_data_stats,
     compute_information_criteria,
     compute_ks_statistic,
     compute_pdf_range,
@@ -262,13 +263,14 @@ class TestFitSingleDistributionEdgeCases:
     def test_fit_returns_correct_structure(self, normal_data):
         """Test that fit returns dict with all required keys."""
         y_hist, bin_edges = np.histogram(normal_data, bins=50, density=True)
+        data_stats = compute_data_stats(normal_data)
 
-
-        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist)
+        result = fit_single_distribution("norm", normal_data, bin_edges, y_hist, data_stats=data_stats)
 
         required_keys = {
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
-            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue", "data_summary",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
+            "data_min", "data_max", "data_mean", "data_stddev", "data_count",
             "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
         }
         assert set(result.keys()) == required_keys

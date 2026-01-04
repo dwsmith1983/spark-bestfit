@@ -170,9 +170,11 @@ class DistributionFitResult:
         pvalue: P-value from KS test (higher indicates better fit)
         ad_statistic: Anderson-Darling statistic (lower is better)
         ad_pvalue: P-value from A-D test (only for norm, expon, logistic, gumbel_r, gumbel_l)
-        data_summary: Optional summary statistics of the original data (sample_size,
-            min, max, mean, std). Captured during fitting to aid debugging and
-            provenance tracking.
+        data_min: Minimum value in the data used for fitting
+        data_max: Maximum value in the data used for fitting
+        data_mean: Mean of the data used for fitting
+        data_stddev: Standard deviation of the data used for fitting
+        data_count: Number of samples in the data used for fitting
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0).
             When set, the distribution is truncated at this lower limit.
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0).
@@ -204,7 +206,12 @@ class DistributionFitResult:
     pvalue: Optional[float] = None
     ad_statistic: Optional[float] = None
     ad_pvalue: Optional[float] = None
-    data_summary: Optional[Dict[str, float]] = None
+    # Flat data stats (v2.0: replaced data_summary MapType for ~20% perf)
+    data_min: Optional[float] = None
+    data_max: Optional[float] = None
+    data_mean: Optional[float] = None
+    data_stddev: Optional[float] = None
+    data_count: Optional[float] = None
     # Bounds for truncated distribution fitting (v1.4.0)
     lower_bound: Optional[float] = None
     upper_bound: Optional[float] = None
@@ -226,7 +233,11 @@ class DistributionFitResult:
             "pvalue": self.pvalue,
             "ad_statistic": self.ad_statistic,
             "ad_pvalue": self.ad_pvalue,
-            "data_summary": self.data_summary,
+            "data_min": self.data_min,
+            "data_max": self.data_max,
+            "data_mean": self.data_mean,
+            "data_stddev": self.data_stddev,
+            "data_count": self.data_count,
             "lower_bound": self.lower_bound,
             "upper_bound": self.upper_bound,
         }
@@ -851,9 +862,11 @@ class FitResults:
                     pvalue=pvalue,
                     ad_statistic=ad_stat,
                     ad_pvalue=ad_pvalue,
-                    data_summary=(
-                        dict(row["data_summary"]) if hasattr(row, "data_summary") and row["data_summary"] else None
-                    ),
+                    data_min=row["data_min"] if "data_min" in row else None,
+                    data_max=row["data_max"] if "data_max" in row else None,
+                    data_mean=row["data_mean"] if "data_mean" in row else None,
+                    data_stddev=row["data_stddev"] if "data_stddev" in row else None,
+                    data_count=row["data_count"] if "data_count" in row else None,
                     lower_bound=row["lower_bound"] if hasattr(row, "lower_bound") else None,
                     upper_bound=row["upper_bound"] if hasattr(row, "upper_bound") else None,
                 )
@@ -955,9 +968,11 @@ class FitResults:
                 pvalue=row["pvalue"],
                 ad_statistic=row["ad_statistic"],
                 ad_pvalue=row["ad_pvalue"],
-                data_summary=(
-                    dict(row["data_summary"]) if hasattr(row, "data_summary") and row["data_summary"] else None
-                ),
+                data_min=row["data_min"] if "data_min" in row else None,
+                data_max=row["data_max"] if "data_max" in row else None,
+                data_mean=row["data_mean"] if "data_mean" in row else None,
+                data_stddev=row["data_stddev"] if "data_stddev" in row else None,
+                data_count=row["data_count"] if "data_count" in row else None,
                 lower_bound=row["lower_bound"] if hasattr(row, "lower_bound") else None,
                 upper_bound=row["upper_bound"] if hasattr(row, "upper_bound") else None,
             )

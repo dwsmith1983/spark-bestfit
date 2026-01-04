@@ -15,7 +15,7 @@ from spark_bestfit.discrete_fitting import (
     create_discrete_sample_data,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry
-from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_summary
+from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_stats
 from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
 from spark_bestfit.utils import get_spark_session
 
@@ -311,8 +311,8 @@ class DiscreteDistributionFitter:
         histogram_bc = self.spark.sparkContext.broadcast((x_values, empirical_pmf))
         data_sample_bc = self.spark.sparkContext.broadcast(data_sample)
 
-        # Compute data summary for provenance (once per column)
-        data_summary = compute_data_summary(data_sample.astype(float))
+        # Compute data stats for provenance (once per column)
+        data_stats = compute_data_stats(data_sample.astype(float))
 
         try:
             # Interleave slow distributions for better partition balance
@@ -334,7 +334,7 @@ class DiscreteDistributionFitter:
                 histogram_bc,
                 data_sample_bc,
                 column_name=column,
-                data_summary=data_summary,
+                data_stats=data_stats,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
                 lazy_metrics=lazy_metrics,

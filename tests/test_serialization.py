@@ -30,13 +30,11 @@ def normal_result():
         pvalue=0.90,
         ad_statistic=0.35,
         ad_pvalue=0.15,
-        data_summary={
-            "sample_size": 10000.0,
-            "min": 20.5,
-            "max": 82.3,
-            "mean": 50.1,
-            "std": 10.2,
-        },
+        data_min=20.5,
+        data_max=82.3,
+        data_mean=50.1,
+        data_stddev=10.2,
+        data_count=10000.0,
     )
 
 
@@ -54,13 +52,11 @@ def gamma_result():
         pvalue=0.95,
         ad_statistic=0.40,
         ad_pvalue=None,
-        data_summary={
-            "sample_size": 5000.0,
-            "min": 0.5,
-            "max": 45.2,
-            "mean": 10.0,
-            "std": 7.1,
-        },
+        data_min=0.5,
+        data_max=45.2,
+        data_mean=10.0,
+        data_stddev=7.1,
+        data_count=5000.0,
     )
 
 
@@ -87,8 +83,12 @@ class TestJsonRoundTrip:
         assert loaded.ad_statistic == normal_result.ad_statistic
         assert loaded.ad_pvalue == normal_result.ad_pvalue
 
-        # Data summary
-        assert loaded.data_summary == normal_result.data_summary
+        # Data stats
+        assert loaded.data_min == normal_result.data_min
+        assert loaded.data_max == normal_result.data_max
+        assert loaded.data_mean == normal_result.data_mean
+        assert loaded.data_stddev == normal_result.data_stddev
+        assert loaded.data_count == normal_result.data_count
 
     def test_json_contains_required_metadata(self, normal_result, tmp_path):
         """Test that JSON output contains version metadata."""
@@ -169,7 +169,8 @@ class TestPickleRoundTrip:
 
         assert loaded.distribution == normal_result.distribution
         assert loaded.parameters == normal_result.parameters
-        assert loaded.data_summary == normal_result.data_summary
+        assert loaded.data_min == normal_result.data_min
+        assert loaded.data_count == normal_result.data_count
 
     def test_pickle_extension_autodetected(self, normal_result, tmp_path):
         """Test .pickle extension is auto-detected."""
@@ -187,35 +188,39 @@ class TestPickleRoundTrip:
             DistributionFitResult.load(path)
 
 
-class TestDataSummary:
-    """Tests for data_summary handling."""
+class TestDataStats:
+    """Tests for data stats field handling."""
 
-    def test_data_summary_preserved(self, normal_result, tmp_path):
-        """Test that data_summary survives round-trip."""
+    def test_data_stats_preserved(self, normal_result, tmp_path):
+        """Test that data stats survive round-trip."""
         path = tmp_path / "model.json"
         normal_result.save(path)
         loaded = DistributionFitResult.load(path)
 
-        assert loaded.data_summary is not None
-        assert loaded.data_summary["sample_size"] == 10000.0
-        assert loaded.data_summary["min"] == 20.5
-        assert loaded.data_summary["max"] == 82.3
-        assert loaded.data_summary["mean"] == 50.1
-        assert loaded.data_summary["std"] == 10.2
+        assert loaded.data_count == 10000.0
+        assert loaded.data_min == 20.5
+        assert loaded.data_max == 82.3
+        assert loaded.data_mean == 50.1
+        assert loaded.data_stddev == 10.2
 
-    def test_none_data_summary_handled(self, tmp_path):
-        """Test that None data_summary is preserved."""
+    def test_none_data_stats_handled(self, tmp_path):
+        """Test that None data stats are preserved."""
         result = DistributionFitResult(
             distribution="norm",
             parameters=[0.0, 1.0],
             sse=0.01,
-            data_summary=None,
+            data_min=None,
+            data_max=None,
+            data_mean=None,
+            data_stddev=None,
+            data_count=None,
         )
         path = tmp_path / "model.json"
         result.save(path)
         loaded = DistributionFitResult.load(path)
 
-        assert loaded.data_summary is None
+        assert loaded.data_min is None
+        assert loaded.data_count is None
 
 
 class TestNoneAndOptionalFields:
@@ -234,7 +239,11 @@ class TestNoneAndOptionalFields:
             pvalue=None,
             ad_statistic=None,
             ad_pvalue=None,
-            data_summary=None,
+            data_min=None,
+            data_max=None,
+            data_mean=None,
+            data_stddev=None,
+            data_count=None,
         )
         path = tmp_path / "model.json"
         result.save(path)
@@ -247,7 +256,8 @@ class TestNoneAndOptionalFields:
         assert loaded.pvalue is None
         assert loaded.ad_statistic is None
         assert loaded.ad_pvalue is None
-        assert loaded.data_summary is None
+        assert loaded.data_min is None
+        assert loaded.data_count is None
 
     def test_unicode_column_name(self, tmp_path):
         """Test that unicode column names are preserved."""

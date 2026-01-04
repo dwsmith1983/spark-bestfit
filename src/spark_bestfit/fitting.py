@@ -8,7 +8,7 @@ import pandas as pd
 import scipy.stats as st
 from pyspark import Broadcast
 from pyspark.sql.functions import pandas_udf
-from pyspark.sql.types import ArrayType, FloatType, MapType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
 from scipy.stats import rv_continuous
 
 # Constant for fitting sample size
@@ -38,8 +38,12 @@ FIT_RESULT_SCHEMA = StructType(
         StructField("pvalue", FloatType(), True),
         StructField("ad_statistic", FloatType(), True),
         StructField("ad_pvalue", FloatType(), True),
-        # data_summary: summary statistics of the original data for provenance
-        StructField("data_summary", MapType(StringType(), FloatType()), True),
+        # Flat data summary columns for provenance (v2.0: replaced MapType for ~20% perf)
+        StructField("data_min", FloatType(), True),
+        StructField("data_max", FloatType(), True),
+        StructField("data_mean", FloatType(), True),
+        StructField("data_stddev", FloatType(), True),
+        StructField("data_count", FloatType(), True),
         # Bounds for truncated distribution fitting (v1.4.0)
         StructField("lower_bound", FloatType(), True),
         StructField("upper_bound", FloatType(), True),
@@ -47,7 +51,7 @@ FIT_RESULT_SCHEMA = StructType(
 )
 
 
-def compute_data_summary(data: np.ndarray) -> Dict[str, float]:
+def compute_data_stats(data: np.ndarray) -> Dict[str, float]:
     """Compute summary statistics of the original data.
 
     These statistics provide lightweight provenance information for debugging
@@ -57,14 +61,14 @@ def compute_data_summary(data: np.ndarray) -> Dict[str, float]:
         data: Data array used for fitting
 
     Returns:
-        Dictionary with keys: sample_size, min, max, mean, std
+        Dictionary with keys: data_min, data_max, data_mean, data_stddev, data_count
     """
     return {
-        "sample_size": float(len(data)),
-        "min": float(np.min(data)),
-        "max": float(np.max(data)),
-        "mean": float(np.mean(data)),
-        "std": float(np.std(data)),
+        "data_min": float(np.min(data)),
+        "data_max": float(np.max(data)),
+        "data_mean": float(np.mean(data)),
+        "data_stddev": float(np.std(data)),
+        "data_count": float(len(data)),
     }
 
 
@@ -72,7 +76,7 @@ def create_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
     column_name: Optional[str] = None,
-    data_summary: Optional[Dict[str, float]] = None,
+    data_stats: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
@@ -87,7 +91,7 @@ def create_fitting_udf(
         histogram_broadcast: Broadcast variable containing (y_hist, bin_edges)
         data_sample_broadcast: Broadcast variable containing data sample
         column_name: Name of the column being fitted (for result tracking)
-        data_summary: Pre-computed summary statistics of the original data
+        data_stats: Pre-computed summary statistics (data_min, data_max, etc.)
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
         lazy_metrics: If True, skip expensive KS/AD computation during fitting.
@@ -101,8 +105,8 @@ def create_fitting_udf(
         >>> # In DistributionFitter:
         >>> hist_bc = spark.sparkContext.broadcast((y_hist, bin_edges))
         >>> data_bc = spark.sparkContext.broadcast(data_sample)
-        >>> summary = compute_data_summary(data_sample)
-        >>> fitting_udf = create_fitting_udf(hist_bc, data_bc, column_name="value", data_summary=summary)
+        >>> stats = compute_data_stats(data_sample)
+        >>> fitting_udf = create_fitting_udf(hist_bc, data_bc, column_name="value", data_stats=stats)
         >>> results = df.select(fitting_udf(col('distribution_name')))
     """
 
@@ -118,7 +122,7 @@ def create_fitting_udf(
             distribution_names: Series of scipy distribution names to fit
 
         Returns:
-            DataFrame with columns: column_name, distribution, parameters, sse, aic, bic, data_summary
+            DataFrame with fit result columns including data_min, data_max, etc.
         """
         # Get broadcasted data (no serialization overhead!)
         y_hist, bin_edges = histogram_broadcast.value
@@ -133,7 +137,7 @@ def create_fitting_udf(
                 bin_edges=bin_edges,
                 y_hist=y_hist,
                 column_name=column_name,
-                data_summary=data_summary,
+                data_stats=data_stats,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
                 lazy_metrics=lazy_metrics,
@@ -156,7 +160,7 @@ def fit_single_distribution(
     bin_edges: np.ndarray,
     y_hist: np.ndarray,
     column_name: Optional[str] = None,
-    data_summary: Optional[Dict[str, float]] = None,
+    data_stats: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
@@ -178,15 +182,14 @@ def fit_single_distribution(
         bin_edges: Histogram bin edge values (len = n_bins + 1)
         y_hist: Histogram density values
         column_name: Name of the column being fitted (for multi-column support)
-        data_summary: Pre-computed summary statistics of the original data
+        data_stats: Pre-computed summary statistics (data_min, data_max, etc.)
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
         lazy_metrics: If True, skip expensive KS/AD computation. These metrics
             will be None in the result and computed on-demand later. (v1.5.0)
 
     Returns:
-        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic,
-        ks_statistic, pvalue, ad_statistic, ad_pvalue, data_summary, lower_bound, upper_bound
+        Dictionary with fit result fields including data_min, data_max, etc.
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -200,7 +203,7 @@ def fit_single_distribution(
 
             # Check for NaN in parameters (convergence failure)
             if any(not np.isfinite(p) for p in params):
-                return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+                return _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
             # Create frozen distribution (possibly truncated) for metrics
             frozen_dist = dist(*params)
@@ -223,7 +226,7 @@ def fit_single_distribution(
 
             # Check for invalid SSE
             if not np.isfinite(sse):
-                return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+                return _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
             # Compute information criteria using frozen distribution (fast, always computed)
             aic, bic = compute_information_criteria_frozen(frozen_dist, len(params), data_sample)
@@ -250,7 +253,7 @@ def fit_single_distribution(
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
                     # These indicate fitting issues - return failed result
-                    return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+                    return _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
             return {
                 "column_name": column_name,
@@ -263,13 +266,13 @@ def fit_single_distribution(
                 "pvalue": float(pvalue) if pvalue is not None else None,
                 "ad_statistic": float(ad_stat) if ad_stat is not None else None,
                 "ad_pvalue": ad_pvalue,
-                "data_summary": data_summary,
+                **(data_stats or {}),  # Flat data stats: data_min, data_max, etc.
                 "lower_bound": lower_bound,
                 "upper_bound": upper_bound,
             }
 
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+        return _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
 
 class _TruncatedDist:
@@ -332,7 +335,7 @@ def _create_truncated_dist(frozen_dist, lb: float, ub: float):
 def _failed_fit_result(
     dist_name: str,
     column_name: Optional[str] = None,
-    data_summary: Optional[Dict[str, float]] = None,
+    data_stats: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
@@ -341,7 +344,7 @@ def _failed_fit_result(
     Args:
         dist_name: Name of the distribution that failed
         column_name: Name of the column being fitted (for multi-column support)
-        data_summary: Pre-computed summary statistics of the original data
+        data_stats: Pre-computed summary statistics (data_min, data_max, etc.)
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0)
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
 
@@ -359,7 +362,7 @@ def _failed_fit_result(
         "pvalue": 0.0,
         "ad_statistic": float(np.inf),
         "ad_pvalue": None,
-        "data_summary": data_summary,
+        **(data_stats or {}),  # Flat data stats: data_min, data_max, etc.
         "lower_bound": lower_bound,
         "upper_bound": upper_bound,
     }
