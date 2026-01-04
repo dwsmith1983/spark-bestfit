@@ -1,29 +1,103 @@
-"""Distributed sampling for fitted distributions."""
+"""Distributed sampling for fitted distributions.
 
-from typing import Iterator, List, Optional
+This module provides functions for generating samples from fitted distributions
+using the backend abstraction for distributed or local execution.
+"""
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
-import pandas as pd
 import scipy.stats as st
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.types import DoubleType, IntegerType, StructField, StructType
 
-from spark_bestfit.utils import get_spark_session
+if TYPE_CHECKING:
+    from spark_bestfit.protocols import ExecutionBackend
+
+
+def sample_distributed(
+    distribution: str,
+    parameters: List[float],
+    n: int,
+    backend: "ExecutionBackend",
+    num_partitions: Optional[int] = None,
+    random_seed: Optional[int] = None,
+    column_name: str = "sample",
+) -> Any:
+    """Generate samples from a fitted distribution using backend abstraction.
+
+    Uses the backend's parallelism to generate samples, enabling generation
+    of millions of samples efficiently with SparkBackend or local execution
+    with LocalBackend.
+
+    Args:
+        distribution: scipy.stats distribution name (e.g., "norm", "expon")
+        parameters: Distribution parameters (shape, loc, scale)
+        n: Total number of samples to generate
+        backend: Execution backend (SparkBackend, LocalBackend, etc.)
+        num_partitions: Number of partitions to use. Defaults to backend parallelism.
+        random_seed: Random seed for reproducibility. Each partition uses seed + partition_id.
+        column_name: Name for the output column (default: "sample")
+
+    Returns:
+        Backend-specific DataFrame with single column containing samples
+        (Spark DataFrame for SparkBackend, pandas DataFrame for LocalBackend)
+
+    Example:
+        >>> from spark_bestfit.backends.spark import SparkBackend
+        >>> backend = SparkBackend(spark)
+        >>> df = sample_distributed("norm", [0.0, 1.0], n=1_000_000, backend=backend)
+        >>> df.show(5)
+        +-------------------+
+        |             sample|
+        +-------------------+
+        | 0.4691122931291924|
+        |-0.2828633018445851|
+        | 1.0093545783546243|
+        +-------------------+
+    """
+    # Get distribution object from scipy
+    dist = getattr(st, distribution)
+
+    def generate_distribution_samples(
+        n_samples: int,
+        partition_id: int,
+        seed: Optional[int],
+    ) -> Dict[str, np.ndarray]:
+        """Generate samples from the distribution.
+
+        This function is passed to the backend's generate_samples method.
+        """
+        if seed is not None:
+            rng = np.random.default_rng(seed)
+            samples = dist.rvs(*parameters, size=n_samples, random_state=rng)
+        else:
+            samples = dist.rvs(*parameters, size=n_samples)
+
+        return {column_name: samples}
+
+    return backend.generate_samples(
+        n=n,
+        generator_func=generate_distribution_samples,
+        column_names=[column_name],
+        num_partitions=num_partitions,
+        random_seed=random_seed,
+    )
 
 
 def sample_spark(
     distribution: str,
     parameters: List[float],
     n: int,
-    spark: Optional[SparkSession] = None,
+    spark: Optional[Any] = None,
     num_partitions: Optional[int] = None,
     random_seed: Optional[int] = None,
     column_name: str = "sample",
-) -> DataFrame:
-    """Generate distributed samples from a fitted distribution.
+) -> Any:
+    """Generate distributed samples from a fitted distribution using Spark.
 
-    Uses Spark's parallelism to generate samples across the cluster,
-    enabling generation of millions of samples efficiently.
+    .. deprecated::
+        Use :func:`sample_distributed` with a SparkBackend instead.
+
+    This is a backward-compatible wrapper around sample_distributed().
 
     Args:
         distribution: scipy.stats distribution name
@@ -48,63 +122,15 @@ def sample_spark(
         | 1.0093545783546243|
         +-------------------+
     """
-    spark = get_spark_session(spark)
-    if num_partitions is None:
-        num_partitions = spark.sparkContext.defaultParallelism
+    from spark_bestfit.backends.spark import SparkBackend
 
-    # Calculate samples per partition (distribute evenly)
-    base_samples = n // num_partitions
-    remainder = n % num_partitions
-
-    # Create a driver dataframe with partition info
-    partition_data = []
-    for i in range(num_partitions):
-        # First 'remainder' partitions get one extra sample
-        samples_for_partition = base_samples + (1 if i < remainder else 0)
-        if samples_for_partition > 0:
-            partition_data.append((i, samples_for_partition))
-
-    # Create DataFrame with partition assignments
-    partition_df = spark.createDataFrame(
-        partition_data,
-        StructType(
-            [
-                StructField("partition_id", IntegerType(), False),
-                StructField("n_samples", IntegerType(), False),
-            ]
-        ),
+    backend = SparkBackend(spark)
+    return sample_distributed(
+        distribution=distribution,
+        parameters=parameters,
+        n=n,
+        backend=backend,
+        num_partitions=num_partitions,
+        random_seed=random_seed,
+        column_name=column_name,
     )
-
-    # Repartition to ensure each row goes to its own partition
-    partition_df = partition_df.repartition(len(partition_data))
-
-    # Define output schema
-    output_schema = StructType([StructField(column_name, DoubleType(), False)])
-
-    # Get distribution object
-    dist = getattr(st, distribution)
-
-    def generate_samples_for_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:  # pragma: no cover
-        """Generate samples for each partition (runs in Spark executors)."""
-        for pdf in iterator:
-            if len(pdf) == 0:
-                continue
-
-            for idx in range(len(pdf)):
-                n_samples = int(pdf.iloc[idx]["n_samples"])
-                partition_id = int(pdf.iloc[idx]["partition_id"])
-
-                # Create unique seed for this partition
-                if random_seed is not None:
-                    rng = np.random.default_rng(random_seed + partition_id)
-                    # Use the rng to generate scipy samples
-                    samples = dist.rvs(*parameters, size=n_samples, random_state=rng)
-                else:
-                    samples = dist.rvs(*parameters, size=n_samples)
-
-                yield pd.DataFrame({column_name: samples})
-
-    # Apply the UDF
-    result_df = partition_df.mapInPandas(generate_samples_for_partition, schema=output_schema)
-
-    return result_df

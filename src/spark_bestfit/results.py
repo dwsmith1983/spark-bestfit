@@ -170,9 +170,11 @@ class DistributionFitResult:
         pvalue: P-value from KS test (higher indicates better fit)
         ad_statistic: Anderson-Darling statistic (lower is better)
         ad_pvalue: P-value from A-D test (only for norm, expon, logistic, gumbel_r, gumbel_l)
-        data_summary: Optional summary statistics of the original data (sample_size,
-            min, max, mean, std). Captured during fitting to aid debugging and
-            provenance tracking.
+        data_min: Minimum value in the data used for fitting
+        data_max: Maximum value in the data used for fitting
+        data_mean: Mean of the data used for fitting
+        data_stddev: Standard deviation of the data used for fitting
+        data_count: Number of samples in the data used for fitting
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0).
             When set, the distribution is truncated at this lower limit.
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0).
@@ -204,7 +206,12 @@ class DistributionFitResult:
     pvalue: Optional[float] = None
     ad_statistic: Optional[float] = None
     ad_pvalue: Optional[float] = None
-    data_summary: Optional[Dict[str, float]] = None
+    # Flat data stats (v2.0: replaced data_summary MapType for ~20% perf)
+    data_min: Optional[float] = None
+    data_max: Optional[float] = None
+    data_mean: Optional[float] = None
+    data_stddev: Optional[float] = None
+    data_count: Optional[float] = None
     # Bounds for truncated distribution fitting (v1.4.0)
     lower_bound: Optional[float] = None
     upper_bound: Optional[float] = None
@@ -226,7 +233,11 @@ class DistributionFitResult:
             "pvalue": self.pvalue,
             "ad_statistic": self.ad_statistic,
             "ad_pvalue": self.ad_pvalue,
-            "data_summary": self.data_summary,
+            "data_min": self.data_min,
+            "data_max": self.data_max,
+            "data_mean": self.data_mean,
+            "data_stddev": self.data_stddev,
+            "data_count": self.data_count,
             "lower_bound": self.lower_bound,
             "upper_bound": self.upper_bound,
         }
@@ -618,19 +629,30 @@ class FitResults:
 
     def __init__(
         self,
-        results_df: DataFrame,
+        results_df: Union[DataFrame, pd.DataFrame],
         lazy_contexts: Optional[Dict[str, "LazyMetricsContext"]] = None,
     ):
         """Initialize FitResults.
 
         Args:
-            results_df: Spark DataFrame with fit results
+            results_df: Spark DataFrame or pandas DataFrame with fit results
             lazy_contexts: Optional dict mapping column names to LazyMetricsContext
                 for on-demand KS/AD computation. When provided, enables true lazy
                 metric evaluation.
         """
         self._df = results_df
         self._lazy_contexts = lazy_contexts or {}
+        # Cache whether this is a Spark DataFrame for fast access
+        self._is_spark = hasattr(results_df, "sparkSession")
+
+    @property
+    def is_spark_df(self) -> bool:
+        """Check if the underlying DataFrame is a Spark DataFrame.
+
+        Returns:
+            True if Spark DataFrame, False if pandas DataFrame.
+        """
+        return self._is_spark
 
     @property
     def is_lazy(self) -> bool:
@@ -671,15 +693,22 @@ class FitResults:
             # Already materialized or never was lazy
             return self
 
-        # Collect all rows and compute metrics
-        all_rows = self._df.collect()
+        # Collect all rows - handle both Spark and pandas DataFrames
+        if self._is_spark:
+            all_rows = self._df.collect()
+        else:
+            # Convert pandas DataFrame rows to list of dicts
+            all_rows = self._df.to_dict("records")
+
         column_names = self.column_names if self.column_names else [None]
 
         # Group rows by column
         rows_by_column: Dict[Optional[str], list] = {}
         for row in all_rows:
-            # Use hasattr for reliable field existence check in PySpark Row
-            col = row["column_name"] if hasattr(row, "column_name") else None
+            if self._is_spark:
+                col = row["column_name"] if hasattr(row, "column_name") else None
+            else:
+                col = row.get("column_name")
             if col not in rows_by_column:
                 rows_by_column[col] = []
             rows_by_column[col].append(row)
@@ -695,7 +724,10 @@ class FitResults:
                 else:
                     # No context, just pass through
                     for row in rows_by_column.get(col_name, []):
-                        materialized_results.append(dict(row.asDict()))
+                        if self._is_spark:
+                            materialized_results.append(dict(row.asDict()))
+                        else:
+                            materialized_results.append(dict(row))
                     continue
 
             context = self._lazy_contexts[context_key]
@@ -708,7 +740,10 @@ class FitResults:
                 from spark_bestfit.fitting import compute_ks_ad_metrics as compute_metrics
 
             for row in rows_by_column.get(col_name, []):
-                row_dict = dict(row.asDict())
+                if self._is_spark:
+                    row_dict = dict(row.asDict())
+                else:
+                    row_dict = dict(row)
 
                 # Compute metrics if they're None
                 if row_dict.get("ks_statistic") is None:
@@ -727,13 +762,16 @@ class FitResults:
                 materialized_results.append(row_dict)
 
         # Create new DataFrame from materialized results
-        from spark_bestfit.fitting import FIT_RESULT_SCHEMA
+        if self._is_spark:
+            from spark_bestfit.fitting import FIT_RESULT_SCHEMA
 
-        spark = self._df.sparkSession
-        materialized_df = spark.createDataFrame(materialized_results, schema=FIT_RESULT_SCHEMA)
-
-        # Return new FitResults without lazy contexts (fully materialized)
-        return FitResults(materialized_df.cache(), lazy_contexts=None)
+            spark = self._df.sparkSession
+            materialized_df = spark.createDataFrame(materialized_results, schema=FIT_RESULT_SCHEMA)
+            return FitResults(materialized_df.cache(), lazy_contexts=None)
+        else:
+            # pandas DataFrame
+            materialized_df = pd.DataFrame(materialized_results)
+            return FitResults(materialized_df, lazy_contexts=None)
 
     def unpersist(self, blocking: bool = False) -> "FitResults":
         """Release the cached DataFrame from memory.
@@ -764,7 +802,9 @@ class FitResults:
             >>> materialized = lazy_results.materialize()
             >>> lazy_results.unpersist()  # Release lazy version
         """
-        self._df.unpersist(blocking)
+        if self._is_spark:
+            self._df.unpersist(blocking)
+        # For pandas DataFrames, no unpersist needed (garbage collected automatically)
         return self
 
     @staticmethod
@@ -773,6 +813,8 @@ class FitResults:
 
         Uses the stored seed and row count to reproduce the same sample
         that was used during initial fitting.
+
+        Supports Spark DataFrames, Ray Datasets, and pandas DataFrames.
 
         Args:
             context: LazyMetricsContext with source DataFrame and sampling params
@@ -786,12 +828,27 @@ class FitResults:
         try:
             sample_size = min(FITTING_SAMPLE_SIZE, context.row_count)
             fraction = min(sample_size / context.row_count, 1.0)
+            df = context.source_df
+            column = context.column
+            seed = context.random_seed
 
-            sample_df = context.source_df.select(context.column).sample(
-                fraction=fraction,
-                seed=context.random_seed,
-            )
-            data = sample_df.toPandas()[context.column].values
+            # Detect DataFrame type and use appropriate sampling method
+            if hasattr(df, "select_columns") and hasattr(df, "random_sample"):
+                # Ray Dataset
+                sampled = df.random_sample(fraction, seed=seed)
+                data = sampled.select_columns([column]).to_pandas()[column].values
+            elif hasattr(df, "sample") and hasattr(df, "iloc"):
+                # pandas DataFrame
+                sample_df = df[[column]].sample(frac=fraction, random_state=seed)
+                data = sample_df[column].values
+            else:
+                # Spark DataFrame (default)
+                sample_df = df.select(column).sample(
+                    fraction=fraction,
+                    seed=seed,
+                )
+                data = sample_df.toPandas()[column].values
+
             return data.astype(int) if context.is_discrete else data.astype(float)
         except Exception as e:
             raise RuntimeError(
@@ -827,12 +884,19 @@ class FitResults:
         # Recreate sample once for all distributions
         data_sample = self._recreate_sample(context)
 
+        def _get_row_value(row, key, default=None):
+            """Helper to get value from row (Spark Row or dict)."""
+            if self._is_spark:
+                return row[key] if key in row else default
+            else:
+                return row.get(key, default)
+
         results = []
         for row in rows:
             # Compute metrics for this distribution
             ks_stat, pvalue, ad_stat, ad_pvalue = compute_metrics(
-                dist_name=row["distribution"],
-                params=list(row["parameters"]),
+                dist_name=_get_row_value(row, "distribution"),
+                params=list(_get_row_value(row, "parameters", [])),
                 data_sample=data_sample,
                 lower_bound=context.lower_bound,
                 upper_bound=context.upper_bound,
@@ -841,21 +905,23 @@ class FitResults:
             # Create result with computed metrics
             results.append(
                 DistributionFitResult(
-                    distribution=row["distribution"],
-                    parameters=list(row["parameters"]),
-                    sse=row["sse"],
-                    column_name=row["column_name"] if hasattr(row, "column_name") else None,
-                    aic=row["aic"],
-                    bic=row["bic"],
+                    distribution=_get_row_value(row, "distribution"),
+                    parameters=list(_get_row_value(row, "parameters", [])),
+                    sse=_get_row_value(row, "sse"),
+                    column_name=_get_row_value(row, "column_name"),
+                    aic=_get_row_value(row, "aic"),
+                    bic=_get_row_value(row, "bic"),
                     ks_statistic=ks_stat,
                     pvalue=pvalue,
                     ad_statistic=ad_stat,
                     ad_pvalue=ad_pvalue,
-                    data_summary=(
-                        dict(row["data_summary"]) if hasattr(row, "data_summary") and row["data_summary"] else None
-                    ),
-                    lower_bound=row["lower_bound"] if hasattr(row, "lower_bound") else None,
-                    upper_bound=row["upper_bound"] if hasattr(row, "upper_bound") else None,
+                    data_min=_get_row_value(row, "data_min"),
+                    data_max=_get_row_value(row, "data_max"),
+                    data_mean=_get_row_value(row, "data_mean"),
+                    data_stddev=_get_row_value(row, "data_stddev"),
+                    data_count=_get_row_value(row, "data_count"),
+                    lower_bound=_get_row_value(row, "lower_bound"),
+                    upper_bound=_get_row_value(row, "upper_bound"),
                 )
             )
 
@@ -924,8 +990,13 @@ class FitResults:
         lazy_metric_names = {"ks_statistic", "ad_statistic"}
         if metric in lazy_metric_names:
             # Check if the first row has the metric as None (lazy mode)
-            sample_row = self._df.limit(1).collect()
-            if sample_row and sample_row[0][metric] is None:
+            if self._is_spark:
+                sample_row = self._df.limit(1).collect()
+                first_metric_value = sample_row[0][metric] if sample_row else None
+            else:
+                first_metric_value = self._df[metric].iloc[0] if len(self._df) > 0 else None
+
+            if first_metric_value is None or (isinstance(first_metric_value, float) and np.isnan(first_metric_value)):
                 # True lazy computation: compute metrics on-demand
                 if self._lazy_contexts:
                     return self._best_with_lazy_computation(n, metric, warn_if_poor, pvalue_threshold)
@@ -939,27 +1010,40 @@ class FitResults:
                         stacklevel=2,
                     )
 
-        # Use asc_nulls_last to ensure NULL values (from failed metric computation)
-        # are sorted to the end, not the beginning
-        top_n = self._df.orderBy(F.col(metric).asc_nulls_last()).limit(n).collect()
+        # Get top N results sorted by metric (ascending, nulls last)
+        if self._is_spark:
+            top_n = self._df.orderBy(F.col(metric).asc_nulls_last()).limit(n).collect()
+        else:
+            # pandas: sort by metric, NaN values go to end with na_position='last'
+            sorted_df = self._df.sort_values(by=metric, ascending=True, na_position="last")
+            top_n = sorted_df.head(n).to_dict("records")
+
+        def _get_row_value(row, key, default=None):
+            """Helper to get value from row (Spark Row or dict)."""
+            if self._is_spark:
+                return row[key] if key in row else default
+            else:
+                return row.get(key, default)
 
         results = [
             DistributionFitResult(
-                distribution=row["distribution"],
-                parameters=list(row["parameters"]),
-                sse=row["sse"],
-                column_name=row["column_name"] if hasattr(row, "column_name") else None,
-                aic=row["aic"],
-                bic=row["bic"],
-                ks_statistic=row["ks_statistic"],
-                pvalue=row["pvalue"],
-                ad_statistic=row["ad_statistic"],
-                ad_pvalue=row["ad_pvalue"],
-                data_summary=(
-                    dict(row["data_summary"]) if hasattr(row, "data_summary") and row["data_summary"] else None
-                ),
-                lower_bound=row["lower_bound"] if hasattr(row, "lower_bound") else None,
-                upper_bound=row["upper_bound"] if hasattr(row, "upper_bound") else None,
+                distribution=_get_row_value(row, "distribution"),
+                parameters=list(_get_row_value(row, "parameters", [])),
+                sse=_get_row_value(row, "sse"),
+                column_name=_get_row_value(row, "column_name"),
+                aic=_get_row_value(row, "aic"),
+                bic=_get_row_value(row, "bic"),
+                ks_statistic=_get_row_value(row, "ks_statistic"),
+                pvalue=_get_row_value(row, "pvalue"),
+                ad_statistic=_get_row_value(row, "ad_statistic"),
+                ad_pvalue=_get_row_value(row, "ad_pvalue"),
+                data_min=_get_row_value(row, "data_min"),
+                data_max=_get_row_value(row, "data_max"),
+                data_mean=_get_row_value(row, "data_mean"),
+                data_stddev=_get_row_value(row, "data_stddev"),
+                data_count=_get_row_value(row, "data_count"),
+                lower_bound=_get_row_value(row, "lower_bound"),
+                upper_bound=_get_row_value(row, "upper_bound"),
             )
             for row in top_n
         ]
@@ -1005,7 +1089,8 @@ class FitResults:
         """
         # Determine candidate count - get extra candidates to account for
         # the fact that AIC ranking != KS/AD ranking
-        candidate_count = min(n * 3 + 5, self._df.count())
+        total_count = self._df.count() if self._is_spark else len(self._df)
+        candidate_count = min(n * 3 + 5, total_count)
 
         # Group by column name and process each column separately
         column_names = self.column_names if self.column_names else [None]
@@ -1025,13 +1110,24 @@ class FitResults:
             context = self._lazy_contexts[context_key]
 
             # Get candidate rows sorted by AIC (proxy for likely good fits)
-            if col_name:
-                candidates_df = self._df.filter(F.col("column_name") == col_name)
-            else:
-                candidates_df = self._df
+            if self._is_spark:
+                if col_name:
+                    candidates_df = self._df.filter(F.col("column_name") == col_name)
+                else:
+                    candidates_df = self._df
 
-            # Sort by AIC (always computed, never NULL) with nulls_last for safety
-            candidate_rows = candidates_df.orderBy(F.col("aic").asc_nulls_last()).limit(candidate_count).collect()
+                # Sort by AIC (always computed, never NULL) with nulls_last for safety
+                candidate_rows = candidates_df.orderBy(F.col("aic").asc_nulls_last()).limit(candidate_count).collect()
+            else:
+                # pandas DataFrame
+                if col_name:
+                    candidates_df = self._df[self._df["column_name"] == col_name]
+                else:
+                    candidates_df = self._df
+
+                # Sort by AIC, NaN values at end
+                sorted_df = candidates_df.sort_values(by="aic", ascending=True, na_position="last")
+                candidate_rows = sorted_df.head(candidate_count).to_dict("records")
 
             # Compute lazy metrics for candidates
             computed_results = self._compute_lazy_metrics_for_results(candidate_rows, context)
@@ -1146,7 +1242,10 @@ class FitResults:
             >>> col1_results = results.for_column("col1")
             >>> best = col1_results.best(n=1)[0]
         """
-        filtered = self._df.filter(F.col("column_name") == column_name)
+        if self._is_spark:
+            filtered = self._df.filter(F.col("column_name") == column_name)
+        else:
+            filtered = self._df[self._df["column_name"] == column_name].copy()
 
         # Preserve only the relevant lazy context for this column
         filtered_contexts = {}
@@ -1171,8 +1270,14 @@ class FitResults:
         # Check if column_name column exists and has non-null values
         if "column_name" not in self._df.columns:
             return []
-        rows = self._df.select("column_name").distinct().filter(F.col("column_name").isNotNull()).collect()
-        return [row["column_name"] for row in rows]
+
+        if self._is_spark:
+            rows = self._df.select("column_name").distinct().filter(F.col("column_name").isNotNull()).collect()
+            return [row["column_name"] for row in rows]
+        else:
+            # pandas: get unique non-null values
+            unique_cols = self._df["column_name"].dropna().unique()
+            return list(unique_cols)
 
     def best_per_column(
         self, n: int = 1, metric: MetricName = "ks_statistic"
@@ -1208,24 +1313,48 @@ class FitResults:
                    min_sse  mean_sse  max_sse  min_ks  mean_ks  max_ks  min_ad  mean_ad  max_ad  count
             0      0.001     0.15      2.34    0.02    0.08     0.25    0.10    0.50     2.0      95
         """
-        summary = self._df.select(
-            F.min("sse").alias("min_sse"),
-            F.mean("sse").alias("mean_sse"),
-            F.max("sse").alias("max_sse"),
-            F.min("aic").alias("min_aic"),
-            F.mean("aic").alias("mean_aic"),
-            F.max("aic").alias("max_aic"),
-            F.min("ks_statistic").alias("min_ks"),
-            F.mean("ks_statistic").alias("mean_ks"),
-            F.max("ks_statistic").alias("max_ks"),
-            F.min("pvalue").alias("min_pvalue"),
-            F.mean("pvalue").alias("mean_pvalue"),
-            F.max("pvalue").alias("max_pvalue"),
-            F.min("ad_statistic").alias("min_ad"),
-            F.mean("ad_statistic").alias("mean_ad"),
-            F.max("ad_statistic").alias("max_ad"),
-            F.count("*").alias("total_distributions"),
-        ).toPandas()
+        if self._is_spark:
+            summary = self._df.select(
+                F.min("sse").alias("min_sse"),
+                F.mean("sse").alias("mean_sse"),
+                F.max("sse").alias("max_sse"),
+                F.min("aic").alias("min_aic"),
+                F.mean("aic").alias("mean_aic"),
+                F.max("aic").alias("max_aic"),
+                F.min("ks_statistic").alias("min_ks"),
+                F.mean("ks_statistic").alias("mean_ks"),
+                F.max("ks_statistic").alias("max_ks"),
+                F.min("pvalue").alias("min_pvalue"),
+                F.mean("pvalue").alias("mean_pvalue"),
+                F.max("pvalue").alias("max_pvalue"),
+                F.min("ad_statistic").alias("min_ad"),
+                F.mean("ad_statistic").alias("mean_ad"),
+                F.max("ad_statistic").alias("max_ad"),
+                F.count("*").alias("total_distributions"),
+            ).toPandas()
+        else:
+            # pandas DataFrame
+            df = self._df
+            summary = pd.DataFrame(
+                {
+                    "min_sse": [df["sse"].min()],
+                    "mean_sse": [df["sse"].mean()],
+                    "max_sse": [df["sse"].max()],
+                    "min_aic": [df["aic"].min()],
+                    "mean_aic": [df["aic"].mean()],
+                    "max_aic": [df["aic"].max()],
+                    "min_ks": [df["ks_statistic"].min()],
+                    "mean_ks": [df["ks_statistic"].mean()],
+                    "max_ks": [df["ks_statistic"].max()],
+                    "min_pvalue": [df["pvalue"].min()],
+                    "mean_pvalue": [df["pvalue"].mean()],
+                    "max_pvalue": [df["pvalue"].max()],
+                    "min_ad": [df["ad_statistic"].min()],
+                    "mean_ad": [df["ad_statistic"].mean()],
+                    "max_ad": [df["ad_statistic"].max()],
+                    "total_distributions": [len(df)],
+                }
+            )
 
         return summary
 
@@ -1235,7 +1364,10 @@ class FitResults:
         Returns:
             Count of distributions
         """
-        return self._df.count()
+        if self._is_spark:
+            return self._df.count()
+        else:
+            return len(self._df)
 
     def __len__(self) -> int:
         """Get number of fitted distributions."""

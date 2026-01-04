@@ -861,7 +861,7 @@ class TestPrefilter:
         """Test that prefilter on discrete fitter logs a warning."""
         fitter = DiscreteDistributionFitter(spark_session)
 
-        with patch("spark_bestfit.core.logger") as mock_logger:
+        with patch("spark_bestfit.discrete_fitter.logger") as mock_logger:
             results = fitter.fit(poisson_dataset, column="counts", max_distributions=3, prefilter=True)
             mock_logger.warning.assert_called_once()
             assert "not yet supported" in str(mock_logger.warning.call_args)
@@ -1117,7 +1117,7 @@ class TestPrefilterIntegration:
         # by using a very restrictive exclusion list
         fitter = DistributionFitter(spark_session)
 
-        with patch("spark_bestfit.core.logger") as mock_logger:
+        with patch("spark_bestfit.continuous_fitter.logger") as mock_logger:
             results = fitter.fit(
                 df, "value",
                 max_distributions=5,
@@ -1136,7 +1136,7 @@ class TestPrefilterIntegration:
 
         fitter = DistributionFitter(spark_session)
 
-        with patch("spark_bestfit.core.logger") as mock_logger:
+        with patch("spark_bestfit.continuous_fitter.logger") as mock_logger:
             results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
 
             # Verify info log was called with prefilter message

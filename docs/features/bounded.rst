@@ -1,7 +1,7 @@
 Bounded Distribution Fitting
 ============================
 
-Starting with v1.4.0, spark-bestfit supports fitting distributions with explicit bounds.
+spark-bestfit supports fitting distributions with explicit bounds.
 This is useful for data that has natural constraints like percentages (0-100),
 ages (0+), prices (0+), or any domain-specific limits.
 
@@ -79,7 +79,7 @@ The truncation uses the formula:
 
 .. code-block:: text
 
-   ppf_truncated(u) = ppf_original(cdf_lb + u × (cdf_ub - cdf_lb))
+   ppf_truncated(u) = ppf_original(cdf_lb + u * (cdf_ub - cdf_lb))
 
    where:
      cdf_lb = CDF at lower bound
@@ -128,11 +128,11 @@ Bounds are preserved when saving and loading results:
 Multi-Column Bounded Fitting
 ----------------------------
 
-Starting with v1.5.0, you can specify **different bounds per column** using dictionaries:
+You can specify **different bounds per column** using dictionaries:
 
 .. code-block:: python
 
-   # Different bounds for each column (v1.5.0)
+   # Different bounds for each column
    results = fitter.fit(
        df,
        columns=["percentage", "price", "age"],

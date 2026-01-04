@@ -9,7 +9,7 @@ import scipy.optimize as opt
 import scipy.stats as st
 from pyspark import Broadcast
 from pyspark.sql.functions import pandas_udf
-from pyspark.sql.types import ArrayType, FloatType, MapType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
 
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 
@@ -28,8 +28,12 @@ DISCRETE_FIT_RESULT_SCHEMA = StructType(
         StructField("pvalue", FloatType(), True),
         StructField("ad_statistic", FloatType(), True),
         StructField("ad_pvalue", FloatType(), True),
-        # data_summary: summary statistics of the original data for provenance
-        StructField("data_summary", MapType(StringType(), FloatType()), True),
+        # Flat data summary columns for provenance (v2.0: replaced MapType for ~20% perf)
+        StructField("data_min", FloatType(), True),
+        StructField("data_max", FloatType(), True),
+        StructField("data_mean", FloatType(), True),
+        StructField("data_stddev", FloatType(), True),
+        StructField("data_count", FloatType(), True),
         # Bounded distribution support
         StructField("lower_bound", FloatType(), True),
         StructField("upper_bound", FloatType(), True),
@@ -357,7 +361,7 @@ def fit_single_discrete_distribution(
     empirical_pmf: np.ndarray,
     registry: DiscreteDistributionRegistry,
     column_name: Optional[str] = None,
-    data_summary: Optional[Dict[str, float]] = None,
+    data_stats: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
@@ -371,15 +375,14 @@ def fit_single_discrete_distribution(
         empirical_pmf: Empirical PMF at each x value
         registry: DiscreteDistributionRegistry for parameter configs
         column_name: Name of the column being fitted (for multi-column support)
-        data_summary: Pre-computed summary statistics of the original data
+        data_stats: Pre-computed summary statistics (data_min, data_max, etc.)
         lower_bound: Optional lower bound for truncated distribution
         upper_bound: Optional upper bound for truncated distribution
         lazy_metrics: If True, skip expensive KS computation. These metrics
             will be None in the result and computed on-demand later. (v1.5.0)
 
     Returns:
-        Dictionary with keys: column_name, distribution, parameters, sse, aic, bic,
-        ks_statistic, pvalue, data_summary, lower_bound, upper_bound
+        Dictionary with fit result fields including data_min, data_max, etc.
     """
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -398,13 +401,13 @@ def fit_single_discrete_distribution(
 
             # Check for invalid parameters
             if any(not np.isfinite(p) for p in params):
-                return _failed_discrete_fit_result(dist_name, column_name, data_summary)
+                return _failed_discrete_fit_result(dist_name, column_name, data_stats)
 
             # Compute SSE using PMF
             sse = compute_discrete_sse(dist, tuple(params), x_values, empirical_pmf, dist_name)
 
             if not np.isfinite(sse):
-                return _failed_discrete_fit_result(dist_name, column_name, data_summary)
+                return _failed_discrete_fit_result(dist_name, column_name, data_stats)
 
             # Compute information criteria (fast, always computed)
             aic, bic = compute_discrete_information_criteria(dist, tuple(params), data_sample, dist_name)
@@ -420,7 +423,7 @@ def fit_single_discrete_distribution(
             # Check for convergence warnings
             for w in caught_warnings:
                 if "convergence" in str(w.message).lower() or "nan" in str(w.message).lower():
-                    return _failed_discrete_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+                    return _failed_discrete_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
             return {
                 "column_name": column_name,
@@ -433,19 +436,21 @@ def fit_single_discrete_distribution(
                 "pvalue": float(pvalue) if pvalue is not None else None,
                 "ad_statistic": None,  # A-D not computed for discrete distributions
                 "ad_pvalue": None,
-                "data_summary": data_summary,
+                **(data_stats or {}),  # Flat data stats: data_min, data_max, etc.
                 "lower_bound": float(lower_bound) if lower_bound is not None else None,
                 "upper_bound": float(upper_bound) if upper_bound is not None else None,
             }
 
-    except (ValueError, RuntimeError, FloatingPointError, AttributeError):
-        return _failed_discrete_fit_result(dist_name, column_name, data_summary, lower_bound, upper_bound)
+    except Exception:
+        # Catch all exceptions to ensure fitting never crashes the Spark job
+        # This matches behavior of LocalBackend and RayBackend which skip failed fits
+        return _failed_discrete_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
 
 def _failed_discrete_fit_result(
     dist_name: str,
     column_name: Optional[str] = None,
-    data_summary: Optional[Dict[str, float]] = None,
+    data_stats: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
@@ -454,7 +459,7 @@ def _failed_discrete_fit_result(
     Args:
         dist_name: Name of the distribution that failed
         column_name: Name of the column being fitted (for multi-column support)
-        data_summary: Pre-computed summary statistics of the original data
+        data_stats: Pre-computed summary statistics (data_min, data_max, etc.)
         lower_bound: Optional lower bound for truncated distribution
         upper_bound: Optional upper bound for truncated distribution
 
@@ -472,7 +477,7 @@ def _failed_discrete_fit_result(
         "pvalue": 0.0,
         "ad_statistic": None,  # A-D not computed for discrete distributions
         "ad_pvalue": None,
-        "data_summary": data_summary,
+        **(data_stats or {}),  # Flat data stats: data_min, data_max, etc.
         "lower_bound": float(lower_bound) if lower_bound is not None else None,
         "upper_bound": float(upper_bound) if upper_bound is not None else None,
     }
@@ -482,7 +487,7 @@ def create_discrete_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
     column_name: Optional[str] = None,
-    data_summary: Optional[Dict[str, float]] = None,
+    data_stats: Optional[Dict[str, float]] = None,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
@@ -493,7 +498,7 @@ def create_discrete_fitting_udf(
         histogram_broadcast: Broadcast variable containing (x_values, empirical_pmf)
         data_sample_broadcast: Broadcast variable containing integer data sample
         column_name: Name of the column being fitted (for result tracking)
-        data_summary: Pre-computed summary statistics of the original data
+        data_stats: Pre-computed summary statistics (data_min, data_max, etc.)
         lower_bound: Optional lower bound for truncated distribution
         upper_bound: Optional upper bound for truncated distribution
         lazy_metrics: If True, skip expensive KS computation during fitting.
@@ -523,18 +528,22 @@ def create_discrete_fitting_udf(
         # Fit each distribution in the batch
         results = []
         for dist_name in distribution_names:
-            result = fit_single_discrete_distribution(
-                dist_name=dist_name,
-                data_sample=data_sample,
-                x_values=x_values,
-                empirical_pmf=empirical_pmf,
-                registry=registry,
-                column_name=column_name,
-                data_summary=data_summary,
-                lower_bound=lower_bound,
-                upper_bound=upper_bound,
-                lazy_metrics=lazy_metrics,
-            )
+            try:
+                result = fit_single_discrete_distribution(
+                    dist_name=dist_name,
+                    data_sample=data_sample,
+                    x_values=x_values,
+                    empirical_pmf=empirical_pmf,
+                    registry=registry,
+                    column_name=column_name,
+                    data_stats=data_stats,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    lazy_metrics=lazy_metrics,
+                )
+            except Exception:
+                # Safety net: catch any unexpected exceptions to prevent job failure
+                result = _failed_discrete_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
             results.append(result)
 
         # Create DataFrame
