@@ -46,6 +46,74 @@ Spark environment (see Compatibility Matrix above).
 
    pip install spark-bestfit[spark]
 
+**With Ray support** (for Ray clusters and ML workflows):
+
+.. code-block:: bash
+
+   pip install spark-bestfit[ray]
+
+Backend Support (v2.0.0+)
+-------------------------
+
+spark-bestfit uses a pluggable backend architecture for distributed computation:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Backend
+     - Use Case
+     - Install
+   * - **SparkBackend**
+     - Production clusters, large datasets
+     - Default
+   * - **LocalBackend**
+     - Unit testing, development
+     - Default
+   * - **RayBackend**
+     - Ray clusters, ML workflows
+     - ``pip install spark-bestfit[ray]``
+
+**Using RayBackend:**
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter, RayBackend
+   import pandas as pd
+   import numpy as np
+
+   # Auto-initializes Ray if not already running
+   backend = RayBackend()
+   fitter = DistributionFitter(backend=backend)
+
+   # Works with pandas DataFrames
+   df = pd.DataFrame({"value": np.random.normal(50, 10, 10000)})
+   results = fitter.fit(df, column="value")
+
+   # Also works with Ray Datasets (distributed)
+   import ray
+   ds = ray.data.from_pandas(df)
+   results = fitter.fit(ds, column="value")
+
+   # Connect to existing Ray cluster
+   backend = RayBackend(address="auto")  # Auto-detect cluster
+
+**Using LocalBackend** (for testing without Spark):
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter, LocalBackend
+   import pandas as pd
+
+   backend = LocalBackend(max_workers=4)
+   fitter = DistributionFitter(backend=backend)
+
+   df = pd.DataFrame({"value": [1.0, 2.0, 3.0, ...]})
+   results = fitter.fit(df, column="value")
+
+.. note::
+   Existing code using ``DistributionFitter(spark)`` continues to work unchanged.
+
 Basic Usage
 -----------
 

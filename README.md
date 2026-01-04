@@ -62,6 +62,12 @@ This installs spark-bestfit without PySpark. You are responsible for providing a
 pip install spark-bestfit[spark]
 ```
 
+**With Ray support** (for Ray clusters and ML workflows):
+
+```bash
+pip install spark-bestfit[ray]
+```
+
 ## Quick Start
 
 ```python
@@ -106,7 +112,7 @@ spark-bestfit uses a pluggable backend architecture for distributed computation:
 |---------|----------|---------|
 | **SparkBackend** | Production clusters, large datasets | Default |
 | **LocalBackend** | Unit testing, development | Default |
-| **RayBackend** | Ray clusters, ML workflows | `pip install spark-bestfit[ray]` (planned) |
+| **RayBackend** | Ray clusters, ML workflows | `pip install spark-bestfit[ray]` |
 
 ### Using Backends
 
@@ -128,6 +134,42 @@ import pandas as pd
 df = pd.DataFrame({"value": [1.0, 2.0, 3.0, ...]})
 results = fitter.fit(df, column="value")
 ```
+
+### RayBackend
+
+For Ray clusters and ML workflows (requires `pip install spark-bestfit[ray]`):
+
+```python
+from spark_bestfit import DistributionFitter, RayBackend
+import pandas as pd
+
+# Auto-initializes Ray if not already running
+backend = RayBackend()
+fitter = DistributionFitter(backend=backend)
+
+# Works with pandas DataFrames
+df = pd.DataFrame({"value": np.random.normal(50, 10, 10000)})
+results = fitter.fit(df, column="value")
+
+# Also works with Ray Datasets (distributed)
+import ray
+ds = ray.data.from_pandas(df)
+results = fitter.fit(ds, column="value")
+
+# Connect to existing Ray cluster
+backend = RayBackend(address="auto")  # Auto-detect cluster
+backend = RayBackend(address="ray://cluster:10001")  # Explicit address
+
+# Limit resources
+backend = RayBackend(num_cpus=8)
+```
+
+**RayBackend Features:**
+- Hybrid support for both `pandas.DataFrame` and `ray.data.Dataset` inputs
+- Distributed aggregation for histograms and correlations (no raw data collection)
+- Vectorized Pearson correlation using sufficient statistics
+- Smart partition calculation with slow-distribution weighting
+- Works with GaussianCopula for distributed sample generation
 
 > **Backward Compatible**: Existing code using `DistributionFitter(spark)` continues to work unchanged.
 
@@ -548,8 +590,7 @@ spark-bestfit enables downstream use cases (simulations, ML, analytics) by provi
 
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **2.0.0** | Multi-Backend & Custom Distributions | Ray backend support, user-defined distribution classes, core refactoring |
-| **2.1.0** | API Polish & Performance | Multivariate fitting, FitterConfig builder, copula optimizations |
+| **2.1.0** | API Polish & Performance | User-defined distributions, FitterConfig builder, copula optimizations |
 | **3.0.0** | Advanced | Mixture models, streaming support, right-censored data |
 
 ### Future: Scipy New Distribution API

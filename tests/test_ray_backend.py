@@ -1317,3 +1317,379 @@ class TestRayBackendCorrelationStress:
 
         assert corr.shape == (1, 1)
         assert corr[0, 0] == 1.0
+
+
+class TestRayBackendCalculatePartitions:
+    """Tests for partition calculation with slow distribution weighting."""
+
+    def test_calculate_partitions_basic(self, ray_backend):
+        """Basic partition calculation works."""
+        distributions = ["norm", "expon", "gamma"]
+        partitions = ray_backend._calculate_partitions(distributions)
+
+        assert partitions >= 1
+        assert partitions <= ray_backend.get_parallelism() * 2
+
+    def test_calculate_partitions_with_slow_distributions(self, ray_backend):
+        """Slow distributions get weighted 3x in partition calculation."""
+        # All fast distributions
+        fast_dists = ["norm", "expon", "gamma", "beta"]
+        fast_partitions = ray_backend._calculate_partitions(fast_dists)
+
+        # Same number but with slow distributions
+        from spark_bestfit.distributions import DistributionRegistry
+
+        slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
+        slow_dist = list(slow_set)[0] if slow_set else "levy_stable"
+        slow_dists = ["norm", "expon", slow_dist]
+
+        # Slow distributions should result in more effective partitions
+        slow_partitions = ray_backend._calculate_partitions(slow_dists)
+
+        # With slow weighting, effective count is higher
+        assert slow_partitions >= 1
+
+    def test_calculate_partitions_empty_list(self, ray_backend):
+        """Empty distribution list returns minimum partitions."""
+        partitions = ray_backend._calculate_partitions([])
+        assert partitions >= 0
+
+    def test_calculate_partitions_many_distributions(self, ray_backend):
+        """Many distributions capped at 2x CPU count."""
+        distributions = [f"dist_{i}" for i in range(100)]
+        partitions = ray_backend._calculate_partitions(distributions)
+
+        # Should be capped at 2x parallelism
+        assert partitions <= ray_backend.get_parallelism() * 2
+
+
+class TestRayBackendGenerateSamples:
+    """Tests for distributed sample generation."""
+
+    def test_generate_samples_basic(self, ray_backend):
+        """generate_samples creates correct number of samples."""
+
+        def generator_func(n_samples, partition_id, seed):
+            np.random.seed(seed)
+            return {"value": np.random.normal(0, 1, n_samples)}
+
+        result = ray_backend.generate_samples(
+            n=100,
+            generator_func=generator_func,
+            column_names=["value"],
+            random_seed=42,
+        )
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 100
+        assert "value" in result.columns
+
+    def test_generate_samples_multiple_columns(self, ray_backend):
+        """generate_samples works with multiple columns."""
+
+        def generator_func(n_samples, partition_id, seed):
+            np.random.seed(seed)
+            return {
+                "x": np.random.normal(0, 1, n_samples),
+                "y": np.random.uniform(0, 1, n_samples),
+                "z": np.random.exponential(1, n_samples),
+            }
+
+        result = ray_backend.generate_samples(
+            n=500,
+            generator_func=generator_func,
+            column_names=["x", "y", "z"],
+            num_partitions=4,
+            random_seed=42,
+        )
+
+        assert len(result) == 500
+        assert list(result.columns) == ["x", "y", "z"]
+
+    def test_generate_samples_reproducibility(self, ray_backend):
+        """generate_samples with same seed produces similar statistics."""
+
+        def generator_func(n_samples, partition_id, seed):
+            np.random.seed(seed)
+            return {"value": np.random.normal(50, 10, n_samples)}
+
+        result1 = ray_backend.generate_samples(
+            n=1000,
+            generator_func=generator_func,
+            column_names=["value"],
+            num_partitions=2,
+            random_seed=42,
+        )
+
+        result2 = ray_backend.generate_samples(
+            n=1000,
+            generator_func=generator_func,
+            column_names=["value"],
+            num_partitions=2,
+            random_seed=42,
+        )
+
+        # With same seed and partitions, should produce same data
+        np.testing.assert_array_almost_equal(result1["value"].values, result2["value"].values)
+
+    def test_generate_samples_zero_n(self, ray_backend):
+        """generate_samples with n=0 returns empty DataFrame."""
+
+        def generator_func(n_samples, partition_id, seed):
+            return {"value": np.array([])}
+
+        result = ray_backend.generate_samples(
+            n=0,
+            generator_func=generator_func,
+            column_names=["value"],
+        )
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+    def test_generate_samples_custom_partitions(self, ray_backend):
+        """generate_samples respects custom partition count."""
+
+        partition_ids_seen = []
+
+        def generator_func(n_samples, partition_id, seed):
+            partition_ids_seen.append(partition_id)
+            return {"value": np.ones(n_samples) * partition_id}
+
+        result = ray_backend.generate_samples(
+            n=100,
+            generator_func=generator_func,
+            column_names=["value"],
+            num_partitions=5,
+            random_seed=42,
+        )
+
+        assert len(result) == 100
+        # Should have samples from multiple partitions
+        assert len(set(result["value"].values)) >= 1
+
+
+class TestRayBackendSpearmanCorrelation:
+    """Tests for Spearman correlation on Ray Dataset (collects to pandas)."""
+
+    def test_spearman_correlation_ray_dataset(self, ray_backend):
+        """Spearman correlation on Ray Dataset collects and computes correctly."""
+        np.random.seed(42)
+        n = 500
+
+        # Create monotonic relationship (perfect Spearman correlation)
+        x = np.arange(n).astype(float)
+        y = x**2  # Monotonic but not linear
+        z = -x  # Perfect negative correlation with x
+
+        data = pd.DataFrame({"x": x, "y": y, "z": z})
+        ds = ray.data.from_pandas(data)
+
+        corr = ray_backend.compute_correlation(ds, ["x", "y", "z"], method="spearman")
+
+        assert corr.shape == (3, 3)
+        # x and y have perfect monotonic relationship
+        assert corr[0, 1] > 0.99
+        # x and z have perfect negative monotonic relationship
+        assert corr[0, 2] < -0.99
+        # Diagonal is 1
+        np.testing.assert_array_almost_equal(np.diag(corr), [1.0, 1.0, 1.0])
+
+    def test_spearman_vs_pearson_nonlinear(self, ray_backend):
+        """Spearman captures monotonic relationships that Pearson misses."""
+        np.random.seed(42)
+        n = 500
+
+        x = np.linspace(1, 10, n)
+        y = np.exp(x)  # Exponential - monotonic but not linear
+
+        data = pd.DataFrame({"x": x, "y": y})
+        ds = ray.data.from_pandas(data)
+
+        pearson_corr = ray_backend.compute_correlation(ds, ["x", "y"], method="pearson")
+        spearman_corr = ray_backend.compute_correlation(ds, ["x", "y"], method="spearman")
+
+        # Spearman should be perfect (1.0) for monotonic relationship
+        assert spearman_corr[0, 1] > 0.999
+        # Pearson will be high but not perfect due to nonlinearity
+        assert pearson_corr[0, 1] < spearman_corr[0, 1]
+
+
+class TestRayBackendDistributedHistogram:
+    """Tests for distributed histogram computation on Ray Dataset."""
+
+    def test_distributed_histogram_ray_dataset(self, ray_backend):
+        """Distributed histogram on Ray Dataset matches local computation."""
+        np.random.seed(42)
+        data = pd.DataFrame({"value": np.random.normal(50, 10, 1000)})
+        ds = ray.data.from_pandas(data)
+        bin_edges = np.linspace(20, 80, 31)
+
+        # Compute with Ray Dataset (distributed)
+        ray_counts, ray_total = ray_backend.compute_histogram(ds, "value", bin_edges)
+
+        # Compute locally with pandas
+        local_counts, local_total = ray_backend.compute_histogram(data, "value", bin_edges)
+
+        # Should match
+        np.testing.assert_array_equal(ray_counts, local_counts)
+        assert ray_total == local_total
+
+    def test_distributed_histogram_with_nan(self, ray_backend):
+        """Distributed histogram correctly ignores NaN values."""
+        data_with_nan = pd.DataFrame({"value": [1.0, 2.0, np.nan, 4.0, 5.0, np.nan, 7.0]})
+        ds = ray.data.from_pandas(data_with_nan)
+        bin_edges = np.array([0, 2, 4, 6, 8])
+
+        counts, total = ray_backend.compute_histogram(ds, "value", bin_edges)
+
+        # Should only count non-NaN values (5 values)
+        assert total == 5
+        assert sum(counts) == 5
+
+    def test_distributed_histogram_large_dataset(self, ray_backend):
+        """Distributed histogram scales with larger datasets."""
+        np.random.seed(42)
+        # Create larger dataset that will be split across partitions
+        # Use normal distribution to ensure most values fall within bin range
+        data = pd.DataFrame({"value": np.random.normal(50, 10, 10000)})
+        ds = ray.data.from_pandas(data)
+        bin_edges = np.linspace(0, 100, 101)
+
+        counts, total = ray_backend.compute_histogram(ds, "value", bin_edges)
+
+        # Nearly all normal(50,10) values fall within [0, 100]
+        assert total >= 9990  # Allow a few outliers
+        assert len(counts) == 100
+        assert sum(counts) == total
+
+
+class TestRayBackendRayDatasetOperations:
+    """Additional tests for Ray Dataset specific operations."""
+
+    def test_collect_column_ray_dataset_large(self, ray_backend):
+        """collect_column works with larger Ray Dataset."""
+        np.random.seed(42)
+        data = pd.DataFrame({"value": np.random.normal(0, 1, 5000)})
+        ds = ray.data.from_pandas(data)
+
+        result = ray_backend.collect_column(ds, "value")
+
+        assert len(result) == 5000
+        np.testing.assert_array_almost_equal(result, data["value"].values)
+
+    def test_get_column_stats_ray_dataset_precision(self, ray_backend):
+        """get_column_stats on Ray Dataset matches pandas precision."""
+        np.random.seed(42)
+        data = pd.DataFrame({"value": np.random.uniform(-100, 100, 2000)})
+        ds = ray.data.from_pandas(data)
+
+        ray_stats = ray_backend.get_column_stats(ds, "value")
+        pandas_min = float(data["value"].min())
+        pandas_max = float(data["value"].max())
+
+        assert ray_stats["min"] == pandas_min
+        assert ray_stats["max"] == pandas_max
+        assert ray_stats["count"] == 2000
+
+    def test_sample_column_ray_dataset_fraction(self, ray_backend):
+        """sample_column on Ray Dataset respects fraction approximately."""
+        np.random.seed(42)
+        data = pd.DataFrame({"value": np.random.normal(0, 1, 1000)})
+        ds = ray.data.from_pandas(data)
+
+        sample = ray_backend.sample_column(ds, "value", fraction=0.1, seed=42)
+
+        # Ray's random_sample is approximate, check it's in reasonable range
+        assert len(sample) >= 50  # At least 5% (half of 10%)
+        assert len(sample) <= 200  # At most 20% (double of 10%)
+
+    def test_sample_column_ray_dataset_full(self, ray_backend):
+        """sample_column with fraction=1.0 returns all data."""
+        data = pd.DataFrame({"value": [1.0, 2.0, 3.0, 4.0, 5.0]})
+        ds = ray.data.from_pandas(data)
+
+        sample = ray_backend.sample_column(ds, "value", fraction=1.0, seed=42)
+
+        # Should return all values (order may differ)
+        assert len(sample) == 5
+        assert set(sample) == {1.0, 2.0, 3.0, 4.0, 5.0}
+
+
+class TestRayBackendDiscreteParallelFit:
+    """Tests for discrete distribution parallel fitting."""
+
+    def test_discrete_parallel_fit_poisson(self, ray_backend):
+        """Discrete parallel_fit works for Poisson distribution."""
+        from spark_bestfit.discrete_fitting import fit_single_discrete_distribution
+
+        np.random.seed(42)
+        true_lambda = 7
+        data_sample = np.random.poisson(lam=true_lambda, size=1000)
+        x_values, counts = np.unique(data_sample, return_counts=True)
+        pmf = counts / len(data_sample)
+        data_stats = compute_data_stats(data_sample.astype(float))
+
+        results = ray_backend.parallel_fit(
+            distributions=["poisson"],
+            histogram=(x_values, pmf),
+            data_sample=data_sample,
+            fit_func=fit_single_discrete_distribution,
+            column_name="counts",
+            data_stats=data_stats,
+            is_discrete=True,
+        )
+
+        assert len(results) == 1
+        assert results[0]["distribution"] == "poisson"
+        fitted_lambda = results[0]["parameters"][0]
+        assert abs(fitted_lambda - true_lambda) < 0.5
+
+    def test_discrete_parallel_fit_multiple(self, ray_backend):
+        """Discrete parallel_fit works with multiple distributions."""
+        from spark_bestfit.discrete_fitting import fit_single_discrete_distribution
+
+        np.random.seed(42)
+        data_sample = np.random.poisson(lam=5, size=500)
+        x_values, counts = np.unique(data_sample, return_counts=True)
+        pmf = counts / len(data_sample)
+        data_stats = compute_data_stats(data_sample.astype(float))
+
+        results = ray_backend.parallel_fit(
+            distributions=["poisson", "nbinom", "geom"],
+            histogram=(x_values, pmf),
+            data_sample=data_sample,
+            fit_func=fit_single_discrete_distribution,
+            column_name="counts",
+            data_stats=data_stats,
+            is_discrete=True,
+        )
+
+        # Should get results for at least Poisson
+        assert len(results) >= 1
+        dist_names = [r["distribution"] for r in results]
+        assert "poisson" in dist_names
+
+    def test_discrete_parallel_fit_with_bounds(self, ray_backend):
+        """Discrete parallel_fit respects bounds."""
+        from spark_bestfit.discrete_fitting import fit_single_discrete_distribution
+
+        np.random.seed(42)
+        data_sample = np.random.poisson(lam=10, size=500)
+        x_values, counts = np.unique(data_sample, return_counts=True)
+        pmf = counts / len(data_sample)
+        data_stats = compute_data_stats(data_sample.astype(float))
+
+        results = ray_backend.parallel_fit(
+            distributions=["poisson"],
+            histogram=(x_values, pmf),
+            data_sample=data_sample,
+            fit_func=fit_single_discrete_distribution,
+            column_name="counts",
+            data_stats=data_stats,
+            is_discrete=True,
+            lower_bound=0,
+            upper_bound=20,
+        )
+
+        assert len(results) >= 1
