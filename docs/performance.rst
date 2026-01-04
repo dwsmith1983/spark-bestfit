@@ -45,7 +45,7 @@ pluggable compute backends:
      - Default (included)
    * - ``RayBackend``
      - Ray clusters, ML pipelines
-     - ``pip install spark-bestfit[ray]`` (planned)
+     - ``pip install spark-bestfit[ray]``
 
 .. code-block:: python
 

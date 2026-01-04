@@ -19,6 +19,7 @@ Example:
     >>> results = fitter.fit(df, column='value')
 """
 
+import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -102,20 +103,24 @@ def _fit_discrete_distribution(
 # Cached remote function references (created lazily)
 _fit_continuous_remote: Optional[Any] = None
 _fit_discrete_remote: Optional[Any] = None
+_remote_functions_lock = threading.Lock()
 
 
 def _get_remote_functions() -> Tuple[Any, Any]:
     """Get cached remote function references, creating them if needed.
+
+    Thread-safe initialization of Ray remote function wrappers.
 
     Returns:
         Tuple of (fit_continuous_remote, fit_discrete_remote)
     """
     global _fit_continuous_remote, _fit_discrete_remote
 
-    if _fit_continuous_remote is None:
-        _fit_continuous_remote = ray.remote(_fit_continuous_distribution)
-    if _fit_discrete_remote is None:
-        _fit_discrete_remote = ray.remote(_fit_discrete_distribution)
+    with _remote_functions_lock:
+        if _fit_continuous_remote is None:
+            _fit_continuous_remote = ray.remote(_fit_continuous_distribution)
+        if _fit_discrete_remote is None:
+            _fit_discrete_remote = ray.remote(_fit_discrete_distribution)
 
     return _fit_continuous_remote, _fit_discrete_remote
 

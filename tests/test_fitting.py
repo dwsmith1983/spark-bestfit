@@ -95,8 +95,11 @@ class TestFitSingleDistribution:
 
         # Should attempt to fit (may succeed or fail)
         assert result["distribution"] == "norm"
-        # Either succeeds or returns inf
-        assert result["sse"] >= 0 or result["sse"] == np.inf
+        # SSE must be finite positive or infinity (not NaN)
+        assert np.isfinite(result["sse"]) or result["sse"] == np.inf
+        # If fit succeeded, verify we got parameters
+        if np.isfinite(result["sse"]):
+            assert len(result["parameters"]) >= 2  # norm has loc, scale
 
 class TestEvaluatePDF:
     """Tests for PDF evaluation."""

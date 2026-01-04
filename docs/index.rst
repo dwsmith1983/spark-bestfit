@@ -43,6 +43,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    serialization
    copula
    progress
+   ray_backend
    performance
    api
 

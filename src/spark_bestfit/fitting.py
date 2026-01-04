@@ -131,17 +131,21 @@ def create_fitting_udf(
         # Fit each distribution in the batch
         results = []
         for dist_name in distribution_names:
-            result = fit_single_distribution(
-                dist_name=dist_name,
-                data_sample=data_sample,
-                bin_edges=bin_edges,
-                y_hist=y_hist,
-                column_name=column_name,
-                data_stats=data_stats,
-                lower_bound=lower_bound,
-                upper_bound=upper_bound,
-                lazy_metrics=lazy_metrics,
-            )
+            try:
+                result = fit_single_distribution(
+                    dist_name=dist_name,
+                    data_sample=data_sample,
+                    bin_edges=bin_edges,
+                    y_hist=y_hist,
+                    column_name=column_name,
+                    data_stats=data_stats,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    lazy_metrics=lazy_metrics,
+                )
+            except Exception:
+                # Safety net: catch any unexpected exceptions to prevent job failure
+                result = _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
             results.append(result)
 
         # Create DataFrame with explicit schema compliance
@@ -271,7 +275,9 @@ def fit_single_distribution(
                 "upper_bound": upper_bound,
             }
 
-    except (ValueError, RuntimeError, FloatingPointError, AttributeError):
+    except Exception:
+        # Catch all exceptions to ensure fitting never crashes the Spark job
+        # This matches behavior of LocalBackend and RayBackend which skip failed fits
         return _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
 

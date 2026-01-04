@@ -441,7 +441,9 @@ def fit_single_discrete_distribution(
                 "upper_bound": float(upper_bound) if upper_bound is not None else None,
             }
 
-    except (ValueError, RuntimeError, FloatingPointError, AttributeError):
+    except Exception:
+        # Catch all exceptions to ensure fitting never crashes the Spark job
+        # This matches behavior of LocalBackend and RayBackend which skip failed fits
         return _failed_discrete_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
 
@@ -526,18 +528,22 @@ def create_discrete_fitting_udf(
         # Fit each distribution in the batch
         results = []
         for dist_name in distribution_names:
-            result = fit_single_discrete_distribution(
-                dist_name=dist_name,
-                data_sample=data_sample,
-                x_values=x_values,
-                empirical_pmf=empirical_pmf,
-                registry=registry,
-                column_name=column_name,
-                data_stats=data_stats,
-                lower_bound=lower_bound,
-                upper_bound=upper_bound,
-                lazy_metrics=lazy_metrics,
-            )
+            try:
+                result = fit_single_discrete_distribution(
+                    dist_name=dist_name,
+                    data_sample=data_sample,
+                    x_values=x_values,
+                    empirical_pmf=empirical_pmf,
+                    registry=registry,
+                    column_name=column_name,
+                    data_stats=data_stats,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    lazy_metrics=lazy_metrics,
+                )
+            except Exception:
+                # Safety net: catch any unexpected exceptions to prevent job failure
+                result = _failed_discrete_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
             results.append(result)
 
         # Create DataFrame

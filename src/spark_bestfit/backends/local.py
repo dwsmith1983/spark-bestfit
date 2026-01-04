@@ -21,6 +21,7 @@ Example:
 """
 
 import multiprocessing
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -163,6 +164,7 @@ class LocalBackend:
         results = []
         total = len(distributions)
         completed = 0
+        lock = threading.Lock()  # Thread safety for shared state
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(fit_one_distribution, d): d for d in distributions}
@@ -178,12 +180,14 @@ class LocalBackend:
                     # Skip distributions that fail completely
                     pass
 
-                # Update progress
-                completed += 1
+                # Update progress with thread safety
+                with lock:
+                    completed += 1
+                    current_completed = completed
                 if progress_callback is not None:
-                    percent = (completed / total) * 100.0
+                    percent = (current_completed / total) * 100.0
                     try:
-                        progress_callback(completed, total, percent)
+                        progress_callback(current_completed, total, percent)
                     except Exception:
                         pass  # Don't let callback errors break fitting
 

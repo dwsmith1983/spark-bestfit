@@ -227,8 +227,9 @@ class SparkBackend:
             column: Column name
 
         Returns:
-            Dict with keys: 'min', 'max', 'count'. Values may be None for
-            empty DataFrames or columns with all null values.
+            Dict with keys: 'min', 'max', 'count'. Values are NaN for
+            empty DataFrames or columns with all null values, ensuring
+            consistent return type with LocalBackend and RayBackend.
         """
         stats = df.agg(
             F.min(column).alias("min"),
@@ -237,8 +238,8 @@ class SparkBackend:
         ).first()
 
         return {
-            "min": float(stats["min"]) if stats["min"] is not None else None,
-            "max": float(stats["max"]) if stats["max"] is not None else None,
+            "min": float(stats["min"]) if stats["min"] is not None else float("nan"),
+            "max": float(stats["max"]) if stats["max"] is not None else float("nan"),
             "count": int(stats["count"]),
         }
 
