@@ -190,6 +190,7 @@ class RayBackend:
         upper_bound: Optional[float] = None,
         lazy_metrics: bool = False,
         is_discrete: bool = False,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Ray tasks.
 
@@ -210,12 +211,16 @@ class RayBackend:
             upper_bound: Upper bound for truncated fitting
             lazy_metrics: If True, skip expensive KS/AD computation
             is_discrete: If True, use discrete distribution fitting
+            progress_callback: Optional callback for progress updates.
+                Called with (completed, total, percent) after each distribution.
 
         Returns:
             List of fit result dicts (only successful fits, SSE < inf)
         """
         if not distributions:
             return []
+
+        total = len(distributions)
 
         # Get cached remote function references
         fit_continuous_remote, fit_discrete_remote = _get_remote_functions()
@@ -254,17 +259,33 @@ class RayBackend:
                 for d in distributions
             ]
 
-        # Collect results
+        # Collect results with progress tracking using ray.wait()
         results = []
-        for future in futures:
-            try:
-                result = ray.get(future)
-                # Filter failed fits (SSE = infinity)
-                if result["sse"] < float(np.inf):
-                    results.append(result)
-            except Exception:
-                # Skip distributions that fail completely
-                pass
+        completed = 0
+        pending = list(futures)
+
+        while pending:
+            # Wait for at least one task to complete
+            done, pending = ray.wait(pending, num_returns=1)
+
+            for ref in done:
+                try:
+                    result = ray.get(ref)
+                    # Filter failed fits (SSE = infinity)
+                    if result["sse"] < float(np.inf):
+                        results.append(result)
+                except Exception:
+                    # Skip distributions that fail completely
+                    pass
+
+                # Update progress
+                completed += 1
+                if progress_callback is not None:
+                    percent = (completed / total) * 100.0
+                    try:
+                        progress_callback(completed, total, percent)
+                    except Exception:
+                        pass  # Don't let callback errors break fitting
 
         return results
 

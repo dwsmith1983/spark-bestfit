@@ -75,6 +75,7 @@ class ExecutionBackend(Protocol):
         upper_bound: Optional[float] = None,
         lazy_metrics: bool = False,
         is_discrete: bool = False,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel.
 
@@ -97,6 +98,10 @@ class ExecutionBackend(Protocol):
             upper_bound: Optional upper bound for truncated fitting
             lazy_metrics: If True, skip expensive KS/AD computation
             is_discrete: If True, use discrete distribution fitting
+            progress_callback: Optional callback for progress updates.
+                Called with (completed, total, percent) after each distribution
+                completes fitting. Callback is invoked from worker thread for
+                LocalBackend/RayBackend, or via StatusTracker for SparkBackend.
 
         Returns:
             List of fit result dicts. Each dict contains:

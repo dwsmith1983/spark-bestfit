@@ -251,72 +251,61 @@ class DistributionFitter:
         if max_distributions is not None and max_distributions > 0:
             distributions = distributions[:max_distributions]
 
-        # Start progress tracking if callback provided (Spark only)
-        tracker = None
-        if progress_callback is not None and self.spark is not None:
-            from spark_bestfit.progress import ProgressTracker
+        # Fit each column and collect results
+        all_results_dfs = []
+        lazy_contexts: Dict[str, LazyMetricsContext] = {}
 
-            tracker = ProgressTracker(self.spark, progress_callback)
-            tracker.start()
+        for col in target_columns:
+            # Get per-column bounds (empty dict if not bounded)
+            col_lower, col_upper = column_bounds.get(col, (None, None))
+            logger.info(f"Fitting column '{col}'...")
+            results_df = self._fit_single_column(
+                df_sample=df_sample,
+                column=col,
+                row_count=row_count,
+                bins=bins,
+                use_rice_rule=use_rice_rule,
+                distributions=distributions,
+                num_partitions=num_partitions,
+                lower_bound=col_lower,
+                upper_bound=col_upper,
+                lazy_metrics=lazy_metrics,
+                prefilter=prefilter,
+                progress_callback=progress_callback,
+            )
+            all_results_dfs.append(results_df)
 
-        try:
-            # Fit each column and collect results
-            all_results_dfs = []
-            lazy_contexts: Dict[str, LazyMetricsContext] = {}
-
-            for col in target_columns:
-                # Get per-column bounds (empty dict if not bounded)
-                col_lower, col_upper = column_bounds.get(col, (None, None))
-                logger.info(f"Fitting column '{col}'...")
-                results_df = self._fit_single_column(
-                    df_sample=df_sample,
+            # Build lazy context for on-demand metric computation
+            if lazy_metrics:
+                lazy_contexts[col] = LazyMetricsContext(
+                    source_df=df_sample,
                     column=col,
+                    random_seed=self.random_seed,
                     row_count=row_count,
-                    bins=bins,
-                    use_rice_rule=use_rice_rule,
-                    distributions=distributions,
-                    num_partitions=num_partitions,
                     lower_bound=col_lower,
                     upper_bound=col_upper,
-                    lazy_metrics=lazy_metrics,
-                    prefilter=prefilter,
+                    is_discrete=False,
                 )
-                all_results_dfs.append(results_df)
 
-                # Build lazy context for on-demand metric computation
-                if lazy_metrics:
-                    lazy_contexts[col] = LazyMetricsContext(
-                        source_df=df_sample,
-                        column=col,
-                        random_seed=self.random_seed,
-                        row_count=row_count,
-                        lower_bound=col_lower,
-                        upper_bound=col_upper,
-                        is_discrete=False,
-                    )
+        # Union all results - handle both Spark and pandas DataFrames
+        if self.spark is not None:
+            # Spark: union DataFrames
+            combined_df = reduce(DataFrame.union, all_results_dfs)
+            combined_df = combined_df.cache()
+            total_results = combined_df.count()
+        else:
+            # Non-Spark backend: concatenate pandas DataFrames
+            import pandas as pd
 
-            # Union all results - handle both Spark and pandas DataFrames
-            if self.spark is not None:
-                # Spark: union DataFrames
-                combined_df = reduce(DataFrame.union, all_results_dfs)
-                combined_df = combined_df.cache()
-                total_results = combined_df.count()
-            else:
-                # Non-Spark backend: concatenate pandas DataFrames
-                import pandas as pd
+            combined_df = pd.concat(all_results_dfs, ignore_index=True)
+            total_results = len(combined_df)
 
-                combined_df = pd.concat(all_results_dfs, ignore_index=True)
-                total_results = len(combined_df)
+        logger.info(
+            f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
+        )
 
-            logger.info(
-                f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
-            )
-
-            # Pass lazy contexts to FitResults for on-demand metric computation
-            return FitResults(combined_df, lazy_contexts=lazy_contexts if lazy_metrics else None)
-        finally:
-            if tracker is not None:
-                tracker.stop()
+        # Pass lazy contexts to FitResults for on-demand metric computation
+        return FitResults(combined_df, lazy_contexts=lazy_contexts if lazy_metrics else None)
 
     def _fit_single_column(
         self,
@@ -331,6 +320,7 @@ class DistributionFitter:
         upper_bound: Optional[float] = None,
         lazy_metrics: bool = False,
         prefilter: Union[bool, str] = False,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -346,6 +336,7 @@ class DistributionFitter:
             upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
             lazy_metrics: If True, skip KS/AD computation for performance (v1.5.0)
             prefilter: Pre-filter mode (False, True, or 'aggressive') (v1.6.0)
+            progress_callback: Optional callback for progress updates (v2.0.0)
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -401,6 +392,7 @@ class DistributionFitter:
             upper_bound=upper_bound,
             lazy_metrics=lazy_metrics,
             is_discrete=False,
+            progress_callback=progress_callback,
         )
 
         # Convert results to DataFrame

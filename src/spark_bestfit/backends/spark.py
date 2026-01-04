@@ -86,6 +86,7 @@ class SparkBackend:
         upper_bound: Optional[float] = None,
         lazy_metrics: bool = False,
         is_discrete: bool = False,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Pandas UDFs.
 
@@ -109,6 +110,9 @@ class SparkBackend:
             upper_bound: Upper bound for truncated fitting
             lazy_metrics: If True, skip expensive KS/AD computation
             is_discrete: If True, use discrete distribution fitting
+            progress_callback: Optional callback for progress updates.
+                Called with (completed_tasks, total_tasks, percent) at the
+                Spark task level via StatusTracker polling.
 
         Returns:
             List of fit result dicts
@@ -116,6 +120,14 @@ class SparkBackend:
         # Handle empty distribution list
         if not distributions:
             return []
+
+        # Start progress tracking if callback provided
+        tracker = None
+        if progress_callback is not None:
+            from spark_bestfit.progress import ProgressTracker
+
+            tracker = ProgressTracker(self.spark, progress_callback)
+            tracker.start()
 
         # Broadcast data to executors
         histogram_bc = self.broadcast(histogram)
@@ -168,6 +180,10 @@ class SparkBackend:
             return [row.asDict() for row in results_df.collect()]
 
         finally:
+            # Stop progress tracking
+            if tracker is not None:
+                tracker.stop()
+
             # Always clean up broadcast variables
             self.destroy_broadcast(histogram_bc)
             self.destroy_broadcast(data_sample_bc)

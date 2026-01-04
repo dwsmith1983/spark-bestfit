@@ -21,7 +21,7 @@ Example:
 """
 
 import multiprocessing
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -84,6 +84,7 @@ class LocalBackend:
         upper_bound: Optional[float] = None,
         lazy_metrics: bool = False,
         is_discrete: bool = False,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using threads.
 
@@ -105,10 +106,14 @@ class LocalBackend:
             upper_bound: Upper bound for truncated fitting
             lazy_metrics: If True, skip expensive KS/AD computation
             is_discrete: If True, use discrete distribution fitting
+            progress_callback: Optional callback for progress updates.
+                Called with (completed, total, percent) after each distribution.
 
         Returns:
             List of fit result dicts (only successful fits, SSE < inf)
         """
+        if not distributions:
+            return []
         # Unpack histogram based on distribution type
         if is_discrete:
             x_values, empirical_pmf = histogram
@@ -156,9 +161,14 @@ class LocalBackend:
 
         # Execute in parallel using ThreadPoolExecutor
         results = []
+        total = len(distributions)
+        completed = 0
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(fit_one_distribution, d): d for d in distributions}
-            for future in futures:
+
+            # Use as_completed for progress tracking
+            for future in as_completed(futures):
                 try:
                     result = future.result()
                     # Filter failed fits (SSE = infinity)
@@ -167,6 +177,15 @@ class LocalBackend:
                 except Exception:
                     # Skip distributions that fail completely
                     pass
+
+                # Update progress
+                completed += 1
+                if progress_callback is not None:
+                    percent = (completed / total) * 100.0
+                    try:
+                        progress_callback(completed, total, percent)
+                    except Exception:
+                        pass  # Don't let callback errors break fitting
 
         return results
 

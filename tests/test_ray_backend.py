@@ -1693,3 +1693,361 @@ class TestRayBackendDiscreteParallelFit:
         )
 
         assert len(results) >= 1
+
+
+class TestRayBackendLazyMetrics:
+    """Tests for lazy_metrics with Ray Dataset."""
+
+    def test_lazy_metrics_with_ray_dataset(self, ray_backend):
+        """lazy_metrics=True with Ray Dataset should work with .best() call."""
+        from spark_bestfit import DistributionFitter
+
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=5000)
+        df = pd.DataFrame({"value": data})
+        ds = ray.data.from_pandas(df)
+
+        fitter = DistributionFitter(backend=ray_backend)
+        results = fitter.fit(
+            ds,
+            column="value",
+            lazy_metrics=True,
+            max_distributions=5,
+        )
+
+        # This should trigger lazy metric computation without error
+        best = results.best(n=1)
+        assert len(best) == 1
+        assert best[0].distribution is not None
+        # Verify KS statistic was computed (not None)
+        assert best[0].ks_statistic is not None
+
+    def test_lazy_metrics_with_ray_dataset_multi_column(self, ray_backend):
+        """lazy_metrics=True with Ray Dataset works for multi-column fitting."""
+        from spark_bestfit import DistributionFitter
+
+        np.random.seed(42)
+        data = pd.DataFrame({
+            "col_a": np.random.normal(100, 20, 3000),
+            "col_b": np.random.exponential(5, 3000),
+        })
+        ds = ray.data.from_pandas(data)
+
+        fitter = DistributionFitter(backend=ray_backend)
+        results = fitter.fit(
+            ds,
+            columns=["col_a", "col_b"],
+            lazy_metrics=True,
+            max_distributions=5,
+        )
+
+        # Get best per column - should trigger lazy computation
+        best_per_col = results.best_per_column(n=1)
+        assert "col_a" in best_per_col
+        assert "col_b" in best_per_col
+        assert best_per_col["col_a"][0].ks_statistic is not None
+        assert best_per_col["col_b"][0].ks_statistic is not None
+
+
+class TestRayBackendGaussianCopula:
+    """Tests for GaussianCopula with Ray Dataset and RayBackend."""
+
+    def test_copula_fit_with_ray_dataset(self, ray_backend):
+        """GaussianCopula.fit works with Ray Dataset and RayBackend."""
+        from spark_bestfit import DistributionFitter, GaussianCopula
+
+        np.random.seed(42)
+        n = 2000
+        x = np.random.normal(0, 1, n)
+        data = pd.DataFrame({
+            "feature_a": x * 10 + 50,
+            "feature_b": np.exp(0.5 * x + np.random.normal(0, 0.2, n)),
+        })
+        ds = ray.data.from_pandas(data)
+
+        # Fit marginals
+        fitter = DistributionFitter(backend=ray_backend)
+        results = fitter.fit(
+            ds,
+            columns=["feature_a", "feature_b"],
+            max_distributions=5,
+        )
+
+        # Fit copula with Ray Dataset and RayBackend
+        copula = GaussianCopula.fit(results, ds, backend=ray_backend)
+
+        assert copula.correlation_matrix is not None
+        assert copula.correlation_matrix.shape == (2, 2)
+        # Diagonal should be 1.0
+        np.testing.assert_array_almost_equal(
+            np.diag(copula.correlation_matrix), [1.0, 1.0], decimal=5
+        )
+        # Features should be correlated (positive correlation)
+        assert copula.correlation_matrix[0, 1] > 0.5
+
+    def test_copula_sample_with_ray_backend(self, ray_backend):
+        """GaussianCopula sampling works after fitting with RayBackend."""
+        from spark_bestfit import DistributionFitter, GaussianCopula
+
+        np.random.seed(42)
+        data = pd.DataFrame({
+            "col1": np.random.normal(100, 20, 2000),
+            "col2": np.random.normal(50, 10, 2000),
+        })
+        ds = ray.data.from_pandas(data)
+
+        fitter = DistributionFitter(backend=ray_backend)
+        results = fitter.fit(ds, columns=["col1", "col2"], max_distributions=5)
+
+        copula = GaussianCopula.fit(results, ds, backend=ray_backend)
+
+        # Generate samples
+        samples = copula.sample(n=1000, random_state=42)
+
+        assert "col1" in samples
+        assert "col2" in samples
+        assert len(samples["col1"]) == 1000
+        assert len(samples["col2"]) == 1000
+
+    def test_copula_fit_with_pandas_and_ray_backend(self, ray_backend):
+        """GaussianCopula.fit works with pandas DataFrame and RayBackend."""
+        from spark_bestfit import DistributionFitter, GaussianCopula
+
+        np.random.seed(42)
+        data = pd.DataFrame({
+            "a": np.random.normal(0, 1, 2000),
+            "b": np.random.uniform(0, 10, 2000),
+        })
+
+        # Fit with pandas DataFrame
+        fitter = DistributionFitter(backend=ray_backend)
+        results = fitter.fit(data, columns=["a", "b"], max_distributions=5)
+
+        # Fit copula with pandas DataFrame
+        copula = GaussianCopula.fit(results, data, backend=ray_backend)
+
+        assert copula.correlation_matrix.shape == (2, 2)
+        # Should work without error
+
+
+class TestRayBackendProgressCallback:
+    """Tests for progress_callback in RayBackend."""
+
+    def test_ray_backend_progress_callback(self, ray_backend, normal_data, histogram):
+        """RayBackend invokes progress callback with correct values."""
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma"]
+        results = ray_backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Should have exactly len(distributions) callback calls
+        assert len(progress_calls) == len(distributions)
+
+        # Verify progress values are correct
+        for i, (completed, total, percent) in enumerate(progress_calls):
+            assert total == len(distributions)
+            # Progress is incremental via ray.wait()
+            assert 1 <= completed <= len(distributions)
+            assert 0 < percent <= 100
+
+        # Last callback should show 100%
+        last_call = progress_calls[-1]
+        assert last_call[0] == len(distributions)
+        assert last_call[2] == 100.0
+
+    def test_ray_backend_progress_callback_error_handling(self, ray_backend, normal_data, histogram):
+        """RayBackend handles callback errors gracefully."""
+
+        def failing_callback(completed, total, percent):
+            raise ValueError("Intentional callback error")
+
+        # Should not raise despite callback errors
+        distributions = ["norm", "expon"]
+        results = ray_backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=failing_callback,
+        )
+
+        # Fitting should still complete successfully
+        assert len(results) > 0
+
+    def test_ray_backend_no_callback(self, ray_backend, normal_data, histogram):
+        """RayBackend works fine without progress callback."""
+        distributions = ["norm", "expon"]
+        results = ray_backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=None,
+        )
+
+        assert len(results) > 0
+
+    def test_fitter_progress_callback_ray(self, ray_backend, normal_data):
+        """DistributionFitter progress callback works with RayBackend."""
+        from spark_bestfit import DistributionFitter
+
+        fitter = DistributionFitter(backend=ray_backend)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        df = pd.DataFrame({"value": normal_data})
+        results = fitter.fit(
+            df,
+            column="value",
+            max_distributions=5,
+            progress_callback=on_progress,
+        )
+
+        # Should have received progress calls
+        assert len(progress_calls) > 0
+        # Should have results
+        assert len(results.best(n=1)) == 1
+
+    def test_ray_backend_progress_ordered_by_completion(self, ray_backend, normal_data, histogram):
+        """RayBackend progress shows strictly increasing completed count."""
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma", "uniform", "beta"]
+        ray_backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Verify completed count is strictly increasing
+        completed_values = [call[0] for call in progress_calls]
+        for i in range(1, len(completed_values)):
+            assert completed_values[i] == completed_values[i - 1] + 1
+
+    # --- Edge case tests ---
+
+    def test_ray_backend_progress_empty_distributions(self, ray_backend, normal_data, histogram):
+        """RayBackend progress callback handles empty distribution list gracefully."""
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        results = ray_backend.parallel_fit(
+            distributions=[],  # Empty list
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Should return empty results, no callback invocations
+        assert len(results) == 0
+        assert len(progress_calls) == 0
+
+    def test_ray_backend_progress_single_distribution(self, ray_backend, normal_data, histogram):
+        """RayBackend progress callback works with single distribution."""
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        results = ray_backend.parallel_fit(
+            distributions=["norm"],  # Single distribution
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Should have exactly one callback call with 100%
+        assert len(progress_calls) == 1
+        assert progress_calls[0] == (1, 1, 100.0)
+        assert len(results) == 1
+
+    def test_ray_backend_progress_bounds_invariants(self, ray_backend, normal_data, histogram):
+        """RayBackend progress callback values are always within valid bounds."""
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            # Validate invariants inside callback
+            assert isinstance(completed, int)
+            assert isinstance(total, int)
+            assert isinstance(percent, float)
+            assert completed >= 1
+            assert completed <= total
+            assert percent > 0
+            assert percent <= 100
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma"]
+        ray_backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # If we get here, all invariants held
+        assert len(progress_calls) == len(distributions)
+
+    # --- DiscreteDistributionFitter tests ---
+
+    def test_discrete_fitter_progress_callback_ray(self, ray_backend):
+        """DiscreteDistributionFitter progress callback works with RayBackend."""
+        from spark_bestfit import DiscreteDistributionFitter
+
+        np.random.seed(42)
+        count_data = np.random.poisson(lam=10, size=500)
+
+        fitter = DiscreteDistributionFitter(backend=ray_backend)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        df = pd.DataFrame({"counts": count_data})
+        results = fitter.fit(
+            df,
+            column="counts",
+            max_distributions=3,
+            progress_callback=on_progress,
+        )
+
+        # Should have received progress calls
+        assert len(progress_calls) > 0
+        # Should have results
+        assert len(results.best(n=1, metric="aic")) == 1

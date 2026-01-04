@@ -1353,3 +1353,337 @@ class TestBackendEdgeCasesExtended:
         assert corr.shape == (2, 2)
         # With perfect linear data (ignoring NaN), correlation should be high
         assert corr[0, 1] > 0.9
+
+
+class TestProgressCallback:
+    """Tests for progress_callback in backends."""
+
+    def test_local_backend_progress_callback(self, normal_data, histogram):
+        """LocalBackend invokes progress callback with correct values."""
+        backend = LocalBackend(max_workers=2)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma"]
+        results = backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Should have exactly len(distributions) callback calls
+        assert len(progress_calls) == len(distributions)
+
+        # Verify progress values are correct
+        for i, (completed, total, percent) in enumerate(progress_calls):
+            assert total == len(distributions)
+            # Can't guarantee order of completion due to parallelism,
+            # but all should be in valid range
+            assert 1 <= completed <= len(distributions)
+            assert 0 < percent <= 100
+
+        # Last callback should show 100%
+        last_completed = max(call[0] for call in progress_calls)
+        assert last_completed == len(distributions)
+
+    def test_local_backend_progress_callback_error_handling(self, normal_data, histogram):
+        """LocalBackend handles callback errors gracefully."""
+        backend = LocalBackend(max_workers=2)
+
+        def failing_callback(completed, total, percent):
+            raise ValueError("Intentional callback error")
+
+        # Should not raise despite callback errors
+        distributions = ["norm", "expon"]
+        results = backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=failing_callback,
+        )
+
+        # Fitting should still complete successfully
+        assert len(results) > 0
+
+    def test_local_backend_no_callback(self, normal_data, histogram):
+        """LocalBackend works fine without progress callback."""
+        backend = LocalBackend(max_workers=2)
+
+        distributions = ["norm", "expon"]
+        results = backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=None,
+        )
+
+        assert len(results) > 0
+
+    def test_spark_backend_progress_callback(self, spark, normal_data, histogram):
+        """SparkBackend invokes progress callback via StatusTracker."""
+        backend = SparkBackend(spark)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma", "uniform"]
+        results = backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            num_partitions=2,
+            progress_callback=on_progress,
+        )
+
+        # Spark progress tracking is at task level, not distribution level
+        # Just verify fitting completed successfully
+        assert len(results) > 0
+
+    def test_fitter_progress_callback_local(self, normal_data):
+        """DistributionFitter progress callback works with LocalBackend."""
+        from spark_bestfit import DistributionFitter, LocalBackend
+
+        backend = LocalBackend(max_workers=2)
+        fitter = DistributionFitter(backend=backend)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        df = pd.DataFrame({"value": normal_data})
+        results = fitter.fit(
+            df,
+            column="value",
+            max_distributions=5,
+            progress_callback=on_progress,
+        )
+
+        # Should have received progress calls
+        assert len(progress_calls) > 0
+        # Should have results
+        assert len(results.best(n=1)) == 1
+
+    # --- SparkBackend additional tests ---
+
+    def test_spark_backend_progress_callback_error_handling(self, spark, normal_data, histogram):
+        """SparkBackend handles callback errors gracefully."""
+        backend = SparkBackend(spark)
+
+        def failing_callback(completed, total, percent):
+            raise ValueError("Intentional callback error")
+
+        distributions = ["norm", "expon"]
+        results = backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            num_partitions=2,
+            progress_callback=failing_callback,
+        )
+
+        # Fitting should still complete successfully
+        assert len(results) > 0
+
+    def test_spark_backend_no_callback(self, spark, normal_data, histogram):
+        """SparkBackend works fine without progress callback."""
+        backend = SparkBackend(spark)
+
+        distributions = ["norm", "expon"]
+        results = backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            num_partitions=2,
+            progress_callback=None,
+        )
+
+        assert len(results) > 0
+
+    def test_fitter_progress_callback_spark(self, spark, normal_data):
+        """DistributionFitter progress callback works with SparkBackend."""
+        from spark_bestfit import DistributionFitter
+
+        fitter = DistributionFitter(spark)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        df = spark.createDataFrame([(float(x),) for x in normal_data], ["value"])
+        results = fitter.fit(
+            df,
+            column="value",
+            max_distributions=5,
+            progress_callback=on_progress,
+        )
+
+        # Should have results
+        assert len(results.best(n=1)) == 1
+
+    # --- Edge case tests ---
+
+    def test_progress_callback_empty_distributions_local(self, normal_data, histogram):
+        """Progress callback handles empty distribution list gracefully."""
+        backend = LocalBackend(max_workers=2)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        results = backend.parallel_fit(
+            distributions=[],  # Empty list
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Should return empty results, no callback invocations
+        assert len(results) == 0
+        assert len(progress_calls) == 0
+
+    def test_progress_callback_single_distribution_local(self, normal_data, histogram):
+        """Progress callback works with single distribution."""
+        backend = LocalBackend(max_workers=2)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        results = backend.parallel_fit(
+            distributions=["norm"],  # Single distribution
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Should have exactly one callback call with 100%
+        assert len(progress_calls) == 1
+        assert progress_calls[0] == (1, 1, 100.0)
+        assert len(results) == 1
+
+    def test_local_backend_progress_strictly_increasing(self, normal_data, histogram):
+        """LocalBackend progress shows strictly increasing completed count."""
+        backend = LocalBackend(max_workers=2)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma", "uniform", "beta"]
+        backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # Verify completed count is strictly increasing
+        completed_values = [call[0] for call in progress_calls]
+        for i in range(1, len(completed_values)):
+            assert completed_values[i] == completed_values[i - 1] + 1
+
+        # Verify invariants on all calls
+        for completed, total, percent in progress_calls:
+            assert 1 <= completed <= total
+            assert 0 < percent <= 100
+            assert total == len(distributions)
+            assert abs(percent - (completed / total * 100)) < 0.01
+
+    def test_progress_callback_bounds_invariants(self, normal_data, histogram):
+        """Progress callback values are always within valid bounds."""
+        backend = LocalBackend(max_workers=2)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            # Validate invariants inside callback
+            assert isinstance(completed, int)
+            assert isinstance(total, int)
+            assert isinstance(percent, float)
+            assert completed >= 1
+            assert completed <= total
+            assert percent > 0
+            assert percent <= 100
+            progress_calls.append((completed, total, percent))
+
+        distributions = ["norm", "expon", "gamma"]
+        backend.parallel_fit(
+            distributions=distributions,
+            histogram=histogram,
+            data_sample=normal_data,
+            fit_func=fit_single_distribution,
+            column_name="value",
+            data_stats=compute_data_stats(normal_data),
+            progress_callback=on_progress,
+        )
+
+        # If we get here, all invariants held
+        assert len(progress_calls) == len(distributions)
+
+    # --- DiscreteDistributionFitter tests ---
+
+    def test_discrete_fitter_progress_callback_local(self):
+        """DiscreteDistributionFitter progress callback works with LocalBackend."""
+        from spark_bestfit import DiscreteDistributionFitter, LocalBackend
+
+        np.random.seed(42)
+        count_data = np.random.poisson(lam=10, size=500)
+
+        backend = LocalBackend(max_workers=2)
+        fitter = DiscreteDistributionFitter(backend=backend)
+
+        progress_calls = []
+
+        def on_progress(completed, total, percent):
+            progress_calls.append((completed, total, percent))
+
+        df = pd.DataFrame({"counts": count_data})
+        results = fitter.fit(
+            df,
+            column="counts",
+            max_distributions=3,
+            progress_callback=on_progress,
+        )
+
+        # Should have received progress calls
+        assert len(progress_calls) > 0
+        # Should have results
+        assert len(results.best(n=1, metric="aic")) == 1

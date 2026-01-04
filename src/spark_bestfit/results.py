@@ -814,6 +814,8 @@ class FitResults:
         Uses the stored seed and row count to reproduce the same sample
         that was used during initial fitting.
 
+        Supports Spark DataFrames, Ray Datasets, and pandas DataFrames.
+
         Args:
             context: LazyMetricsContext with source DataFrame and sampling params
 
@@ -826,12 +828,27 @@ class FitResults:
         try:
             sample_size = min(FITTING_SAMPLE_SIZE, context.row_count)
             fraction = min(sample_size / context.row_count, 1.0)
+            df = context.source_df
+            column = context.column
+            seed = context.random_seed
 
-            sample_df = context.source_df.select(context.column).sample(
-                fraction=fraction,
-                seed=context.random_seed,
-            )
-            data = sample_df.toPandas()[context.column].values
+            # Detect DataFrame type and use appropriate sampling method
+            if hasattr(df, "select_columns") and hasattr(df, "random_sample"):
+                # Ray Dataset
+                sampled = df.random_sample(fraction, seed=seed)
+                data = sampled.select_columns([column]).to_pandas()[column].values
+            elif hasattr(df, "sample") and hasattr(df, "iloc"):
+                # pandas DataFrame
+                sample_df = df[[column]].sample(frac=fraction, random_state=seed)
+                data = sample_df[column].values
+            else:
+                # Spark DataFrame (default)
+                sample_df = df.select(column).sample(
+                    fraction=fraction,
+                    seed=seed,
+                )
+                data = sample_df.toPandas()[column].values
+
             return data.astype(int) if context.is_discrete else data.astype(float)
         except Exception as e:
             raise RuntimeError(

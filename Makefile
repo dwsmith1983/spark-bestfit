@@ -61,9 +61,11 @@ benchmark-charts: ## Generate scaling charts from benchmark results
 
 validate-notebooks: ## Run all example notebooks to validate they execute without errors
 	@echo "Validating example notebooks..."
-	@for nb in examples/*.ipynb; do \
-		echo "  Running $$nb..."; \
-		PYTHONPATH=src jupyter nbconvert --to notebook --execute --inplace \
-			--ExecutePreprocessor.timeout=600 "$$nb" || exit 1; \
+	@for nb in examples/*.ipynb examples/**/*.ipynb; do \
+		if [ -f "$$nb" ]; then \
+			echo "  Running $$nb..."; \
+			PYTHONPATH=src python -m jupyter nbconvert --to notebook --execute --inplace \
+				--ExecutePreprocessor.timeout=600 "$$nb" || exit 1; \
+		fi; \
 	done
 	@echo "All notebooks validated successfully!"
