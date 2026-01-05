@@ -4,7 +4,15 @@ import logging
 from functools import reduce
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
-from pyspark.sql import DataFrame, SparkSession
+# PySpark is optional - only import if available
+try:
+    from pyspark.sql import DataFrame, SparkSession
+
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    DataFrame = None  # type: ignore[assignment,misc]
+    SparkSession = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 from spark_bestfit.base_fitter import BaseFitter
 from spark_bestfit.discrete_fitting import (
