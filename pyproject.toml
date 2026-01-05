@@ -86,6 +86,7 @@ test = [
 
 # Base test dependencies without pyspark/pyarrow
 test-base = [
+    "matplotlib>=3.7.0,<4.0.0",
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
