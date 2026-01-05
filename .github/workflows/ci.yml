@@ -53,7 +53,7 @@ jobs:
       needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           # Spark 3.5.x with Python 3.11 and 3.12 (NumPy 1.x)
@@ -103,7 +103,7 @@ jobs:
         run: |
           pip install -e ".[test-base]"
           pip install "${{ matrix.pyspark }}" "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}"
-          if [ -n "${{ matrix.extra-deps }}" ]; then pip install ${{ matrix.extra-deps }}; fi
+          if [ -n "${{ matrix.extra-deps }}" ]; then pip install "${{ matrix.extra-deps }}"; fi
       - name: Show installed versions
         run: |
           python -c "import pyspark; print(f'PySpark: {pyspark.__version__}')"
