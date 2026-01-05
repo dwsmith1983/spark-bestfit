@@ -115,6 +115,11 @@ class LocalBackend:
         """
         if not distributions:
             return []
+
+        # Check for empty or invalid data sample
+        if len(data_sample) == 0:
+            return []
+
         # Unpack histogram based on distribution type
         if is_discrete:
             x_values, empirical_pmf = histogram
@@ -240,6 +245,9 @@ class LocalBackend:
     ) -> np.ndarray:
         """Sample a column and return as numpy array.
 
+        Filters out NaN and infinite values before sampling to ensure
+        clean data for distribution fitting.
+
         Args:
             df: Pandas DataFrame
             column: Column name
@@ -247,9 +255,13 @@ class LocalBackend:
             seed: Random seed for reproducibility
 
         Returns:
-            Numpy array of sampled values
+            Numpy array of sampled values (NaN/inf filtered)
         """
-        sample_df = df[[column]].sample(frac=fraction, random_state=seed)
+        # Filter out NaN and inf values before sampling
+        clean_df = df[[column]].replace([np.inf, -np.inf], np.nan).dropna()
+        if len(clean_df) == 0:
+            return np.array([])
+        sample_df = clean_df.sample(frac=fraction, random_state=seed)
         return sample_df[column].values
 
     @staticmethod

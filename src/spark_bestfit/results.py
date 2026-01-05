@@ -7,9 +7,18 @@ from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import pyspark.sql.functions as F
 import scipy.stats as st
-from pyspark.sql import DataFrame
+
+# PySpark is optional - only import if available
+try:
+    import pyspark.sql.functions as F
+    from pyspark.sql import DataFrame
+
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    F = None  # type: ignore[assignment]
+    DataFrame = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame as SparkDataFrame
@@ -1196,7 +1205,7 @@ class FitResults:
         """
         # Check for lazy metrics warning
         lazy_filter_requested = ks_threshold is not None or pvalue_threshold is not None or ad_threshold is not None
-        if lazy_filter_requested:
+        if lazy_filter_requested and self._is_spark:
             sample_row = self._df.limit(1).collect()
             if sample_row and sample_row[0]["ks_statistic"] is None:
                 warnings.warn(
@@ -1209,18 +1218,34 @@ class FitResults:
 
         filtered = self._df
 
-        if sse_threshold is not None:
-            filtered = filtered.filter(F.col("sse") < sse_threshold)
-        if aic_threshold is not None:
-            filtered = filtered.filter(F.col("aic") < aic_threshold)
-        if bic_threshold is not None:
-            filtered = filtered.filter(F.col("bic") < bic_threshold)
-        if ks_threshold is not None:
-            filtered = filtered.filter(F.col("ks_statistic") < ks_threshold)
-        if pvalue_threshold is not None:
-            filtered = filtered.filter(F.col("pvalue") > pvalue_threshold)
-        if ad_threshold is not None:
-            filtered = filtered.filter(F.col("ad_statistic") < ad_threshold)
+        if self._is_spark:
+            # Spark DataFrame filtering
+            if sse_threshold is not None:
+                filtered = filtered.filter(F.col("sse") < sse_threshold)
+            if aic_threshold is not None:
+                filtered = filtered.filter(F.col("aic") < aic_threshold)
+            if bic_threshold is not None:
+                filtered = filtered.filter(F.col("bic") < bic_threshold)
+            if ks_threshold is not None:
+                filtered = filtered.filter(F.col("ks_statistic") < ks_threshold)
+            if pvalue_threshold is not None:
+                filtered = filtered.filter(F.col("pvalue") > pvalue_threshold)
+            if ad_threshold is not None:
+                filtered = filtered.filter(F.col("ad_statistic") < ad_threshold)
+        else:
+            # pandas DataFrame filtering
+            if sse_threshold is not None:
+                filtered = filtered[filtered["sse"] < sse_threshold]
+            if aic_threshold is not None:
+                filtered = filtered[filtered["aic"] < aic_threshold]
+            if bic_threshold is not None:
+                filtered = filtered[filtered["bic"] < bic_threshold]
+            if ks_threshold is not None:
+                filtered = filtered[filtered["ks_statistic"] < ks_threshold]
+            if pvalue_threshold is not None:
+                filtered = filtered[filtered["pvalue"] > pvalue_threshold]
+            if ad_threshold is not None:
+                filtered = filtered[filtered["ad_statistic"] < ad_threshold]
 
         # Preserve lazy contexts for the filtered results
         # Note: Don't cache here - parent DataFrame is already cached
@@ -1429,15 +1454,24 @@ class FitResults:
         }
 
         # Count acceptable fits
-        acceptable_filter = self._df
-        acceptable_filter = acceptable_filter.filter(F.col("pvalue") >= pvalue_threshold)
-        acceptable_filter = acceptable_filter.filter(F.col("ks_statistic") <= ks_threshold)
-        # Only filter by A-D if values exist
-        if summary_dict["min_ad"] is not None:
-            acceptable_filter = acceptable_filter.filter(
-                (F.col("ad_statistic").isNull()) | (F.col("ad_statistic") <= ad_threshold)
-            )
-        n_acceptable = acceptable_filter.count()
+        if self._is_spark:
+            acceptable_filter = self._df
+            acceptable_filter = acceptable_filter.filter(F.col("pvalue") >= pvalue_threshold)
+            acceptable_filter = acceptable_filter.filter(F.col("ks_statistic") <= ks_threshold)
+            # Only filter by A-D if values exist
+            if summary_dict["min_ad"] is not None:
+                acceptable_filter = acceptable_filter.filter(
+                    (F.col("ad_statistic").isNull()) | (F.col("ad_statistic") <= ad_threshold)
+                )
+            n_acceptable = acceptable_filter.count()
+        else:
+            # pandas DataFrame
+            acceptable = self._df[(self._df["pvalue"] >= pvalue_threshold) & (self._df["ks_statistic"] <= ks_threshold)]
+            if summary_dict["min_ad"] is not None:
+                acceptable = acceptable[
+                    acceptable["ad_statistic"].isna() | (acceptable["ad_statistic"] <= ad_threshold)
+                ]
+            n_acceptable = len(acceptable)
 
         # Generate warnings
         if top_fits:

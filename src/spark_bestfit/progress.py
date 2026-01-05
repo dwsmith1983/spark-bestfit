@@ -17,7 +17,14 @@ import threading
 import time
 from typing import Callable, Optional
 
-from pyspark.sql import SparkSession
+# PySpark is optional - only import if available
+try:
+    from pyspark.sql import SparkSession
+
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    SparkSession = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 from spark_bestfit.utils import get_spark_session
 

@@ -1,15 +1,31 @@
 """Distribution fitting using Pandas UDFs for efficient parallel processing."""
 
+from __future__ import annotations
+
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import scipy.stats as st
-from pyspark import Broadcast
-from pyspark.sql.functions import pandas_udf
-from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
 from scipy.stats import rv_continuous
+
+# PySpark is optional - only import if available
+try:
+    from pyspark import Broadcast
+    from pyspark.sql.functions import pandas_udf
+    from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
+
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    Broadcast = None  # type: ignore[assignment,misc]
+    pandas_udf = None  # type: ignore[assignment,misc]
+    ArrayType = None  # type: ignore[assignment,misc]
+    FloatType = None  # type: ignore[assignment,misc]
+    StringType = None  # type: ignore[assignment,misc]
+    StructField = None  # type: ignore[assignment,misc]
+    StructType = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 # Constant for fitting sample size
 FITTING_SAMPLE_SIZE: int = 10_000  # Most scipy distributions fit well with 10k samples
@@ -24,31 +40,34 @@ AD_PVALUE_DISTRIBUTIONS: Dict[str, str] = {
     "gumbel_l": "gumbel_l",
 }
 
-# Define output schema for Pandas UDF
+# Define output schema for Pandas UDF (only if PySpark is available)
 # Note: Pandas infers all columns as nullable, so we match that here
-FIT_RESULT_SCHEMA = StructType(
-    [
-        StructField("column_name", StringType(), True),  # Column being fitted
-        StructField("distribution", StringType(), True),
-        StructField("parameters", ArrayType(FloatType()), True),
-        StructField("sse", FloatType(), True),
-        StructField("aic", FloatType(), True),
-        StructField("bic", FloatType(), True),
-        StructField("ks_statistic", FloatType(), True),
-        StructField("pvalue", FloatType(), True),
-        StructField("ad_statistic", FloatType(), True),
-        StructField("ad_pvalue", FloatType(), True),
-        # Flat data summary columns for provenance (v2.0: replaced MapType for ~20% perf)
-        StructField("data_min", FloatType(), True),
-        StructField("data_max", FloatType(), True),
-        StructField("data_mean", FloatType(), True),
-        StructField("data_stddev", FloatType(), True),
-        StructField("data_count", FloatType(), True),
-        # Bounds for truncated distribution fitting (v1.4.0)
-        StructField("lower_bound", FloatType(), True),
-        StructField("upper_bound", FloatType(), True),
-    ]
-)
+if _PYSPARK_AVAILABLE:
+    FIT_RESULT_SCHEMA = StructType(
+        [
+            StructField("column_name", StringType(), True),  # Column being fitted
+            StructField("distribution", StringType(), True),
+            StructField("parameters", ArrayType(FloatType()), True),
+            StructField("sse", FloatType(), True),
+            StructField("aic", FloatType(), True),
+            StructField("bic", FloatType(), True),
+            StructField("ks_statistic", FloatType(), True),
+            StructField("pvalue", FloatType(), True),
+            StructField("ad_statistic", FloatType(), True),
+            StructField("ad_pvalue", FloatType(), True),
+            # Flat data summary columns for provenance (v2.0: replaced MapType for ~20% perf)
+            StructField("data_min", FloatType(), True),
+            StructField("data_max", FloatType(), True),
+            StructField("data_mean", FloatType(), True),
+            StructField("data_stddev", FloatType(), True),
+            StructField("data_count", FloatType(), True),
+            # Bounds for truncated distribution fitting (v1.4.0)
+            StructField("lower_bound", FloatType(), True),
+            StructField("upper_bound", FloatType(), True),
+        ]
+    )
+else:
+    FIT_RESULT_SCHEMA = None  # type: ignore[assignment]
 
 
 def compute_data_stats(data: np.ndarray) -> Dict[str, float]:

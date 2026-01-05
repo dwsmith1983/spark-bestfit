@@ -25,7 +25,14 @@ Example:
 
 from spark_bestfit._version import __version__
 from spark_bestfit.backends.local import LocalBackend
-from spark_bestfit.backends.spark import SparkBackend
+
+# Conditional Spark import (only if pyspark is installed)
+try:
+    from spark_bestfit.backends.spark import SparkBackend  # noqa: F401
+
+    _SPARK_AVAILABLE = True
+except ImportError:
+    _SPARK_AVAILABLE = False
 
 # Conditional Ray import (only if ray is installed)
 try:
@@ -59,9 +66,8 @@ __all__ = [
     "GaussianCopula",
     # Backends (v2.0)
     "ExecutionBackend",
-    "SparkBackend",
     "LocalBackend",
-    # RayBackend added conditionally below
+    # SparkBackend and RayBackend added conditionally below
     # Progress tracking
     "ProgressTracker",
     "ProgressCallback",
@@ -84,6 +90,10 @@ __all__ = [
     # Version
     "__version__",
 ]
+
+# Conditionally add SparkBackend to exports if pyspark is installed
+if _SPARK_AVAILABLE:
+    __all__.append("SparkBackend")
 
 # Conditionally add RayBackend to exports if ray is installed
 if _RAY_AVAILABLE:

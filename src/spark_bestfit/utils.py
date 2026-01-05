@@ -2,10 +2,17 @@
 
 from typing import Optional
 
-from pyspark.sql import SparkSession
+# PySpark is optional - only import if available
+try:
+    from pyspark.sql import SparkSession
+
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    SparkSession = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 
-def get_spark_session(spark: Optional[SparkSession] = None) -> SparkSession:
+def get_spark_session(spark: Optional["SparkSession"] = None) -> "SparkSession":
     """Get or create a SparkSession.
 
     If a SparkSession is provided, it is returned as-is.
@@ -28,6 +35,13 @@ def get_spark_session(spark: Optional[SparkSession] = None) -> SparkSession:
         >>> # Use active session
         >>> session = get_spark_session()  # Gets active session
     """
+    if not _PYSPARK_AVAILABLE:
+        raise ImportError(
+            "PySpark is required but not installed. "
+            "Install with: pip install spark-bestfit[spark]\n"
+            "Or use a non-Spark backend: LocalBackend() or RayBackend()"
+        )
+
     if spark is not None:
         return spark
 
