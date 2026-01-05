@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v2.0.1 (2026-01-05)
+
+### Bug Fixes
+
+- Add matplotlib to test dependencies for CI
+  ([`82fad83`](https://github.com/dwsmith1983/spark-bestfit/commit/82fad838ffc0ccdebd5528a0e062d0017148e932))
+
+- Add matplotlib to test-base for CI
+  ([`82fad83`](https://github.com/dwsmith1983/spark-bestfit/commit/82fad838ffc0ccdebd5528a0e062d0017148e932))
+
+
 ## v2.0.0 (2026-01-04)
 
 ### Bug Fixes
