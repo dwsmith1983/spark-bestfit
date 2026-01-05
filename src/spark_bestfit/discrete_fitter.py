@@ -4,10 +4,9 @@ import logging
 from functools import reduce
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
-import pyspark.sql.functions as F
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.types import NumericType
 
+from spark_bestfit.base_fitter import BaseFitter
 from spark_bestfit.discrete_fitting import (
     DISCRETE_FIT_RESULT_SCHEMA,
     compute_discrete_histogram,
@@ -17,7 +16,6 @@ from spark_bestfit.discrete_fitting import (
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_stats
 from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
-from spark_bestfit.utils import get_spark_session
 
 if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
@@ -28,7 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS: Tuple[str, ...] = tuple(DiscreteDistributionRegistry.DEFAULT_EXCLUSIONS)
 
 
-class DiscreteDistributionFitter:
+class DiscreteDistributionFitter(BaseFitter):
     """Spark distribution fitting engine for discrete (count) data.
 
     Efficiently fits scipy.stats discrete distributions to integer data using
@@ -61,6 +59,10 @@ class DiscreteDistributionFitter:
         >>> print(f"Best: {best.distribution} (AIC={best.aic:.2f})")
     """
 
+    # Class attributes for BaseFitter
+    _registry_class = DiscreteDistributionRegistry
+    _default_exclusions = DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
+
     def __init__(
         self,
         spark: Optional[SparkSession] = None,
@@ -84,32 +86,12 @@ class DiscreteDistributionFitter:
         Raises:
             RuntimeError: If no SparkSession provided and no active session exists
         """
-        # Initialize backend (lazy import to avoid circular dependency)
-        if backend is not None:
-            self._backend = backend
-            # Extract SparkSession from SparkBackend if available
-            if hasattr(backend, "spark"):
-                self.spark = backend.spark
-            else:
-                # For non-Spark backends (LocalBackend, RayBackend), no SparkSession needed
-                self.spark = None
-        else:
-            self.spark = get_spark_session(spark)
-            # Lazy import to avoid circular dependency
-            from spark_bestfit.backends.spark import SparkBackend
-
-            self._backend = SparkBackend(self.spark)
-
-        self.excluded_distributions = (
-            excluded_distributions if excluded_distributions is not None else DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS
+        super().__init__(
+            spark=spark,
+            excluded_distributions=excluded_distributions,
+            random_seed=random_seed,
+            backend=backend,
         )
-        self.random_seed = random_seed
-        # When excluded_distributions=() is explicitly passed, disable registry's
-        # default exclusions so ALL scipy discrete distributions are available
-        if excluded_distributions == ():
-            self._registry = DiscreteDistributionRegistry(custom_exclusions=set())
-        else:
-            self._registry = DiscreteDistributionRegistry()
 
     def fit(
         self,
@@ -193,14 +175,8 @@ class DiscreteDistributionFitter:
             >>> results = fitter.fit(df, 'counts', lazy_metrics=True)
             >>> best_aic = results.best(n=1, metric='aic')[0]  # Fast, no KS computed
         """
-        # Validate column/columns parameters
-        if column is None and columns is None:
-            raise ValueError("Must provide either 'column' or 'columns' parameter")
-        if column is not None and columns is not None:
-            raise ValueError("Cannot provide both 'column' and 'columns' - use one or the other")
-
-        # Normalize to list of columns
-        target_columns = [column] if column is not None else columns
+        # Normalize column/columns to list
+        target_columns = self._normalize_columns(column, columns)
 
         # Input validation for all columns
         for col in target_columns:
@@ -214,14 +190,7 @@ class DiscreteDistributionFitter:
         self._validate_bounds(lower_bound, upper_bound, target_columns)
 
         # Get row count (single operation for all columns)
-        # Handle Spark DataFrame, Ray Dataset, and pandas DataFrame
-        if hasattr(df, "sparkSession"):
-            row_count = df.count()
-        elif hasattr(df, "select_columns") and hasattr(df, "count"):
-            # Ray Dataset - use count() method
-            row_count = df.count()
-        else:
-            row_count = len(df)
+        row_count = self._get_row_count(df)
         if row_count == 0:
             raise ValueError("DataFrame is empty")
         logger.info(f"Row count: {row_count}")
@@ -403,224 +372,16 @@ class DiscreteDistributionFitter:
                 or sample_fraction out of range
             TypeError: If column is not numeric
         """
-        if max_distributions == 0:
-            raise ValueError("max_distributions cannot be 0")
+        # Use base class validation methods (no bins for discrete)
+        BaseFitter._validate_max_distributions(max_distributions)
+        BaseFitter._validate_column_exists(df, column)
+        BaseFitter._validate_column_numeric(df, column)
+        BaseFitter._validate_sample_fraction(sample_fraction)
 
-        # Get columns list - handle Spark, pandas, and Ray Dataset
-        if hasattr(df, "select_columns") and hasattr(df, "schema"):
-            # Ray Dataset - use schema() method to get column names
-            columns_list = df.schema().names
-        elif hasattr(df, "schema") and hasattr(df.schema, "__iter__"):
-            # Spark DataFrame
-            columns_list = df.columns
-        else:
-            # pandas DataFrame (or similar)
-            columns_list = list(df.columns)
-
-        if column not in columns_list:
-            raise ValueError(f"Column '{column}' not found in DataFrame. Available columns: {columns_list}")
-
-        # Handle type checking for Spark, pandas, and Ray Dataset
-        if hasattr(df, "select_columns") and hasattr(df, "schema"):
-            # Ray Dataset - check schema for numeric type
-            schema = df.schema()
-            col_idx = schema.names.index(column)
-            col_type = schema.types[col_idx]
-            # Ray DataType has string repr like 'double', 'int64', etc.
-            type_str = str(col_type).lower()
-            numeric_types = ("int", "float", "double", "decimal")
-            if not any(t in type_str for t in numeric_types):
-                raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
-        elif hasattr(df, "schema") and hasattr(df.schema, "__getitem__"):
-            # Spark DataFrame
-            col_type = df.schema[column].dataType
-            if not isinstance(col_type, NumericType):
-                raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
-        else:
-            # pandas DataFrame (or similar)
-            import pandas as pd
-
-            if hasattr(df, "dtypes"):
-                col_dtype = df[column].dtype
-                if not pd.api.types.is_numeric_dtype(col_dtype):
-                    raise TypeError(f"Column '{column}' must be numeric, got {col_dtype}")
-
-        if sample_fraction is not None and not 0.0 < sample_fraction <= 1.0:
-            raise ValueError(f"sample_fraction must be in (0, 1], got {sample_fraction}")
-
-    @staticmethod
-    def _validate_bounds(
-        lower_bound: Optional[Union[float, Dict[str, float]]],
-        upper_bound: Optional[Union[float, Dict[str, float]]],
-        target_columns: List[str],
-    ) -> None:
-        """Validate bounds parameters.
-
-        Args:
-            lower_bound: Scalar or dict of lower bounds
-            upper_bound: Scalar or dict of upper bounds
-            target_columns: List of columns being fitted
-
-        Raises:
-            ValueError: If bounds are invalid (lower >= upper, unknown columns in dict)
-        """
-        # Validate scalar bounds
-        if isinstance(lower_bound, (int, float)) and isinstance(upper_bound, (int, float)):
-            if lower_bound >= upper_bound:
-                raise ValueError(f"lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})")
-            return
-
-        # Validate dict bounds - check for unknown columns
-        if isinstance(lower_bound, dict):
-            unknown = set(lower_bound.keys()) - set(target_columns)
-            if unknown:
-                raise ValueError(f"lower_bound contains unknown columns: {unknown}. Valid columns: {target_columns}")
-
-        if isinstance(upper_bound, dict):
-            unknown = set(upper_bound.keys()) - set(target_columns)
-            if unknown:
-                raise ValueError(f"upper_bound contains unknown columns: {unknown}. Valid columns: {target_columns}")
-
-        # Validate that lower < upper for each column where both are specified
-        lower_dict = lower_bound if isinstance(lower_bound, dict) else {}
-        upper_dict = upper_bound if isinstance(upper_bound, dict) else {}
-
-        for col in target_columns:
-            col_lower = lower_dict.get(col) if isinstance(lower_bound, dict) else lower_bound
-            col_upper = upper_dict.get(col) if isinstance(upper_bound, dict) else upper_bound
-            if col_lower is not None and col_upper is not None:
-                if col_lower >= col_upper:
-                    raise ValueError(
-                        f"lower_bound ({col_lower}) must be less than upper_bound ({col_upper}) for column '{col}'"
-                    )
-
-    @staticmethod
-    def _resolve_bounds(
-        df: DataFrame,
-        target_columns: List[str],
-        lower_bound: Optional[Union[float, Dict[str, float]]],
-        upper_bound: Optional[Union[float, Dict[str, float]]],
-    ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
-        """Resolve bounds to per-column dict, auto-detecting from data where needed.
-
-        Args:
-            df: DataFrame containing data
-            target_columns: List of columns being fitted
-            lower_bound: Scalar, dict, or None
-            upper_bound: Scalar, dict, or None
-
-        Returns:
-            Dict mapping column name to (lower, upper) tuple
-        """
-        # Determine which columns need auto-detection
-        lower_dict = lower_bound if isinstance(lower_bound, dict) else {}
-        upper_dict = upper_bound if isinstance(upper_bound, dict) else {}
-
-        cols_need_lower = [
-            col for col in target_columns if not isinstance(lower_bound, (int, float)) and col not in lower_dict
-        ]
-        cols_need_upper = [
-            col for col in target_columns if not isinstance(upper_bound, (int, float)) and col not in upper_dict
-        ]
-
-        # Build aggregation expressions for auto-detection
-        agg_exprs = []
-        for col in cols_need_lower:
-            agg_exprs.append(F.min(col).alias(f"min_{col}"))
-        for col in cols_need_upper:
-            agg_exprs.append(F.max(col).alias(f"max_{col}"))
-
-        # Execute single aggregation for all needed bounds
-        auto_bounds: Dict[str, float] = {}
-        if agg_exprs:
-            bounds_row = df.agg(*agg_exprs).first()
-            for col in cols_need_lower:
-                auto_bounds[f"min_{col}"] = float(bounds_row[f"min_{col}"])
-            for col in cols_need_upper:
-                auto_bounds[f"max_{col}"] = float(bounds_row[f"max_{col}"])
-
-        # Build final per-column bounds dict
-        result: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
-        for col in target_columns:
-            # Determine lower bound for this column
-            if isinstance(lower_bound, (int, float)):
-                col_lower = float(lower_bound)
-            elif isinstance(lower_bound, dict) and col in lower_bound:
-                col_lower = float(lower_bound[col])
-            else:
-                col_lower = auto_bounds.get(f"min_{col}")
-
-            # Determine upper bound for this column
-            if isinstance(upper_bound, (int, float)):
-                col_upper = float(upper_bound)
-            elif isinstance(upper_bound, dict) and col in upper_bound:
-                col_upper = float(upper_bound[col])
-            else:
-                col_upper = auto_bounds.get(f"max_{col}")
-
-            result[col] = (col_lower, col_upper)
-            logger.info(f"Bounded fitting for '{col}': bounds=[{col_lower}, {col_upper}]")
-
-        return result
-
-    def _apply_sampling(
-        self,
-        df: DataFrame,
-        row_count: int,
-        enable_sampling: bool,
-        sample_fraction: Optional[float],
-        max_sample_size: int,
-        sample_threshold: int,
-    ) -> DataFrame:
-        """Apply sampling to DataFrame if dataset exceeds threshold.
-
-        Args:
-            df: Spark DataFrame to sample
-            row_count: Total row count of DataFrame
-            enable_sampling: Whether sampling is enabled
-            sample_fraction: Explicit fraction to sample (None = auto-determine)
-            max_sample_size: Maximum rows when auto-determining fraction
-            sample_threshold: Row count above which sampling is applied
-
-        Returns:
-            Original DataFrame if no sampling needed, otherwise sampled DataFrame
-        """
-        if not enable_sampling or row_count <= sample_threshold:
-            return df
-
-        if sample_fraction is not None:
-            fraction = sample_fraction
-        else:
-            fraction = min(max_sample_size / row_count, 0.35)
-
-        logger.info(f"Sampling {fraction * 100:.1f}% of data ({int(row_count * fraction)} rows)")
-        # Handle both Spark and pandas DataFrames
-        if hasattr(df, "sparkSession"):
-            return df.sample(fraction=fraction, seed=self.random_seed)
-        else:
-            # pandas DataFrame
-            return df.sample(frac=fraction, random_state=self.random_seed)
-
-    def _calculate_partitions(self, distributions: List[str]) -> int:
-        """Calculate optimal Spark partition count for distribution fitting.
-
-        Uses distribution-aware weighting: slow distributions count 3x to ensure
-        adequate parallelism when fitting computationally expensive distributions.
-
-        Args:
-            distributions: List of distribution names to fit
-
-        Returns:
-            Optimal partition count for the fitting operation
-        """
-        from spark_bestfit.distributions import DistributionRegistry
-
-        slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
-        slow_count = sum(1 for d in distributions if d in slow_set)
-        # Slow distributions count 3x (1 base + 2 extra)
-        effective_count = len(distributions) + slow_count * 2
-        total_cores = self._backend.get_parallelism()
-        return min(effective_count, total_cores * 2)
+    # _validate_bounds inherited from BaseFitter
+    # _resolve_bounds inherited from BaseFitter
+    # _apply_sampling inherited from BaseFitter
+    # _calculate_partitions inherited from BaseFitter
 
     def plot(
         self,
