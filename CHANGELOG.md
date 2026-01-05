@@ -2,6 +2,56 @@
 
 <!-- version list -->
 
+## v2.0.2 (2026-01-05)
+
+### Bug Fixes
+
+- Add pyarrow back for Ray tests (required by ray.data)
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Add pyarrow to ray optional dependency (required by ray.data)
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Handle NaN/inf values and empty results in distribution fitting
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Make PySpark optional in continuous_fitter, discrete_fitter, utils
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Make PySpark optional in progress.py ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Make SparkBackend import conditional for Ray-only environments
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Remove pyarrow from Ray test matrix (not needed)
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Use future annotations to defer Broadcast type evaluation
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+### Refactoring
+
+- BaseFitter extraction, numerical stability, LazyMetrics lifecycle
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Extract BaseFitter base class to eliminate code duplication
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+- Make PySpark truly optional for Ray/Local backends
+  ([#89](https://github.com/dwsmith1983/spark-bestfit/pull/89),
+  [`e3124f3`](https://github.com/dwsmith1983/spark-bestfit/commit/e3124f3618743abb0e66246716cdcdd2034d269a))
+
+
 ## v2.0.1 (2026-01-05)
 
 ### Bug Fixes
