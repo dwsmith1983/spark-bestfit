@@ -27,9 +27,16 @@ For Ray clusters:
 """
 
 from spark_bestfit.backends.local import LocalBackend
-from spark_bestfit.backends.spark import SparkBackend
 
-__all__ = ["SparkBackend", "LocalBackend"]
+__all__ = ["LocalBackend"]
+
+# Conditional Spark import (only if pyspark is installed)
+try:
+    from spark_bestfit.backends.spark import SparkBackend  # noqa: F401
+
+    __all__.append("SparkBackend")
+except ImportError:
+    pass  # PySpark not installed, SparkBackend not available
 
 # Conditional Ray import (only if ray is installed)
 try:
