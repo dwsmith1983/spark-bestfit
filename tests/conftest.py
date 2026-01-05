@@ -2,7 +2,15 @@
 
 import numpy as np
 import pytest
-from pyspark.sql import SparkSession
+
+# PySpark is optional - only import if available (supports Ray-only testing)
+try:
+    from pyspark.sql import SparkSession
+
+    PYSPARK_AVAILABLE = True
+except ImportError:
+    PYSPARK_AVAILABLE = False
+    SparkSession = None  # type: ignore
 
 
 @pytest.fixture(scope="session")
@@ -10,7 +18,11 @@ def spark_session():
     """Create a Spark session for testing.
 
     Scope: session - reuse across all tests for performance.
+    Skips if PySpark is not installed.
     """
+    if not PYSPARK_AVAILABLE:
+        pytest.skip("PySpark not installed")
+
     spark = (
         SparkSession.builder.appName("spark-bestfit-tests")
         .master("local[2]")
