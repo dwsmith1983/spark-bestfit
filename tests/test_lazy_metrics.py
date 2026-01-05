@@ -546,3 +546,79 @@ class TestFitResultsUnpersist:
 
         # Chain materialize() and unpersist()
         results.materialize().unpersist()
+
+
+class TestLazyMetricsLifecycle:
+    """Tests for LazyMetrics DataFrame lifecycle error handling.
+
+    When lazy_metrics=True, the FitResults holds a reference to the source
+    DataFrame. If that DataFrame becomes unavailable (unpersisted, deleted,
+    corrupted), accessing lazy metrics should raise a clear RuntimeError.
+    """
+
+    def test_invalid_source_df_raises_runtime_error(self, spark, sample_df):
+        """Accessing lazy metrics with invalid source_df raises RuntimeError."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
+
+        # Verify lazy context exists
+        assert results.is_lazy
+
+        # Corrupt the source_df reference in the lazy context
+        # This simulates what happens when the DataFrame is unavailable
+        for context in results._lazy_contexts.values():
+            context.source_df = None  # Invalidate the reference
+
+        # Attempting to compute lazy metrics should raise RuntimeError
+        with pytest.raises(RuntimeError, match="Failed to recreate sample"):
+            results.best(n=1, metric="ks_statistic")
+
+    def test_invalid_source_df_error_message_helpful(self, spark, sample_df):
+        """RuntimeError message includes guidance about materialize()."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
+
+        # Corrupt the source_df reference
+        for context in results._lazy_contexts.values():
+            context.source_df = None
+
+        # Error message should mention materialize() as the solution
+        with pytest.raises(RuntimeError, match="materialize.*before unpersisting"):
+            results.best(n=1, metric="ks_statistic")
+
+    def test_materialize_before_invalidation_succeeds(self, spark, sample_df):
+        """Materializing before source_df invalidation preserves metrics."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
+
+        # Materialize while source_df is still valid
+        materialized = results.materialize()
+
+        # Now corrupt the original results' source_df
+        for context in results._lazy_contexts.values():
+            context.source_df = None
+
+        # Materialized results should still work (no lazy context)
+        assert not materialized.is_lazy
+        best = materialized.best(n=1, metric="ks_statistic")
+        assert len(best) == 1
+        assert best[0].ks_statistic is not None
+
+    def test_non_ks_metrics_work_without_source_df(self, spark, sample_df):
+        """Non-lazy metrics (SSE, AIC, BIC) work even with invalid source_df."""
+        fitter = DistributionFitter(spark)
+        results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
+
+        # Corrupt the source_df reference
+        for context in results._lazy_contexts.values():
+            context.source_df = None
+
+        # SSE, AIC, BIC are computed during fit, not lazily
+        # These should still work
+        best_sse = results.best(n=1, metric="sse")
+        assert len(best_sse) == 1
+        assert best_sse[0].sse is not None
+
+        best_aic = results.best(n=1, metric="aic")
+        assert len(best_aic) == 1
+        assert best_aic[0].aic is not None
