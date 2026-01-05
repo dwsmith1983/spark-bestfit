@@ -9,8 +9,15 @@ on:
 jobs:
   # Detect which paths changed to conditionally run jobs
   changes:
-    # Skip release commits - they only update version/changelog, already tested via PR
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    # Skip on push to main if:
+    # 1. Release commits (chore(release):) - only update version/changelog
+    # 2. PR merge commits (contain '(#') - already tested in PR
+    if: |
+      github.event_name == 'pull_request' ||
+      (
+        !startsWith(github.event.head_commit.message, 'chore(release):') &&
+        !contains(github.event.head_commit.message, '(#')
+      )
     runs-on: ubuntu-latest
     outputs:
       src: ${{ steps.filter.outputs.src }}
@@ -35,7 +42,13 @@ jobs:
               - 'pyproject.toml'
 
   pre-commit:
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    # Same skip logic as changes job
+    if: |
+      github.event_name == 'pull_request' ||
+      (
+        !startsWith(github.event.head_commit.message, 'chore(release):') &&
+        !contains(github.event.head_commit.message, '(#')
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
