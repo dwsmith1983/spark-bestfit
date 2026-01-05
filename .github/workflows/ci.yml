@@ -117,8 +117,8 @@ jobs:
       - name: Run tests
         run: |
           if [ "${{ matrix.ray }}" = "true" ]; then
-            # Ray job: only run Ray-specific tests (faster)
-            pytest tests/test_ray_backend.py -v
+            # Ray job: only run Ray-specific tests (faster, disable pytest-spark plugin)
+            pytest tests/test_ray_backend.py -v -p no:spark
           else
             # Standard jobs: full test suite with coverage
             pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=75 -v
