@@ -83,12 +83,11 @@ jobs:
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
-          # Ray backend testing (without PySpark to verify optional dependency)
+          # Ray backend testing (without PySpark/PyArrow to verify optional dependency)
           - python-version: "3.12"
             spark-version: "ray-only"
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
-            pyarrow: "pyarrow>=17.0.0,<19.0.0"
             extra-deps: "ray[default]>=2.9.0,<3.0.0"
             ray: true
 
@@ -101,7 +100,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[test-base]"
-          pip install "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}"
+          pip install "${{ matrix.numpy }}" "${{ matrix.pandas }}"
+          if [ -n "${{ matrix.pyarrow }}" ]; then pip install "${{ matrix.pyarrow }}"; fi
           if [ -n "${{ matrix.pyspark }}" ]; then pip install "${{ matrix.pyspark }}"; fi
           if [ -n "${{ matrix.extra-deps }}" ]; then pip install "${{ matrix.extra-deps }}"; fi
       - name: Show installed versions
@@ -109,7 +109,7 @@ jobs:
           python -c "import pyspark; print(f'PySpark: {pyspark.__version__}')" 2>/dev/null || echo "PySpark: not installed"
           python -c "import numpy; print(f'NumPy: {numpy.__version__}')"
           python -c "import pandas; print(f'Pandas: {pandas.__version__}')"
-          python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')"
+          python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')" 2>/dev/null || echo "PyArrow: not installed"
           python -c "import ray; print(f'Ray: {ray.__version__}')" 2>/dev/null || echo "Ray: not installed"
       - name: Run tests
         run: |
