@@ -319,6 +319,36 @@ class DistributionFitter(BaseFitter):
         # Create fitting sample
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
 
+        # Handle empty sample (all NaN/inf data filtered out)
+        if len(data_sample) == 0:
+            logger.warning(f"  No valid data for '{column}' after filtering NaN/inf values")
+            import pandas as pd
+
+            if self.spark is not None:
+                return self.spark.createDataFrame([], schema=FIT_RESULT_SCHEMA)
+            else:
+                return pd.DataFrame(
+                    columns=[
+                        "column_name",
+                        "distribution",
+                        "parameters",
+                        "sse",
+                        "aic",
+                        "bic",
+                        "ks_statistic",
+                        "pvalue",
+                        "ad_statistic",
+                        "ad_pvalue",
+                        "data_min",
+                        "data_max",
+                        "data_mean",
+                        "data_stddev",
+                        "data_count",
+                        "lower_bound",
+                        "upper_bound",
+                    ]
+                )
+
         # Apply pre-filtering if enabled (v1.6.0)
         original_distributions = distributions
         original_count = len(distributions)
@@ -375,7 +405,31 @@ class DistributionFitter(BaseFitter):
             # Non-Spark backend: use pandas DataFrame
             import pandas as pd
 
-            results_df = pd.DataFrame(results) if results else pd.DataFrame()
+            if results:
+                results_df = pd.DataFrame(results)
+            else:
+                # Create empty DataFrame with proper schema to preserve API contract
+                results_df = pd.DataFrame(
+                    columns=[
+                        "column_name",
+                        "distribution",
+                        "parameters",
+                        "sse",
+                        "aic",
+                        "bic",
+                        "ks_statistic",
+                        "pvalue",
+                        "ad_statistic",
+                        "ad_pvalue",
+                        "data_min",
+                        "data_max",
+                        "data_mean",
+                        "data_stddev",
+                        "data_count",
+                        "lower_bound",
+                        "upper_bound",
+                    ]
+                )
 
         num_results = len(results)
         logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")

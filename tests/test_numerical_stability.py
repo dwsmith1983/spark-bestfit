@@ -83,16 +83,8 @@ def clean_poisson_data():
 
 
 class TestNaNHandling:
-    """Test NaN handling at different contamination levels.
+    """Test NaN handling at different contamination levels."""
 
-    KNOWN ISSUE: LocalBackend continuous fitter returns empty DataFrame with
-    no columns when data contains NaN. This breaks the FitResults.best() method.
-    These tests document the current (broken) behavior as xfail.
-    """
-
-    @pytest.mark.xfail(
-        reason="BUG: LocalBackend continuous fitter returns empty DataFrame with NaN data"
-    )
     @pytest.mark.parametrize("nan_fraction", [0.01, 0.10, 0.50])
     def test_continuous_fit_with_nan_fraction(self, continuous_fitter, clean_normal_data, nan_fraction):
         """Continuous fitter should handle NaN at various contamination levels."""
@@ -110,23 +102,16 @@ class TestNaNHandling:
         # Should have results (NaN-filtered data still has valid values)
         assert len(results.best(n=1, metric="aic")) > 0
 
-    @pytest.mark.xfail(
-        reason="BUG: LocalBackend continuous fitter returns empty DataFrame with NaN data"
-    )
-    def test_continuous_fit_all_nan_behavior(self, continuous_fitter):
-        """Fitting 100% NaN data should raise error or return empty results."""
+    def test_continuous_fit_all_nan_returns_empty(self, continuous_fitter):
+        """Fitting 100% NaN data should return empty results with proper schema."""
         data = np.array([np.nan] * 100)
         df = pd.DataFrame({"value": data})
 
-        # Either raises or returns empty results - both are acceptable
-        try:
-            results = continuous_fitter.fit(df, column="value", max_distributions=1)
-            # If no exception, should have no valid results
-            all_results = results.best(n=100, metric="aic")
-            # Empty or all-NaN results are acceptable
-            assert len(all_results) == 0 or all(r.aic is None or not np.isfinite(r.aic) for r in all_results)
-        except (ValueError, RuntimeError):
-            pass  # Raising is also acceptable
+        results = continuous_fitter.fit(df, column="value", max_distributions=1)
+
+        # Should have empty results with proper schema (columns exist)
+        assert len(results._df.columns) > 0
+        assert len(results.best(n=1, metric="aic")) == 0
 
     @pytest.mark.parametrize("nan_fraction", [0.01, 0.10, 0.50])
     def test_discrete_fit_with_nan_fraction(self, discrete_fitter, clean_poisson_data, nan_fraction):
@@ -142,21 +127,16 @@ class TestNaNHandling:
         results = discrete_fitter.fit(df, column="counts", max_distributions=3)
         assert len(results.best(n=1, metric="aic")) > 0
 
-    @pytest.mark.xfail(
-        reason="BUG: Discrete fitter produces valid-looking results for 100% NaN data"
-    )
-    def test_discrete_fit_all_nan_behavior(self, discrete_fitter):
-        """Fitting 100% NaN discrete data should raise error or return empty."""
+    def test_discrete_fit_all_nan_returns_empty(self, discrete_fitter):
+        """Fitting 100% NaN discrete data should return empty results with proper schema."""
         data = np.array([np.nan] * 100)
         df = pd.DataFrame({"counts": data})
 
-        # Either raises or returns empty results
-        try:
-            results = discrete_fitter.fit(df, column="counts", max_distributions=1)
-            all_results = results.best(n=100, metric="aic")
-            assert len(all_results) == 0 or all(r.aic is None or not np.isfinite(r.aic) for r in all_results)
-        except (ValueError, RuntimeError):
-            pass
+        results = discrete_fitter.fit(df, column="counts", max_distributions=1)
+
+        # Should have empty results with proper schema (columns exist)
+        assert len(results._df.columns) > 0
+        assert len(results.best(n=1, metric="aic")) == 0
 
 
 # =============================================================================
@@ -165,52 +145,35 @@ class TestNaNHandling:
 
 
 class TestInfHandling:
-    """Test handling of infinite values.
+    """Test handling of infinite values."""
 
-    KNOWN ISSUE: Same as NaN handling - LocalBackend returns empty DataFrame
-    when data contains inf values, breaking FitResults.best().
-    """
-
-    @pytest.mark.xfail(
-        reason="BUG: LocalBackend continuous fitter returns empty DataFrame with inf data"
-    )
     def test_continuous_fit_with_positive_inf(self, continuous_fitter, clean_normal_data):
-        """Continuous fitter should handle positive infinity in data."""
+        """Continuous fitter should filter +inf and return valid results."""
         data = clean_normal_data.copy()
         data[0] = np.inf  # Single inf value
 
         df = pd.DataFrame({"value": data})
 
-        # Should either filter inf or raise meaningful error
-        try:
-            results = continuous_fitter.fit(df, column="value", max_distributions=3)
-            # If it succeeds, verify we can get results
-            best_list = results.best(n=1, metric="aic")
-            if len(best_list) > 0:
-                best = best_list[0]
-                assert best.aic is None or np.isfinite(best.aic)
-        except (ValueError, RuntimeError) as e:
-            # Acceptable to reject data with inf
-            pass
+        # Inf values are filtered, remaining data is fitted
+        results = continuous_fitter.fit(df, column="value", max_distributions=3)
+        best_list = results.best(n=1, metric="aic")
 
-    @pytest.mark.xfail(
-        reason="BUG: LocalBackend continuous fitter returns empty DataFrame with inf data"
-    )
+        # Should have results (inf filtered, 999 valid values remain)
+        assert len(best_list) > 0
+        assert np.isfinite(best_list[0].aic)
+
     def test_continuous_fit_with_negative_inf(self, continuous_fitter, clean_normal_data):
-        """Continuous fitter should handle negative infinity in data."""
+        """Continuous fitter should filter -inf and return valid results."""
         data = clean_normal_data.copy()
         data[0] = -np.inf
 
         df = pd.DataFrame({"value": data})
 
-        try:
-            results = continuous_fitter.fit(df, column="value", max_distributions=3)
-            best_list = results.best(n=1, metric="aic")
-            if len(best_list) > 0:
-                best = best_list[0]
-                assert best.aic is None or np.isfinite(best.aic)
-        except (ValueError, RuntimeError):
-            pass  # Acceptable to reject
+        results = continuous_fitter.fit(df, column="value", max_distributions=3)
+        best_list = results.best(n=1, metric="aic")
+
+        assert len(best_list) > 0
+        assert np.isfinite(best_list[0].aic)
 
     def test_continuous_fit_with_mixed_inf(self, continuous_fitter, clean_normal_data):
         """Continuous fitter should handle both +inf and -inf."""
@@ -598,11 +561,8 @@ class TestSingleDistributionFitEdgeCases:
 class TestMultiColumnEdgeCases:
     """Test multi-column fitting with edge cases."""
 
-    @pytest.mark.xfail(
-        reason="BUG: LocalBackend continuous fitter returns empty for column with NaN"
-    )
     def test_multi_column_one_has_nan(self, continuous_fitter):
-        """Multi-column fit where one column has NaN."""
+        """Multi-column fit where one column has NaN - NaN filtered per-column."""
         np.random.seed(42)
         df = pd.DataFrame({
             "clean": np.random.normal(50, 10, 100),
@@ -611,7 +571,7 @@ class TestMultiColumnEdgeCases:
 
         results = continuous_fitter.fit(df, columns=["clean", "with_nan"], max_distributions=2)
 
-        # Should get results for both columns
+        # Should get results for both columns (NaN filtered from with_nan)
         clean_results = results.for_column("clean")
         nan_results = results.for_column("with_nan")
 
@@ -634,3 +594,124 @@ class TestMultiColumnEdgeCases:
         # Parameters should reflect the different scales
         assert small_best.data_mean < 1e-3
         assert large_best.data_mean > 1e3
+
+
+# =============================================================================
+# Direct Unit Tests for New Branches
+# =============================================================================
+
+
+class TestLocalBackendNaNInfFiltering:
+    """Direct unit tests for LocalBackend.sample_column() NaN/inf filtering."""
+
+    def test_sample_column_all_nan_returns_empty_array(self, local_backend):
+        """sample_column with all NaN returns empty array."""
+        df = pd.DataFrame({"value": [np.nan] * 100})
+        result = local_backend.sample_column(df, "value", fraction=1.0, seed=42)
+        assert isinstance(result, np.ndarray)
+        assert len(result) == 0
+
+    def test_sample_column_all_inf_returns_empty_array(self, local_backend):
+        """sample_column with all inf values returns empty array."""
+        df = pd.DataFrame({"value": [np.inf] * 50 + [-np.inf] * 50})
+        result = local_backend.sample_column(df, "value", fraction=1.0, seed=42)
+        assert isinstance(result, np.ndarray)
+        assert len(result) == 0
+
+    def test_sample_column_mixed_nan_inf_returns_empty(self, local_backend):
+        """sample_column with mixed NaN and inf returns empty array."""
+        df = pd.DataFrame({"value": [np.nan, np.inf, -np.inf, np.nan]})
+        result = local_backend.sample_column(df, "value", fraction=1.0, seed=42)
+        assert len(result) == 0
+
+    def test_sample_column_filters_nan_keeps_valid(self, local_backend):
+        """sample_column filters NaN but keeps valid values."""
+        df = pd.DataFrame({"value": [1.0, np.nan, 2.0, np.nan, 3.0]})
+        result = local_backend.sample_column(df, "value", fraction=1.0, seed=42)
+        assert len(result) == 3  # Only valid values
+        assert not np.any(np.isnan(result))
+
+    def test_sample_column_filters_inf_keeps_valid(self, local_backend):
+        """sample_column filters inf but keeps valid values."""
+        df = pd.DataFrame({"value": [1.0, np.inf, 2.0, -np.inf, 3.0]})
+        result = local_backend.sample_column(df, "value", fraction=1.0, seed=42)
+        assert len(result) == 3  # Only valid values
+        assert not np.any(np.isinf(result))
+
+
+class TestLocalBackendParallelFitEmptyData:
+    """Direct unit tests for LocalBackend.parallel_fit() with empty data."""
+
+    def test_parallel_fit_empty_data_sample_returns_empty_list(self, local_backend):
+        """parallel_fit with empty data_sample returns empty list."""
+        from spark_bestfit.fitting import fit_single_distribution
+
+        # Empty data sample
+        result = local_backend.parallel_fit(
+            distributions=["norm", "expon"],
+            histogram=(np.array([1, 2, 3]), np.array([0.0, 1.0, 2.0, 3.0])),
+            data_sample=np.array([]),  # Empty!
+            fit_func=fit_single_distribution,
+            column_name="test",
+        )
+        assert result == []
+
+    def test_parallel_fit_nonempty_data_returns_results(self, local_backend):
+        """parallel_fit with valid data returns results."""
+        from spark_bestfit.fitting import fit_single_distribution
+
+        np.random.seed(42)
+        data = np.random.normal(50, 10, 100)
+        hist, bin_edges = np.histogram(data, bins=20, density=True)
+
+        result = local_backend.parallel_fit(
+            distributions=["norm"],
+            histogram=(hist, bin_edges),
+            data_sample=data,
+            fit_func=fit_single_distribution,
+            column_name="test",
+        )
+        assert len(result) == 1
+        assert result[0]["distribution"] == "norm"
+
+
+class TestFitterEmptySampleHandling:
+    """Direct tests for fitter empty sample path (schema preservation)."""
+
+    def test_continuous_fitter_empty_sample_has_schema(self, continuous_fitter):
+        """Continuous fitter preserves schema even with empty results."""
+        df = pd.DataFrame({"value": [np.nan] * 100})
+        results = continuous_fitter.fit(df, column="value", max_distributions=1)
+
+        # Check the internal DataFrame has proper schema
+        expected_columns = [
+            "column_name", "distribution", "parameters", "sse", "aic", "bic",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
+            "data_min", "data_max", "data_mean", "data_stddev", "data_count",
+            "lower_bound", "upper_bound",
+        ]
+        for col in expected_columns:
+            assert col in results._df.columns, f"Missing column: {col}"
+
+    def test_discrete_fitter_empty_sample_has_schema(self, discrete_fitter):
+        """Discrete fitter preserves schema even with empty results."""
+        df = pd.DataFrame({"counts": [np.nan] * 100})
+        results = discrete_fitter.fit(df, column="counts", max_distributions=1)
+
+        # Check the internal DataFrame has proper schema
+        expected_columns = [
+            "column_name", "distribution", "parameters", "sse", "aic", "bic",
+            "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
+            "data_min", "data_max", "data_mean", "data_stddev", "data_count",
+            "lower_bound", "upper_bound",
+        ]
+        for col in expected_columns:
+            assert col in results._df.columns, f"Missing column: {col}"
+
+    def test_continuous_fitter_all_inf_has_schema(self, continuous_fitter):
+        """Continuous fitter with all-inf data preserves schema."""
+        df = pd.DataFrame({"value": [np.inf] * 100})
+        results = continuous_fitter.fit(df, column="value", max_distributions=1)
+
+        assert len(results._df.columns) == 17
+        assert len(results.best(n=1, metric="aic")) == 0

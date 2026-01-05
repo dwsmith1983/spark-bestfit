@@ -297,9 +297,39 @@ class DiscreteDistributionFitter(BaseFitter):
         sample_size = min(FITTING_SAMPLE_SIZE, row_count)
         fraction = min(sample_size / row_count, 1.0)
         # Use backend's sample_column which handles both Spark and pandas
-        data_sample = self._backend.sample_column(df_sample, column, fraction=fraction, seed=self.random_seed).astype(
-            int
-        )
+        raw_sample = self._backend.sample_column(df_sample, column, fraction=fraction, seed=self.random_seed)
+
+        # Handle empty sample (all NaN/inf data filtered out)
+        if len(raw_sample) == 0:
+            logger.warning(f"  No valid data for '{column}' after filtering NaN/inf values")
+            import pandas as pd
+
+            if self.spark is not None:
+                return self.spark.createDataFrame([], schema=DISCRETE_FIT_RESULT_SCHEMA)
+            else:
+                return pd.DataFrame(
+                    columns=[
+                        "column_name",
+                        "distribution",
+                        "parameters",
+                        "sse",
+                        "aic",
+                        "bic",
+                        "ks_statistic",
+                        "pvalue",
+                        "ad_statistic",
+                        "ad_pvalue",
+                        "data_min",
+                        "data_max",
+                        "data_mean",
+                        "data_stddev",
+                        "data_count",
+                        "lower_bound",
+                        "upper_bound",
+                    ]
+                )
+
+        data_sample = raw_sample.astype(int)
         data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
         logger.info(f"  Data sample for '{column}': {len(data_sample)} values")
 
@@ -345,7 +375,31 @@ class DiscreteDistributionFitter(BaseFitter):
             # Non-Spark backend: use pandas DataFrame
             import pandas as pd
 
-            results_df = pd.DataFrame(results) if results else pd.DataFrame()
+            if results:
+                results_df = pd.DataFrame(results)
+            else:
+                # Create empty DataFrame with proper schema to preserve API contract
+                results_df = pd.DataFrame(
+                    columns=[
+                        "column_name",
+                        "distribution",
+                        "parameters",
+                        "sse",
+                        "aic",
+                        "bic",
+                        "ks_statistic",
+                        "pvalue",
+                        "ad_statistic",
+                        "ad_pvalue",
+                        "data_min",
+                        "data_max",
+                        "data_mean",
+                        "data_stddev",
+                        "data_count",
+                        "lower_bound",
+                        "upper_bound",
+                    ]
+                )
 
         num_results = len(results)
         logger.info(f"  Fit {num_results}/{len(distributions)} distributions for '{column}'")
