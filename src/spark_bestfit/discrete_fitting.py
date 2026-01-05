@@ -1,5 +1,7 @@
 """Discrete distribution fitting using MLE optimization and Pandas UDFs."""
 
+from __future__ import annotations
+
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
