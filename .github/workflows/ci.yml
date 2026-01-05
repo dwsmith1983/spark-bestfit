@@ -102,17 +102,27 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[test-base]"
-          pip install "${{ matrix.pyspark }}" "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}"
+          if [ "${{ matrix.ray }}" != "true" ]; then
+            # Standard jobs: install PySpark stack
+            pip install "${{ matrix.pyspark }}" "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}"
+          fi
           if [ -n "${{ matrix.extra-deps }}" ]; then pip install "${{ matrix.extra-deps }}"; fi
       - name: Show installed versions
         run: |
-          python -c "import pyspark; print(f'PySpark: {pyspark.__version__}')"
+          python -c "import pyspark; print(f'PySpark: {pyspark.__version__}')" 2>/dev/null || echo "PySpark: not installed"
           python -c "import numpy; print(f'NumPy: {numpy.__version__}')"
           python -c "import pandas; print(f'Pandas: {pandas.__version__}')"
-          python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')"
+          python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')" 2>/dev/null || echo "PyArrow: not installed"
           python -c "import ray; print(f'Ray: {ray.__version__}')" 2>/dev/null || echo "Ray: not installed"
       - name: Run tests
-        run: pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=75 -v
+        run: |
+          if [ "${{ matrix.ray }}" = "true" ]; then
+            # Ray job: only run Ray-specific tests (faster)
+            pytest tests/test_ray_backend.py -v
+          else
+            # Standard jobs: full test suite with coverage
+            pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=75 -v
+          fi
       - name: Upload coverage
         uses: codecov/codecov-action@v5
         if: matrix.python-version == '3.12' && matrix.spark-version == '4.x' && !matrix.ray
