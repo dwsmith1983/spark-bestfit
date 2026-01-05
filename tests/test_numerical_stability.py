@@ -209,7 +209,8 @@ class TestExtremeValues:
             # If successful, verify no inf in results
             assert np.all(np.isfinite(bin_edges))
             assert np.all(np.isfinite(hist_values))
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError, IndexError):
+            # IndexError occurs in NumPy 1.x due to integer overflow in histogram
             pass  # Acceptable to reject extreme values
 
     def test_histogram_with_small_values(self):

@@ -83,8 +83,17 @@ jobs:
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
+          # Ray backend testing (Spark 4.x + Ray)
+          - python-version: "3.12"
+            spark-version: "4.x"
+            pyspark: "pyspark>=4.0.0,<5.0.0"
+            numpy: "numpy>=2.0.0,<3.0.0"
+            pandas: "pandas>=2.2.0,<3.0.0"
+            pyarrow: "pyarrow>=17.0.0,<19.0.0"
+            extra-deps: "ray[default]>=2.9.0,<3.0.0"
+            ray: true
 
-    name: Test (Python ${{ matrix.python-version }}, Spark ${{ matrix.spark-version }})
+    name: Test (Python ${{ matrix.python-version }}, Spark ${{ matrix.spark-version }}${{ matrix.ray && ', Ray' || '' }})
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -101,11 +110,12 @@ jobs:
           python -c "import numpy; print(f'NumPy: {numpy.__version__}')"
           python -c "import pandas; print(f'Pandas: {pandas.__version__}')"
           python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')"
+          python -c "import ray; print(f'Ray: {ray.__version__}')" 2>/dev/null || echo "Ray: not installed"
       - name: Run tests
         run: pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=75 -v
       - name: Upload coverage
         uses: codecov/codecov-action@v5
-        if: matrix.python-version == '3.12' && matrix.spark-version == '4.x'
+        if: matrix.python-version == '3.12' && matrix.spark-version == '4.x' && !matrix.ray
         with:
           files: coverage.xml
           fail_ci_if_error: false
