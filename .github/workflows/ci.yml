@@ -83,11 +83,13 @@ jobs:
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
-          # Ray backend testing (without PySpark/PyArrow to verify optional dependency)
+          # Ray backend testing (without PySpark to verify optional dependency)
+          # Note: PyArrow is required by ray.data (Ray Datasets)
           - python-version: "3.12"
             spark-version: "ray-only"
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
+            pyarrow: "pyarrow>=17.0.0,<19.0.0"
             extra-deps: "ray[default]>=2.9.0,<3.0.0"
             ray: true
 
