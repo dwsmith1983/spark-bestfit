@@ -41,7 +41,7 @@ All backends use identical scipy fitting, so **fit quality is identical** regard
 - **Gaussian Copula**: Correlated multi-column sampling at scale
 - **Distributed Sampling**: Generate millions of samples using cluster parallelism
 - **Model Serialization**: Save and load fitted distributions to JSON or pickle
-- **Visualization**: Built-in plotting for distribution comparison, Q-Q and P-P plots
+- **Visualization**: Built-in plotting for distribution comparison, Q-Q and P-P plots (requires `[plotting]` extra)
 
 ## Installation
 
@@ -62,6 +62,14 @@ pip install spark-bestfit[spark]
 ```bash
 pip install spark-bestfit[ray]
 ```
+
+**With built-in plotting:**
+
+```bash
+pip install spark-bestfit[plotting]
+```
+
+Combine extras as needed: `pip install spark-bestfit[spark,plotting]`
 
 ## Quick Start
 
@@ -84,8 +92,10 @@ results = fitter.fit(df, column="value")
 best = results.best(n=1)[0]
 print(f"Best: {best.distribution} (KS={best.ks_statistic:.4f})")
 
-# Plot
+# Plot (requires: pip install spark-bestfit[plotting])
 fitter.plot(best, df, "value", title="Best Fit Distribution")
+
+# Or use result.pdf(), result.cdf() for DIY plotting with any library
 ```
 
 ## Compatibility Matrix
