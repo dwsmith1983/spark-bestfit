@@ -53,6 +53,14 @@ Spark environment (see Compatibility Matrix above).
 
    pip install spark-bestfit[ray]
 
+**With built-in plotting support**:
+
+.. code-block:: bash
+
+   pip install spark-bestfit[plotting]
+
+You can combine extras: ``pip install spark-bestfit[spark,plotting]``
+
 See :doc:`/backends` for detailed backend configuration.
 
 Basic Usage
@@ -200,6 +208,11 @@ Compute bootstrap confidence intervals for fitted distribution parameters:
 Visualization
 -------------
 
+.. note::
+   Built-in plotting requires matplotlib. Install with ``pip install spark-bestfit[plotting]``.
+   Alternatively, use ``result.pdf()``, ``result.cdf()``, ``result.sample()`` with any
+   visualization library (see DIY Visualization below).
+
 **Distribution plot:**
 
 .. code-block:: python
@@ -232,6 +245,27 @@ Visualization
        title="P-P Plot",
        save_path="output/pp_plot.png",
    )
+
+**DIY Visualization** (without matplotlib dependency):
+
+If you prefer your own visualization library (plotly, altair, seaborn, etc.), use
+the public methods on ``DistributionFitResult``:
+
+.. code-block:: python
+
+   import numpy as np
+   # import your preferred plotting library
+
+   best = results.best(n=1)[0]
+
+   # Get data for custom plotting
+   x = np.linspace(best.data_min, best.data_max, 1000)
+   y_pdf = best.pdf(x)      # Probability density function
+   y_cdf = best.cdf(x)      # Cumulative distribution function
+   samples = best.sample(10000)  # Random samples for histograms
+
+   # Get the underlying scipy distribution for full control
+   scipy_dist = best.get_scipy_dist()
 
 Discrete Distributions
 ----------------------

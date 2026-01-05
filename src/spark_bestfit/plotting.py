@@ -2,13 +2,35 @@
 
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats as st
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
+
+# Optional matplotlib import - users can install with: pip install spark-bestfit[plotting]
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
+    _MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    _MATPLOTLIB_AVAILABLE = False
+    plt = None  # type: ignore[assignment]
+    Axes = None  # type: ignore[assignment,misc]
+    Figure = None  # type: ignore[assignment,misc]
 
 from spark_bestfit.fitting import compute_pdf_range, extract_distribution_params
+
+
+def _check_matplotlib() -> None:
+    """Raise helpful error if matplotlib is not installed."""
+    if not _MATPLOTLIB_AVAILABLE:
+        raise ImportError(
+            "Matplotlib is required for plotting. Install with:\n"
+            "  pip install spark-bestfit[plotting]\n\n"
+            "Alternatively, use result.pdf(), result.cdf(), result.sample() "
+            "to get data for your own plots with any visualization library."
+        )
+
 
 if TYPE_CHECKING:
     from spark_bestfit.results import DistributionFitResult
@@ -64,6 +86,8 @@ def plot_distribution(
         >>> best = results.best(n=1)[0]
         >>> fitter.plot(best, df, 'value', title='Best Fit')
     """
+    _check_matplotlib()
+
     # Get scipy distribution and parameters
     dist = getattr(st, result.distribution)
     params = result.parameters
@@ -189,6 +213,8 @@ def plot_comparison(
         >>> top_3 = results.best(n=3)
         >>> fitter.plot_comparison(top_3, df, 'value')
     """
+    _check_matplotlib()
+
     if not results:
         raise ValueError("Must provide at least one result to plot")
 
@@ -310,6 +336,8 @@ def plot_qq(
         >>> best = results.best(n=1)[0]
         >>> fitter.plot_qq(best, df, 'value', title='Q-Q Plot')
     """
+    _check_matplotlib()
+
     # Sort the data
     sorted_data = np.sort(data)
     n = len(sorted_data)
@@ -451,6 +479,8 @@ def plot_pp(
         >>> best = results.best(n=1)[0]
         >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
     """
+    _check_matplotlib()
+
     # 1. Sort the data
     sorted_data = np.sort(data)
     n = len(sorted_data)
@@ -564,6 +594,8 @@ def plot_discrete_distribution(
     Returns:
         Tuple of (figure, axis)
     """
+    _check_matplotlib()
+
     # Get scipy distribution and parameters
     dist = getattr(st, result.distribution)
     params = list(result.parameters)
