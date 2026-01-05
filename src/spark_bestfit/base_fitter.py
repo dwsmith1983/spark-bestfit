@@ -4,14 +4,26 @@ import logging
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 
-import pyspark.sql.functions as F
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.types import NumericType
+# PySpark is optional - only import if available
+try:
+    import pyspark.sql.functions as F
+    from pyspark.sql import DataFrame, SparkSession
+    from pyspark.sql.types import NumericType
 
-from spark_bestfit.utils import get_spark_session
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    F = None  # type: ignore[assignment]
+    DataFrame = None  # type: ignore[assignment,misc]
+    SparkSession = None  # type: ignore[assignment,misc]
+    NumericType = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
+
+# Import get_spark_session only if PySpark is available
+if _PYSPARK_AVAILABLE:
+    from spark_bestfit.utils import get_spark_session
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +76,13 @@ class BaseFitter(ABC):
                 # For non-Spark backends (LocalBackend, RayBackend), no SparkSession needed
                 self.spark = None
         else:
+            # Default to SparkBackend - requires PySpark
+            if not _PYSPARK_AVAILABLE:
+                raise ImportError(
+                    "PySpark is required when no backend is specified. "
+                    "Install with: pip install spark-bestfit[spark]\n"
+                    "Or use a non-Spark backend: LocalBackend() or RayBackend()"
+                )
             self.spark = get_spark_session(spark)
             # Lazy import to avoid circular dependency
             from spark_bestfit.backends.spark import SparkBackend
@@ -161,21 +180,35 @@ class BaseFitter(ABC):
             col for col in target_columns if not isinstance(upper_bound, (int, float)) and col not in upper_dict
         ]
 
-        # Build aggregation expressions for auto-detection
-        agg_exprs = []
-        for col in cols_need_lower:
-            agg_exprs.append(F.min(col).alias(f"min_{col}"))
-        for col in cols_need_upper:
-            agg_exprs.append(F.max(col).alias(f"max_{col}"))
-
-        # Execute single aggregation for all needed bounds
+        # Execute aggregation for auto-detection - handle different DataFrame types
         auto_bounds: Dict[str, float] = {}
-        if agg_exprs:
-            bounds_row = df.agg(*agg_exprs).first()
-            for col in cols_need_lower:
-                auto_bounds[f"min_{col}"] = float(bounds_row[f"min_{col}"])
-            for col in cols_need_upper:
-                auto_bounds[f"max_{col}"] = float(bounds_row[f"max_{col}"])
+        cols_to_check = list(set(cols_need_lower + cols_need_upper))
+
+        if cols_to_check:
+            if hasattr(df, "sparkSession"):
+                # Spark DataFrame
+                agg_exprs = []
+                for col in cols_need_lower:
+                    agg_exprs.append(F.min(col).alias(f"min_{col}"))
+                for col in cols_need_upper:
+                    agg_exprs.append(F.max(col).alias(f"max_{col}"))
+                bounds_row = df.agg(*agg_exprs).first()
+                for col in cols_need_lower:
+                    auto_bounds[f"min_{col}"] = float(bounds_row[f"min_{col}"])
+                for col in cols_need_upper:
+                    auto_bounds[f"max_{col}"] = float(bounds_row[f"max_{col}"])
+            elif hasattr(df, "select_columns") and hasattr(df, "min"):
+                # Ray Dataset
+                for col in cols_need_lower:
+                    auto_bounds[f"min_{col}"] = float(df.min(col))
+                for col in cols_need_upper:
+                    auto_bounds[f"max_{col}"] = float(df.max(col))
+            else:
+                # pandas DataFrame
+                for col in cols_need_lower:
+                    auto_bounds[f"min_{col}"] = float(df[col].min())
+                for col in cols_need_upper:
+                    auto_bounds[f"max_{col}"] = float(df[col].max())
 
         # Build final per-column bounds dict
         result: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
@@ -279,7 +312,7 @@ class BaseFitter(ABC):
         if hasattr(df, "select_columns") and hasattr(df, "schema"):
             # Ray Dataset - use schema() method to get column names
             columns_list = df.schema().names
-        elif hasattr(df, "schema") and hasattr(df.schema, "__iter__"):
+        elif hasattr(df, "sparkSession"):
             # Spark DataFrame
             columns_list = df.columns
         else:
@@ -314,7 +347,7 @@ class BaseFitter(ABC):
             numeric_types = ("int", "float", "double", "decimal")
             if not any(t in type_str for t in numeric_types):
                 raise TypeError(f"Column '{column}' must be numeric, got {col_type}")
-        elif hasattr(df, "schema") and hasattr(df.schema, "__getitem__"):
+        elif hasattr(df, "sparkSession") and _PYSPARK_AVAILABLE:
             # Spark DataFrame
             col_type = df.schema[column].dataType
             if not isinstance(col_type, NumericType):

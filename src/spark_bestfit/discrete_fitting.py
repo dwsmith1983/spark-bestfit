@@ -7,38 +7,55 @@ import numpy as np
 import pandas as pd
 import scipy.optimize as opt
 import scipy.stats as st
-from pyspark import Broadcast
-from pyspark.sql.functions import pandas_udf
-from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
+
+# PySpark is optional - only import if available
+try:
+    from pyspark import Broadcast
+    from pyspark.sql.functions import pandas_udf
+    from pyspark.sql.types import ArrayType, FloatType, StringType, StructField, StructType
+
+    _PYSPARK_AVAILABLE = True
+except ImportError:
+    Broadcast = None  # type: ignore[assignment,misc]
+    pandas_udf = None  # type: ignore[assignment,misc]
+    ArrayType = None  # type: ignore[assignment,misc]
+    FloatType = None  # type: ignore[assignment,misc]
+    StringType = None  # type: ignore[assignment,misc]
+    StructField = None  # type: ignore[assignment,misc]
+    StructType = None  # type: ignore[assignment,misc]
+    _PYSPARK_AVAILABLE = False
 
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 
-# Output schema for discrete fitting results
+# Output schema for discrete fitting results (only if PySpark is available)
 # Note: ad_statistic and ad_pvalue are included for schema compatibility with FitResults
 # but are always None for discrete distributions (A-D test is for continuous distributions)
-DISCRETE_FIT_RESULT_SCHEMA = StructType(
-    [
-        StructField("column_name", StringType(), True),  # Column being fitted
-        StructField("distribution", StringType(), True),
-        StructField("parameters", ArrayType(FloatType()), True),
-        StructField("sse", FloatType(), True),
-        StructField("aic", FloatType(), True),
-        StructField("bic", FloatType(), True),
-        StructField("ks_statistic", FloatType(), True),
-        StructField("pvalue", FloatType(), True),
-        StructField("ad_statistic", FloatType(), True),
-        StructField("ad_pvalue", FloatType(), True),
-        # Flat data summary columns for provenance (v2.0: replaced MapType for ~20% perf)
-        StructField("data_min", FloatType(), True),
-        StructField("data_max", FloatType(), True),
-        StructField("data_mean", FloatType(), True),
-        StructField("data_stddev", FloatType(), True),
-        StructField("data_count", FloatType(), True),
-        # Bounded distribution support
-        StructField("lower_bound", FloatType(), True),
-        StructField("upper_bound", FloatType(), True),
-    ]
-)
+if _PYSPARK_AVAILABLE:
+    DISCRETE_FIT_RESULT_SCHEMA = StructType(
+        [
+            StructField("column_name", StringType(), True),  # Column being fitted
+            StructField("distribution", StringType(), True),
+            StructField("parameters", ArrayType(FloatType()), True),
+            StructField("sse", FloatType(), True),
+            StructField("aic", FloatType(), True),
+            StructField("bic", FloatType(), True),
+            StructField("ks_statistic", FloatType(), True),
+            StructField("pvalue", FloatType(), True),
+            StructField("ad_statistic", FloatType(), True),
+            StructField("ad_pvalue", FloatType(), True),
+            # Flat data summary columns for provenance (v2.0: replaced MapType for ~20% perf)
+            StructField("data_min", FloatType(), True),
+            StructField("data_max", FloatType(), True),
+            StructField("data_mean", FloatType(), True),
+            StructField("data_stddev", FloatType(), True),
+            StructField("data_count", FloatType(), True),
+            # Bounded distribution support
+            StructField("lower_bound", FloatType(), True),
+            StructField("upper_bound", FloatType(), True),
+        ]
+    )
+else:
+    DISCRETE_FIT_RESULT_SCHEMA = None  # type: ignore[assignment]
 
 
 def fit_discrete_mle(
