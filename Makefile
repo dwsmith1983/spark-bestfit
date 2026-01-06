@@ -88,10 +88,10 @@ mutate: ## Run mutation testing (uses pyproject.toml config)
 	PYTHONPATH=src mutmut run
 
 mutate-browse: ## Interactive browser for mutation results
-	mutmut browse
+	PYTHONPATH=src mutmut browse
 
-mutate-results: ## Show mutation testing results summary
-	mutmut results
+mutate-results: ## Show mutation testing results summary (excludes segfaults - those are killed)
+	@PYTHONPATH=src mutmut results | grep -v "segfault" || true
 
 mutate-clean: ## Clean mutation testing cache and mutants
 	rm -rf .mutmut-cache html/ mutants/

@@ -9,6 +9,7 @@ from spark_bestfit.discrete_fitting import (
     compute_discrete_information_criteria,
     compute_discrete_ks_statistic,
     compute_discrete_sse,
+    compute_ks_ad_metrics_discrete,
     fit_discrete_mle,
     fit_single_discrete_distribution,
     get_discrete_param_names,
@@ -380,6 +381,152 @@ class TestGetDiscreteParamNames:
         """Test parameter names for geometric distribution."""
         names = get_discrete_param_names("geom")
         assert names == ["p"]
+
+
+class TestComputeKsAdMetricsDiscrete:
+    """Tests for compute_ks_ad_metrics_discrete function."""
+
+    def test_returns_ks_metrics_for_poisson(self):
+        """Test that KS metrics are returned for Poisson distribution."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=5, size=500)
+
+        ks_stat, pvalue, ad_stat, ad_pvalue = compute_ks_ad_metrics_discrete(
+            "poisson", [5.0], data
+        )
+
+        # KS metrics should be computed
+        assert ks_stat is not None
+        assert pvalue is not None
+        assert 0 <= ks_stat <= 1
+        assert 0 <= pvalue <= 1
+
+        # AD metrics should be None for discrete
+        assert ad_stat is None
+        assert ad_pvalue is None
+
+    def test_returns_ks_metrics_for_binomial(self):
+        """Test that KS metrics are returned for binomial distribution."""
+        np.random.seed(42)
+        data = np.random.binomial(n=10, p=0.3, size=500)
+
+        ks_stat, pvalue, ad_stat, ad_pvalue = compute_ks_ad_metrics_discrete(
+            "binom", [10, 0.3], data
+        )
+
+        # KS metrics should be computed
+        assert ks_stat is not None
+        assert pvalue is not None
+        assert 0 <= ks_stat <= 1
+        assert 0 <= pvalue <= 1
+
+        # AD metrics should be None for discrete
+        assert ad_stat is None
+        assert ad_pvalue is None
+
+    def test_good_vs_bad_fit_comparison(self):
+        """Test that good fit has lower KS statistic than poor fit."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=7, size=1000)
+
+        # Good fit with correct parameter
+        ks_good, _, _, _ = compute_ks_ad_metrics_discrete(
+            "poisson", [7.0], data
+        )
+
+        # Poor fit with wrong parameter
+        ks_poor, _, _, _ = compute_ks_ad_metrics_discrete(
+            "poisson", [2.0], data
+        )
+
+        # Good fit should have lower KS statistic
+        assert ks_good < ks_poor
+
+    def test_poor_fit_low_pvalue(self):
+        """Test that poor fit produces low p-value."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=7, size=1000)
+
+        # Fit with wrong parameter (lambda=2 instead of 7)
+        ks_stat, pvalue, _, _ = compute_ks_ad_metrics_discrete(
+            "poisson", [2.0], data
+        )
+
+        # Poor fit should have low p-value
+        assert pvalue < 0.05
+
+    def test_handles_invalid_distribution(self):
+        """Test that invalid distribution returns None values."""
+        data = np.array([1, 2, 3, 4, 5])
+
+        ks_stat, pvalue, ad_stat, ad_pvalue = compute_ks_ad_metrics_discrete(
+            "invalid_dist_name", [1.0], data
+        )
+
+        # Should return None for all metrics
+        assert ks_stat is None
+        assert pvalue is None
+        assert ad_stat is None
+        assert ad_pvalue is None
+
+    def test_handles_float_data_conversion(self):
+        """Test that float data is converted to integer."""
+        np.random.seed(42)
+        # Create float data that should be converted
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 3.0, 2.0, 4.0])
+
+        ks_stat, pvalue, _, _ = compute_ks_ad_metrics_discrete(
+            "poisson", [3.0], data
+        )
+
+        # Should successfully compute metrics
+        assert ks_stat is not None
+        assert pvalue is not None
+
+    def test_optional_bounds_ignored(self):
+        """Test that lower/upper bounds are accepted but don't affect discrete metrics."""
+        np.random.seed(42)
+        data = np.random.poisson(lam=5, size=500)
+
+        # Without bounds
+        ks1, pv1, _, _ = compute_ks_ad_metrics_discrete("poisson", [5.0], data)
+
+        # With bounds (should be ignored for discrete)
+        ks2, pv2, _, _ = compute_ks_ad_metrics_discrete(
+            "poisson", [5.0], data, lower_bound=0.0, upper_bound=100.0
+        )
+
+        # Results should be identical (bounds are ignored)
+        assert ks1 == ks2
+        assert pv1 == pv2
+
+    def test_geometric_distribution(self):
+        """Test KS metrics for geometric distribution."""
+        np.random.seed(42)
+        data = np.random.geometric(p=0.3, size=500)
+
+        ks_stat, pvalue, ad_stat, ad_pvalue = compute_ks_ad_metrics_discrete(
+            "geom", [0.3], data
+        )
+
+        assert ks_stat is not None
+        assert pvalue is not None
+        assert ad_stat is None
+        assert ad_pvalue is None
+
+    def test_negative_binomial_distribution(self):
+        """Test KS metrics for negative binomial distribution."""
+        np.random.seed(42)
+        data = np.random.negative_binomial(n=5, p=0.5, size=500)
+
+        ks_stat, pvalue, ad_stat, ad_pvalue = compute_ks_ad_metrics_discrete(
+            "nbinom", [5, 0.5], data
+        )
+
+        assert ks_stat is not None
+        assert pvalue is not None
+        assert ad_stat is None
+        assert ad_pvalue is None
 
 
 class TestBootstrapDiscreteConfidenceIntervals:

@@ -367,6 +367,129 @@ class TestFitResults:
 
         assert filtered.count() == results.count()
 
+class TestTruncatedFrozenDist:
+    """Tests for TruncatedFrozenDist wrapper class."""
+
+    def test_logpdf_within_bounds(self):
+        """Test logpdf returns valid values within bounds."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
+
+        x = np.array([35, 40, 50, 60, 65])
+        logpdf_values = truncated.logpdf(x)
+
+        # All values should be finite (not -inf)
+        assert np.all(np.isfinite(logpdf_values))
+        # logpdf should be less than 0 for probability density < 1
+        assert np.all(logpdf_values < 0)
+
+    def test_logpdf_outside_bounds(self):
+        """Test logpdf returns -inf outside bounds."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
+
+        x = np.array([20, 25, 75, 80])
+        logpdf_values = truncated.logpdf(x)
+
+        # All values outside bounds should be -inf
+        assert np.all(logpdf_values == -np.inf)
+
+    def test_logpdf_at_boundaries(self):
+        """Test logpdf at exact boundary values."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
+
+        x = np.array([30, 70])
+        logpdf_values = truncated.logpdf(x)
+
+        # Values at boundaries should be finite
+        assert np.all(np.isfinite(logpdf_values))
+
+    def test_logpdf_empty_mask(self):
+        """Test logpdf when all values are outside bounds."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=40, ub=60)
+
+        x = np.array([0, 10, 90, 100])
+        logpdf_values = truncated.logpdf(x)
+
+        # All should be -inf
+        assert np.all(logpdf_values == -np.inf)
+
+    def test_mean_approximation(self):
+        """Test mean approximation for truncated distribution."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
+
+        mean_val = truncated.mean()
+
+        # Mean of symmetric truncation around the true mean should be close to true mean
+        assert np.isfinite(mean_val)
+        assert 45 < mean_val < 55
+
+    def test_mean_asymmetric_truncation(self):
+        """Test mean shifts with asymmetric truncation."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        # Truncate to keep only upper part
+        truncated = TruncatedFrozenDist(frozen, lb=50, ub=80)
+
+        mean_val = truncated.mean()
+
+        # Mean should be above the original mean due to left truncation
+        assert mean_val > 50
+
+    def test_std_approximation(self):
+        """Test std approximation for truncated distribution."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
+
+        std_val = truncated.std()
+
+        # Std of truncated dist should be smaller than original
+        assert np.isfinite(std_val)
+        assert std_val > 0
+        assert std_val < 10  # Original scale is 10
+
+    def test_std_narrow_truncation(self):
+        """Test std decreases with narrower truncation."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        wide = TruncatedFrozenDist(frozen, lb=20, ub=80)
+        narrow = TruncatedFrozenDist(frozen, lb=40, ub=60)
+
+        # Narrower truncation should have smaller std
+        assert narrow.std() < wide.std()
+
+    def test_pdf_consistency_with_logpdf(self):
+        """Test that pdf and logpdf are consistent."""
+        from spark_bestfit.results import TruncatedFrozenDist
+
+        frozen = st.norm(loc=50, scale=10)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
+
+        x = np.array([35, 50, 65])
+        pdf_values = truncated.pdf(x)
+        logpdf_values = truncated.logpdf(x)
+
+        # exp(logpdf) should equal pdf
+        np.testing.assert_allclose(np.exp(logpdf_values), pdf_values, rtol=1e-10)
+
+
 class TestDistributionFitResultEdgeCases:
     """Edge case tests for DistributionFitResult."""
 

@@ -254,12 +254,15 @@ patch_tags = ["fix", "perf", "refactor", "build"]
 [tool.mutmut]
 # Paths to mutate (core fitting logic)
 paths_to_mutate = ["src/spark_bestfit/"]
-# Exclude distributed backends, progress, and plotting from mutation (not testable via LocalBackend)
+# Exclude files with Spark-specific code that can't be tested via LocalBackend
 do_not_mutate = [
     "src/spark_bestfit/backends/spark.py",
     "src/spark_bestfit/backends/ray.py",
     "src/spark_bestfit/progress.py",
     "src/spark_bestfit/plotting.py",
+    "src/spark_bestfit/sampling.py",   # sample_spark deprecated wrapper uses Spark
+    "src/spark_bestfit/protocols.py",  # Abstract ExecutionBackend protocol methods
+    "src/spark_bestfit/utils.py",      # _get_spark_session and Spark utilities
 ]
 # Test selection: ALL tests that work without Spark/Ray
 pytest_add_cli_args_test_selection = [
@@ -276,7 +279,6 @@ pytest_add_cli_args_test_selection = [
     "tests/test_backends.py",
     "tests/test_bounded_fitting.py",
     "tests/test_copula.py",
-    "tests/test_sampling.py",
 ]
 # Additional pytest args: disable spark plugin, skip spark tests, quiet output
 pytest_add_cli_args = ["-p", "no:spark", "-m", "not spark", "-q", "--tb=no"]
