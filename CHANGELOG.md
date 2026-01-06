@@ -2,6 +2,28 @@
 
 <!-- version list -->
 
+## v2.0.3 (2026-01-06)
+
+### Bug Fixes
+
+- CI fail-fast and Spark test imports ([#91](https://github.com/dwsmith1983/spark-bestfit/pull/91),
+  [`19dc28c`](https://github.com/dwsmith1983/spark-bestfit/commit/19dc28cc465051b9856b801039a3d2f9023b8625))
+
+- Correct mutmut test selection to exclude Spark-dependent tests
+  ([#91](https://github.com/dwsmith1983/spark-bestfit/pull/91),
+  [`19dc28c`](https://github.com/dwsmith1983/spark-bestfit/commit/19dc28cc465051b9856b801039a3d2f9023b8625))
+
+### Refactoring
+
+- LocalBackend tests and backend auto-detection for mutation testing
+  ([#91](https://github.com/dwsmith1983/spark-bestfit/pull/91),
+  [`19dc28c`](https://github.com/dwsmith1983/spark-bestfit/commit/19dc28cc465051b9856b801039a3d2f9023b8625))
+
+- Separate Spark tests from LocalBackend tests for mutation testing
+  ([#91](https://github.com/dwsmith1983/spark-bestfit/pull/91),
+  [`19dc28c`](https://github.com/dwsmith1983/spark-bestfit/commit/19dc28cc465051b9856b801039a3d2f9023b8625))
+
+
 ## v2.0.2 (2026-01-05)
 
 ### Bug Fixes
