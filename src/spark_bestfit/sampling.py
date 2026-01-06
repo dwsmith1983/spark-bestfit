@@ -4,6 +4,7 @@ This module provides functions for generating samples from fitted distributions
 using the backend abstraction for distributed or local execution.
 """
 
+import warnings
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
@@ -122,6 +123,11 @@ def sample_spark(
         | 1.0093545783546243|
         +-------------------+
     """
+    warnings.warn(
+        "sample_spark() is deprecated. Use sample_distributed() with SparkBackend instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from spark_bestfit.backends.spark import SparkBackend
 
     backend = SparkBackend(spark)

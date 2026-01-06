@@ -11,12 +11,12 @@ Example:
     >>> fitter = DistributionFitter(spark)
     >>> results = fitter.fit(df, columns=["price", "quantity", "revenue"])
     >>>
-    >>> # Fit copula - correlation computed via backend
-    >>> copula = GaussianCopula.fit(results, df, backend=fitter._backend)
+    >>> # Fit copula - auto-detects backend from DataFrame type
+    >>> copula = GaussianCopula.fit(results, df)
     >>>
     >>> # Generate correlated samples
     >>> samples = copula.sample(n=10000)  # Dict[str, np.ndarray]
-    >>> samples_df = copula.sample_distributed(n=1_000_000, backend=backend)
+    >>> samples_df = copula.sample_spark(n=1_000_000, spark=spark)
 """
 
 import json
@@ -96,8 +96,8 @@ class GaussianCopula:
             df: DataFrame used for fitting (Spark DataFrame or pandas DataFrame)
             columns: Columns to include. Defaults to all columns in results.
             metric: Metric to use for selecting best distribution per column
-            backend: Execution backend. If None, creates SparkBackend (for
-                backward compatibility with Spark DataFrames).
+            backend: Execution backend. If None, auto-detects from DataFrame type
+                (LocalBackend for pandas, RayBackend for Ray, SparkBackend for Spark).
 
         Returns:
             Fitted GaussianCopula instance
@@ -107,7 +107,7 @@ class GaussianCopula:
 
         Example:
             >>> results = fitter.fit(df, columns=["price", "quantity", "revenue"])
-            >>> copula = GaussianCopula.fit(results, df, backend=fitter._backend)
+            >>> copula = GaussianCopula.fit(results, df)  # auto-detects backend
         """
         # Determine columns to use
         if columns is None:
@@ -135,11 +135,24 @@ class GaussianCopula:
                 raise ValueError(f"No fit results for column '{col}'")
             marginals[col] = best[0]
 
-        # Create default backend if not provided (backward compatibility)
+        # Auto-detect backend from DataFrame type if not provided
         if backend is None:
-            from spark_bestfit.backends.spark import SparkBackend
+            import pandas as pd
 
-            backend = SparkBackend()
+            # Check for Ray Dataset (duck typing - has select_columns and to_pandas)
+            if hasattr(df, "select_columns") and hasattr(df, "to_pandas"):
+                from spark_bestfit.backends.ray import RayBackend
+
+                backend = RayBackend()
+            elif isinstance(df, pd.DataFrame):
+                from spark_bestfit.backends.local import LocalBackend
+
+                backend = LocalBackend()
+            else:
+                # Assume Spark DataFrame for backward compatibility
+                from spark_bestfit.backends.spark import SparkBackend
+
+                backend = SparkBackend()
 
         # Compute Spearman correlation via backend
         correlation_matrix = backend.compute_correlation(df, columns, method="spearman")

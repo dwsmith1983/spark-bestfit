@@ -33,17 +33,18 @@ class HistogramComputer:
         >>> # y_hist has 50 values, bin_edges has 51 values
         >>> x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0  # Compute centers if needed
 
-    Backward-compatible example (auto-creates SparkBackend):
+    Auto-detection example (detects backend from DataFrame type):
         >>> computer = HistogramComputer()
-        >>> y_hist, bin_edges = computer.compute_histogram(spark_df, column='value')
+        >>> y_hist, bin_edges = computer.compute_histogram(pandas_df, column='value')  # Uses LocalBackend
     """
 
     def __init__(self, backend: Optional["ExecutionBackend"] = None):
         """Initialize HistogramComputer.
 
         Args:
-            backend: Execution backend. If None, creates SparkBackend when
-                compute_histogram is called (for backward compatibility).
+            backend: Execution backend. If None, auto-detects from DataFrame type
+                when compute_histogram is called (LocalBackend for pandas,
+                RayBackend for Ray, SparkBackend for Spark).
         """
         self._backend = backend
 
@@ -78,8 +79,8 @@ class HistogramComputer:
             >>> y, x = computer.compute_histogram(df, 'value', bins=100)
             >>> # y and x are small numpy arrays (~100 elements)
         """
-        # Get or create backend
-        backend = self._get_backend()
+        # Get or create backend (auto-detect from DataFrame type if not configured)
+        backend = self._get_backend(df)
 
         # Determine number of bins if using Rice rule
         if use_rice_rule:
@@ -130,16 +131,33 @@ class HistogramComputer:
         # Callers can compute centers as: (edges[:-1] + edges[1:]) / 2.0
         return y_density, bin_edges
 
-    def _get_backend(self) -> "ExecutionBackend":
+    def _get_backend(self, df: Any = None) -> "ExecutionBackend":
         """Get or create the execution backend.
 
+        Args:
+            df: DataFrame (optional). If provided and no backend was configured,
+                auto-detects backend from DataFrame type.
+
         Returns:
-            The configured backend, or a new SparkBackend if none was provided.
+            The configured backend, or auto-detected backend based on DataFrame type.
         """
         if self._backend is None:
-            from spark_bestfit.backends.spark import SparkBackend
+            import pandas as pd
 
-            self._backend = SparkBackend()
+            # Check for Ray Dataset (duck typing)
+            if df is not None and hasattr(df, "select_columns") and hasattr(df, "to_pandas"):
+                from spark_bestfit.backends.ray import RayBackend
+
+                self._backend = RayBackend()
+            elif isinstance(df, pd.DataFrame):
+                from spark_bestfit.backends.local import LocalBackend
+
+                self._backend = LocalBackend()
+            else:
+                # Assume Spark DataFrame for backward compatibility
+                from spark_bestfit.backends.spark import SparkBackend
+
+                self._backend = SparkBackend()
         return self._backend
 
     def compute_statistics(self, df: Any, column: str) -> dict:
@@ -152,5 +170,5 @@ class HistogramComputer:
         Returns:
             Dictionary with min, max, count (and optionally mean, stddev)
         """
-        backend = self._get_backend()
+        backend = self._get_backend(df)
         return backend.get_column_stats(df, column)
