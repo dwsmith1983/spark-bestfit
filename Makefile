@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-ray benchmark-all benchmark-charts validate-notebooks
+.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-ray benchmark-all benchmark-charts validate-notebooks mutate mutate-browse mutate-results mutate-html mutate-clean
 
 .DEFAULT_GOAL := help
 
@@ -74,3 +74,25 @@ validate-notebooks: ## Run all example notebooks to validate they execute withou
 		fi; \
 	done
 	@echo "All notebooks validated successfully!"
+
+# Mutation Testing (requires: pip install mutmut)
+# See: https://mutmut.readthedocs.io/
+# Note: Uses LocalBackend tests only (mutmut 3 trampoline incompatible with PySpark workers)
+# Configuration in pyproject.toml [tool.mutmut]
+
+mutate: ## Run mutation testing (uses pyproject.toml config)
+	@echo "Running mutation tests (this may take a while)..."
+	@echo "Using LocalBackend tests only (Spark tests excluded)"
+	@echo "See pyproject.toml [tool.mutmut] for configuration"
+	rm -rf mutants/
+	PYTHONPATH=src mutmut run
+
+mutate-browse: ## Interactive browser for mutation results
+	PYTHONPATH=src mutmut browse
+
+mutate-results: ## Show mutation testing results summary (excludes segfaults - those are killed)
+	@PYTHONPATH=src mutmut results | grep -v "segfault" || true
+
+mutate-clean: ## Clean mutation testing cache and mutants
+	rm -rf .mutmut-cache html/ mutants/
+	@echo "Mutation cache cleaned"

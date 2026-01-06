@@ -2,7 +2,7 @@
 
 import scipy.stats as st
 
-from spark_bestfit.distributions import DistributionRegistry
+from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 
 
 class TestDistributionRegistry:
@@ -181,6 +181,111 @@ class TestDistributionRegistry:
     def test_immutability_of_exclusions(self):
         """Test that get_exclusions returns a copy (immutable)."""
         registry = DistributionRegistry()
+        exclusions1 = registry.get_exclusions()
+        exclusions2 = registry.get_exclusions()
+
+        # Modify one copy
+        exclusions1.add("new_exclusion")
+
+        # Should not affect the other copy or registry
+        assert "new_exclusion" not in exclusions2
+        assert "new_exclusion" not in registry.get_exclusions()
+
+
+class TestDiscreteDistributionRegistry:
+    """Tests for DiscreteDistributionRegistry class."""
+
+    def test_initialization_default(self):
+        """Test initialization with default exclusions."""
+        registry = DiscreteDistributionRegistry()
+
+        assert "nchypergeom_fisher" in registry.get_exclusions()
+        assert "nchypergeom_wallenius" in registry.get_exclusions()
+        assert "randint" in registry.get_exclusions()
+
+    def test_initialization_custom_exclusions(self):
+        """Test initialization with custom exclusions."""
+        custom = {"poisson", "geom"}
+        registry = DiscreteDistributionRegistry(custom_exclusions=custom)
+
+        assert registry.get_exclusions() == custom
+        assert "nchypergeom_fisher" not in registry.get_exclusions()
+
+    def test_get_distributions_returns_configured(self):
+        """Test that get_distributions returns distributions with configs."""
+        registry = DiscreteDistributionRegistry()
+        distributions = registry.get_distributions()
+
+        # Should include distributions we have configs for
+        assert "poisson" in distributions
+        assert "geom" in distributions
+        assert "binom" in distributions
+        assert "nbinom" in distributions
+
+        # Should not include excluded distributions
+        assert "nchypergeom_fisher" not in distributions
+
+    def test_get_distributions_with_additional_exclusions(self):
+        """Test get_distributions with additional exclusions."""
+        registry = DiscreteDistributionRegistry()
+        distributions = registry.get_distributions(additional_exclusions=["poisson", "geom"])
+
+        assert "poisson" not in distributions
+        assert "geom" not in distributions
+        assert "binom" in distributions
+
+    def test_add_exclusion(self):
+        """Test adding an exclusion dynamically."""
+        registry = DiscreteDistributionRegistry()
+        initial_count = len(registry.get_exclusions())
+
+        registry.add_exclusion("poisson")
+
+        assert "poisson" in registry.get_exclusions()
+        assert len(registry.get_exclusions()) == initial_count + 1
+
+        # Should affect get_distributions
+        distributions = registry.get_distributions()
+        assert "poisson" not in distributions
+
+    def test_remove_exclusion(self):
+        """Test removing an exclusion."""
+        registry = DiscreteDistributionRegistry()
+        initial_exclusions = registry.get_exclusions().copy()
+
+        registry.remove_exclusion("nchypergeom_fisher")
+
+        assert "nchypergeom_fisher" not in registry.get_exclusions()
+        assert len(registry.get_exclusions()) == len(initial_exclusions) - 1
+
+    def test_remove_nonexistent_exclusion(self):
+        """Test removing an exclusion that doesn't exist (no error)."""
+        registry = DiscreteDistributionRegistry()
+        initial_exclusions = registry.get_exclusions().copy()
+
+        registry.remove_exclusion("nonexistent_distribution")
+
+        # Should not change exclusions
+        assert registry.get_exclusions() == initial_exclusions
+
+    def test_reset_exclusions(self):
+        """Test resetting exclusions to defaults."""
+        registry = DiscreteDistributionRegistry()
+
+        # Modify exclusions
+        registry.add_exclusion("poisson")
+        registry.remove_exclusion("nchypergeom_fisher")
+
+        # Reset
+        registry.reset_exclusions()
+
+        # Should have default exclusions
+        assert "nchypergeom_fisher" in registry.get_exclusions()
+        assert "poisson" not in registry.get_exclusions()
+
+    def test_get_exclusions_returns_copy(self):
+        """Test that get_exclusions returns a copy (immutable)."""
+        registry = DiscreteDistributionRegistry()
         exclusions1 = registry.get_exclusions()
         exclusions2 = registry.get_exclusions()
 

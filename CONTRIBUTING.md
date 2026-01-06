@@ -62,6 +62,24 @@ make pre-commit
   make test-cov  # With coverage report
   ```
 
+### Mutation Testing
+
+We use [mutmut](https://mutmut.readthedocs.io/) to verify test quality beyond coverage metrics.
+Mutation testing introduces small code changes (mutations) and checks if tests catch them.
+
+```bash
+make mutate          # Run mutation testing (takes a while)
+make mutate-results  # Show results summary
+make mutate-browse   # Interactive browser for surviving mutants
+make mutate-html     # Generate HTML report
+```
+
+**Target:** 80%+ mutation kill rate (surviving mutants indicate weak assertions)
+
+> **Note:** Due to PySpark worker incompatibility with mutmut 3's trampoline, mutation tests
+> run against LocalBackend tests only. The core fitting logic is backend-agnostic, so this
+> still provides comprehensive coverage.
+
 ### Documentation
 - Public APIs require docstrings (Google style)
 - Update README.md for user-facing changes
@@ -128,6 +146,8 @@ chore: update pre-commit hook versions
 | `make check` | Run pre-commit + tests |
 | `make docs` | Build documentation |
 | `make clean` | Remove build artifacts |
+| `make mutate` | Run mutation testing |
+| `make mutate-browse` | Interactive mutation results browser |
 
 ## Questions?
 

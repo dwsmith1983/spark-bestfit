@@ -4,9 +4,16 @@ import warnings
 
 import numpy as np
 import pytest
+
+# Skip all tests if pyspark not installed
+pyspark = pytest.importorskip("pyspark")
+
 from pyspark.sql import SparkSession
 
 from spark_bestfit import DiscreteDistributionFitter, DistributionFitter
+
+# Mark all tests in this module as requiring Spark
+pytestmark = pytest.mark.spark
 
 
 @pytest.fixture(scope="module")

@@ -57,9 +57,38 @@ jobs:
           python-version: "3.12"
       - uses: pre-commit/action@v3.0.1
 
-  test:
+  # Unit tests: LocalBackend tests without Spark (run once, fast)
+  unit-tests:
     needs: [changes, pre-commit]
-    # Only run tests when source code, tests, or dependencies change
+    if: |
+      needs.changes.outputs.src == 'true' ||
+      needs.changes.outputs.tests == 'true' ||
+      needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    name: Unit Tests (LocalBackend)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -e ".[test-base]"
+          pip install "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0"
+      - name: Run unit tests (no Spark)
+        run: |
+          # Run all tests except Spark-marked tests, disable pytest-spark plugin
+          pytest -m "not spark" -p no:spark --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml -v
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  # Spark integration tests: only Spark-marked tests (run in matrix)
+  # Depends on unit-tests to fail fast - don't run slow Spark tests if unit tests fail
+  spark-tests:
+    needs: [changes, pre-commit, unit-tests]
     if: |
       needs.changes.outputs.src == 'true' ||
       needs.changes.outputs.tests == 'true' ||
@@ -96,17 +125,8 @@ jobs:
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
-          # Ray backend testing (without PySpark to verify optional dependency)
-          # Note: PyArrow is required by ray.data (Ray Datasets)
-          - python-version: "3.12"
-            spark-version: "ray-only"
-            numpy: "numpy>=2.0.0,<3.0.0"
-            pandas: "pandas>=2.2.0,<3.0.0"
-            pyarrow: "pyarrow>=17.0.0,<19.0.0"
-            extra-deps: "ray[default]>=2.9.0,<3.0.0"
-            ray: true
 
-    name: Test (Python ${{ matrix.python-version }}, Spark ${{ matrix.spark-version }}${{ matrix.ray && ', Ray' || '' }})
+    name: Spark Tests (Python ${{ matrix.python-version }}, Spark ${{ matrix.spark-version }})
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -115,32 +135,41 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[test-base]"
-          pip install "${{ matrix.numpy }}" "${{ matrix.pandas }}"
-          if [ -n "${{ matrix.pyarrow }}" ]; then pip install "${{ matrix.pyarrow }}"; fi
-          if [ -n "${{ matrix.pyspark }}" ]; then pip install "${{ matrix.pyspark }}"; fi
+          pip install "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}" "${{ matrix.pyspark }}"
           if [ -n "${{ matrix.extra-deps }}" ]; then pip install "${{ matrix.extra-deps }}"; fi
       - name: Show installed versions
         run: |
-          python -c "import pyspark; print(f'PySpark: {pyspark.__version__}')" 2>/dev/null || echo "PySpark: not installed"
+          python -c "import pyspark; print(f'PySpark: {pyspark.__version__}')"
           python -c "import numpy; print(f'NumPy: {numpy.__version__}')"
           python -c "import pandas; print(f'Pandas: {pandas.__version__}')"
-          python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')" 2>/dev/null || echo "PyArrow: not installed"
-          python -c "import ray; print(f'Ray: {ray.__version__}')" 2>/dev/null || echo "Ray: not installed"
-      - name: Run tests
+          python -c "import pyarrow; print(f'PyArrow: {pyarrow.__version__}')"
+      - name: Run Spark tests only
         run: |
-          if [ "${{ matrix.ray }}" = "true" ]; then
-            # Ray job: only run Ray-specific tests (faster, disable pytest-spark plugin)
-            pytest tests/test_ray_backend.py -v -p no:spark
-          else
-            # Standard jobs: full test suite with coverage
-            pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=75 -v
-          fi
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
-        if: matrix.python-version == '3.12' && matrix.spark-version == '4.x' && !matrix.ray
+          # Only run Spark-marked tests
+          pytest -m spark -v
+
+  # Ray backend tests: separate job without Spark
+  # Depends on unit-tests to fail fast - don't run Ray tests if unit tests fail
+  ray-tests:
+    needs: [changes, pre-commit, unit-tests]
+    if: |
+      needs.changes.outputs.src == 'true' ||
+      needs.changes.outputs.tests == 'true' ||
+      needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    name: Ray Tests
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          files: coverage.xml
-          fail_ci_if_error: false
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -e ".[test-base]"
+          pip install "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0" "pyarrow>=17.0.0,<19.0.0" "ray[default]>=2.9.0,<3.0.0"
+      - name: Run Ray tests
+        run: |
+          pytest tests/test_ray_backend.py -v -p no:spark
 
   security:
     name: Security Scan
@@ -199,26 +228,28 @@ jobs:
 
   # Summary job for branch protection - single required check
   ci:
-    needs: [changes, test, docs]
+    needs: [changes, unit-tests, spark-tests, ray-tests, docs]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
           # Get job results (skipped jobs are OK - they were intentionally filtered)
-          test_result="${{ needs.test.result }}"
+          unit_tests_result="${{ needs.unit-tests.result }}"
+          spark_tests_result="${{ needs.spark-tests.result }}"
+          ray_tests_result="${{ needs.ray-tests.result }}"
           docs_result="${{ needs.docs.result }}"
 
           echo "Job results:"
-          echo "  test: $test_result"
+          echo "  unit-tests: $unit_tests_result"
+          echo "  spark-tests: $spark_tests_result"
+          echo "  ray-tests: $ray_tests_result"
           echo "  docs: $docs_result"
 
           # Check each job - 'success' or 'skipped' are acceptable
-          for job in test docs; do
-            result_var="${job}_result"
-            result="${!result_var}"
+          for result in "$unit_tests_result" "$spark_tests_result" "$ray_tests_result" "$docs_result"; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-              echo "Job '$job' failed with result: $result"
+              echo "A job failed with result: $result"
               exit 1
             fi
           done

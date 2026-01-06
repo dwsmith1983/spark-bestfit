@@ -1,7 +1,10 @@
 """Pytest configuration and fixtures for spark-bestfit tests."""
 
 import numpy as np
+import pandas as pd
 import pytest
+
+from spark_bestfit.backends.local import LocalBackend
 
 # PySpark is optional - only import if available (supports Ray-only testing)
 try:
@@ -36,6 +39,53 @@ def spark_session():
     yield spark
 
     spark.stop()
+
+
+# ============================================================================
+# LocalBackend fixtures - for tests that don't require Spark/Ray
+# ============================================================================
+
+
+@pytest.fixture(scope="module")
+def local_backend():
+    """Create LocalBackend for testing.
+
+    Scope: module - reuse within test module for performance.
+    No external dependencies required.
+    """
+    return LocalBackend(max_workers=2)
+
+
+@pytest.fixture
+def pandas_dataset(normal_data):
+    """Create pandas DataFrame from normal data.
+
+    Use this instead of small_dataset when testing with LocalBackend.
+    """
+    return pd.DataFrame({"value": normal_data})
+
+
+@pytest.fixture
+def pandas_positive_dataset(exponential_data):
+    """Create pandas DataFrame with only positive values.
+
+    Use this instead of positive_dataset when testing with LocalBackend.
+    """
+    return pd.DataFrame({"value": exponential_data})
+
+
+@pytest.fixture
+def pandas_poisson_dataset(poisson_data):
+    """Create pandas DataFrame with Poisson count data.
+
+    Use this instead of poisson_dataset when testing with LocalBackend.
+    """
+    return pd.DataFrame({"counts": poisson_data})
+
+
+# ============================================================================
+# Data generation fixtures - backend-agnostic numpy arrays
+# ============================================================================
 
 
 @pytest.fixture

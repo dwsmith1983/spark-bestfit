@@ -50,6 +50,11 @@ coverage.xml
 .benchmarks/
 cover/
 
+# Mutation testing (mutmut)
+.mutmut-cache/
+mutants/
+html/
+
 # Translations
 *.mo
 *.pot

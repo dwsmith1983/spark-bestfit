@@ -1,9 +1,13 @@
-"""Tests for Gaussian Copula module."""
+"""Tests for Gaussian Copula module.
+
+Uses LocalBackend for most tests. Spark-specific sampling tests are in a separate class.
+"""
 
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import scipy.stats as st
 
@@ -14,8 +18,8 @@ from spark_bestfit.serialization import SerializationError
 
 
 @pytest.fixture
-def correlated_data(spark_session):
-    """Generate correlated multi-column data."""
+def correlated_data():
+    """Generate correlated multi-column data as pandas DataFrame."""
     np.random.seed(42)
     n = 5000
 
@@ -34,14 +38,13 @@ def correlated_data(spark_session):
     col_b = st.expon.ppf(st.norm.cdf(mvn_samples[:, 1]), scale=5)  # Exponential(5)
     col_c = 100 + 20 * mvn_samples[:, 2]  # Normal(100, 20)
 
-    data = [(float(a), float(b), float(c)) for a, b, c in zip(col_a, col_b, col_c)]
-    return spark_session.createDataFrame(data, ["col_a", "col_b", "col_c"])
+    return pd.DataFrame({"col_a": col_a, "col_b": col_b, "col_c": col_c})
 
 
 @pytest.fixture
-def multi_column_results(spark_session, correlated_data):
+def multi_column_results(local_backend, correlated_data):
     """Fit distributions to multi-column data."""
-    fitter = DistributionFitter(spark_session, random_seed=42)
+    fitter = DistributionFitter(backend=local_backend, random_seed=42)
     results = fitter.fit(
         correlated_data,
         columns=["col_a", "col_b", "col_c"],
@@ -51,17 +54,17 @@ def multi_column_results(spark_session, correlated_data):
 
 
 @pytest.fixture
-def simple_copula(multi_column_results, correlated_data):
+def simple_copula(multi_column_results, correlated_data, local_backend):
     """Create a fitted GaussianCopula."""
-    return GaussianCopula.fit(multi_column_results, correlated_data)
+    return GaussianCopula.fit(multi_column_results, correlated_data, backend=local_backend)
 
 
 class TestGaussianCopulaFit:
     """Tests for GaussianCopula.fit() method."""
 
-    def test_fit_basic(self, multi_column_results, correlated_data):
+    def test_fit_basic(self, multi_column_results, correlated_data, local_backend):
         """Test basic copula fitting."""
-        copula = GaussianCopula.fit(multi_column_results, correlated_data)
+        copula = GaussianCopula.fit(multi_column_results, correlated_data, backend=local_backend)
 
         assert copula.column_names == ["col_a", "col_b", "col_c"]
         assert len(copula.marginals) == 3
@@ -100,28 +103,28 @@ class TestGaussianCopulaFit:
             assert marginal.distribution is not None
             assert len(marginal.parameters) > 0
 
-    def test_fit_specific_columns(self, multi_column_results, correlated_data):
+    def test_fit_specific_columns(self, multi_column_results, correlated_data, local_backend):
         """Test fitting with specific column subset."""
         copula = GaussianCopula.fit(
-            multi_column_results, correlated_data, columns=["col_a", "col_b"]
+            multi_column_results, correlated_data, columns=["col_a", "col_b"], backend=local_backend
         )
 
         assert copula.column_names == ["col_a", "col_b"]
         assert len(copula.marginals) == 2
         assert copula.correlation_matrix.shape == (2, 2)
 
-    def test_fit_requires_minimum_columns(self, multi_column_results, correlated_data):
+    def test_fit_requires_minimum_columns(self, multi_column_results, correlated_data, local_backend):
         """Test that fit requires at least 2 columns."""
         with pytest.raises(ValueError, match="at least 2 columns"):
             GaussianCopula.fit(
-                multi_column_results, correlated_data, columns=["col_a"]
+                multi_column_results, correlated_data, columns=["col_a"], backend=local_backend
             )
 
-    def test_fit_missing_columns_error(self, multi_column_results, correlated_data):
+    def test_fit_missing_columns_error(self, multi_column_results, correlated_data, local_backend):
         """Test error when columns not in results."""
         with pytest.raises(ValueError, match="not found in results"):
             GaussianCopula.fit(
-                multi_column_results, correlated_data, columns=["col_a", "nonexistent"]
+                multi_column_results, correlated_data, columns=["col_a", "nonexistent"], backend=local_backend
             )
 
 
@@ -247,85 +250,6 @@ class TestGaussianCopulaSample:
             assert p_value > 0.01, f"Column {col}: KS={ks_stat}, p={p_value}"
 
 
-class TestGaussianCopulaSampleSpark:
-    """Tests for distributed sampling via sample_spark()."""
-
-    def test_sample_spark_basic(self, simple_copula, spark_session):
-        """Test basic Spark sampling."""
-        samples_df = simple_copula.sample_spark(n=1000, spark=spark_session)
-
-        assert samples_df.count() == 1000
-        assert set(samples_df.columns) == {"col_a", "col_b", "col_c"}
-
-    def test_sample_spark_reproducibility(self, simple_copula, spark_session):
-        """Test Spark sampling reproducibility."""
-        df1 = simple_copula.sample_spark(
-            n=100, spark=spark_session, num_partitions=2, random_seed=42
-        )
-        df2 = simple_copula.sample_spark(
-            n=100, spark=spark_session, num_partitions=2, random_seed=42
-        )
-
-        # Convert to pandas and sort for comparison
-        pdf1 = df1.toPandas().sort_values("col_a").reset_index(drop=True)
-        pdf2 = df2.toPandas().sort_values("col_a").reset_index(drop=True)
-
-        for col in simple_copula.column_names:
-            np.testing.assert_array_almost_equal(pdf1[col].values, pdf2[col].values)
-
-    def test_sample_spark_different_seeds(self, simple_copula, spark_session):
-        """Test that different seeds produce different results."""
-        df1 = simple_copula.sample_spark(n=100, spark=spark_session, random_seed=42)
-        df2 = simple_copula.sample_spark(n=100, spark=spark_session, random_seed=123)
-
-        pdf1 = df1.toPandas()
-        pdf2 = df2.toPandas()
-
-        # Sample values should be different (not identical)
-        # Check that at least some values differ
-        assert not np.allclose(
-            pdf1["col_a"].sort_values().values,
-            pdf2["col_a"].sort_values().values,
-        )
-
-    def test_sample_spark_preserves_correlation(self, simple_copula, spark_session):
-        """Test that Spark sampling preserves correlation."""
-        samples_df = simple_copula.sample_spark(
-            n=5000, spark=spark_session, random_seed=42
-        )
-        pdf = samples_df.toPandas()
-
-        # Compute Spearman correlation of samples
-        sampled_corr = pdf[simple_copula.column_names].corr(method="spearman").values
-
-        # Should be close to original correlation matrix
-        np.testing.assert_array_almost_equal(
-            sampled_corr, simple_copula.correlation_matrix, decimal=1
-        )
-
-    def test_sample_spark_custom_partitions(self, simple_copula, spark_session):
-        """Test sampling with custom partition count."""
-        samples_df = simple_copula.sample_spark(
-            n=1000, spark=spark_session, num_partitions=4, random_seed=42
-        )
-        assert samples_df.count() == 1000
-
-    def test_sample_spark_return_uniform(self, simple_copula, spark_session):
-        """Test return_uniform=True in sample_spark()."""
-        samples_df = simple_copula.sample_spark(
-            n=1000, spark=spark_session, random_seed=42, return_uniform=True
-        )
-
-        pdf = samples_df.toPandas()
-        for col in simple_copula.column_names:
-            arr = pdf[col].values
-            # Uniform samples should be in [0, 1]
-            assert np.all(arr >= 0.0)
-            assert np.all(arr <= 1.0)
-            # Should be roughly uniformly distributed
-            assert 0.3 < np.mean(arr) < 0.7  # Mean should be ~0.5
-
-
 class TestGaussianCopulaSerialization:
     """Tests for save/load functionality."""
 
@@ -431,7 +355,7 @@ class TestGaussianCopulaSerialization:
 class TestGaussianCopulaEdgeCases:
     """Edge case tests."""
 
-    def test_two_columns_minimum(self, spark_session):
+    def test_two_columns_minimum(self, local_backend):
         """Test copula with exactly 2 columns (minimum)."""
         np.random.seed(42)
         n = 1000
@@ -442,13 +366,12 @@ class TestGaussianCopulaEdgeCases:
         col_a = 50 + 10 * mvn[:, 0]
         col_b = 100 + 20 * mvn[:, 1]
 
-        data = [(float(a), float(b)) for a, b in zip(col_a, col_b)]
-        df = spark_session.createDataFrame(data, ["col_a", "col_b"])
+        df = pd.DataFrame({"col_a": col_a, "col_b": col_b})
 
-        fitter = DistributionFitter(spark_session, random_seed=42)
+        fitter = DistributionFitter(backend=local_backend, random_seed=42)
         results = fitter.fit(df, columns=["col_a", "col_b"], max_distributions=3)
 
-        copula = GaussianCopula.fit(results, df)
+        copula = GaussianCopula.fit(results, df, backend=local_backend)
         assert len(copula.column_names) == 2
 
         samples = copula.sample(n=100)
@@ -489,16 +412,11 @@ class TestGaussianCopulaEdgeCases:
         for col in simple_copula.column_names:
             assert len(samples[col]) == 0
 
-    def test_sample_spark_with_one_sample(self, simple_copula, spark_session):
-        """Test Spark sampling with exactly 1 sample."""
-        df = simple_copula.sample_spark(n=1, spark=spark_session, random_seed=42)
-        assert df.count() == 1
-
 
 class TestGaussianCopulaIntegration:
     """Integration tests for end-to-end workflows."""
 
-    def test_fit_sample_verify_workflow(self, spark_session):
+    def test_fit_sample_verify_workflow(self, local_backend):
         """Test complete workflow: generate data, fit, sample, verify."""
         np.random.seed(42)
         n = 3000
@@ -511,15 +429,14 @@ class TestGaussianCopulaIntegration:
         col_a = 50 + 10 * mvn[:, 0]  # Normal(50, 10)
         col_b = np.exp(mvn[:, 1])  # Log-normal
 
-        data = [(float(a), float(b)) for a, b in zip(col_a, col_b)]
-        df = spark_session.createDataFrame(data, ["col_a", "col_b"])
+        df = pd.DataFrame({"col_a": col_a, "col_b": col_b})
 
         # Fit distributions
-        fitter = DistributionFitter(spark_session, random_seed=42)
+        fitter = DistributionFitter(backend=local_backend, random_seed=42)
         results = fitter.fit(df, columns=["col_a", "col_b"], max_distributions=5)
 
         # Fit copula
-        copula = GaussianCopula.fit(results, df)
+        copula = GaussianCopula.fit(results, df, backend=local_backend)
 
         # Sample
         samples = copula.sample(n=3000, random_state=42)
@@ -531,22 +448,174 @@ class TestGaussianCopulaIntegration:
         # Correlation should be close to original
         assert abs(sampled_corr[0, 1] - copula.correlation_matrix[0, 1]) < 0.1
 
-    def test_save_load_sample_spark_workflow(self, simple_copula, spark_session):
+
+# ============================================================================
+# Spark-specific tests (skip if PySpark not installed)
+# ============================================================================
+
+try:
+    from pyspark.sql import SparkSession
+    PYSPARK_AVAILABLE = True
+except ImportError:
+    PYSPARK_AVAILABLE = False
+
+
+@pytest.fixture(scope="module")
+def spark_copula_session():
+    """Create SparkSession for copula tests."""
+    if not PYSPARK_AVAILABLE:
+        pytest.skip("PySpark not installed")
+
+    spark = (
+        SparkSession.builder.appName("spark-copula-tests")
+        .master("local[2]")
+        .config("spark.ui.enabled", "false")
+        .getOrCreate()
+    )
+
+    yield spark
+
+    spark.stop()
+
+
+@pytest.fixture
+def spark_correlated_data(spark_copula_session):
+    """Generate correlated multi-column data as Spark DataFrame."""
+    np.random.seed(42)
+    n = 5000
+
+    mean = [0, 0, 0]
+    cov = [[1.0, 0.7, 0.5], [0.7, 1.0, 0.3], [0.5, 0.3, 1.0]]
+
+    mvn_samples = np.random.multivariate_normal(mean, cov, size=n)
+
+    col_a = 50 + 10 * mvn_samples[:, 0]
+    col_b = st.expon.ppf(st.norm.cdf(mvn_samples[:, 1]), scale=5)
+    col_c = 100 + 20 * mvn_samples[:, 2]
+
+    data = [(float(a), float(b), float(c)) for a, b, c in zip(col_a, col_b, col_c)]
+    return spark_copula_session.createDataFrame(data, ["col_a", "col_b", "col_c"])
+
+
+@pytest.fixture
+def spark_multi_column_results(spark_copula_session, spark_correlated_data):
+    """Fit distributions to multi-column Spark data."""
+    fitter = DistributionFitter(spark_copula_session, random_seed=42)
+    results = fitter.fit(
+        spark_correlated_data,
+        columns=["col_a", "col_b", "col_c"],
+        max_distributions=5,
+    )
+    return results
+
+
+@pytest.fixture
+def spark_simple_copula(spark_multi_column_results, spark_correlated_data):
+    """Create a fitted GaussianCopula from Spark data."""
+    return GaussianCopula.fit(spark_multi_column_results, spark_correlated_data)
+
+
+@pytest.mark.spark
+@pytest.mark.skipif(not PYSPARK_AVAILABLE, reason="PySpark not installed")
+class TestGaussianCopulaSampleSpark:
+    """Tests for distributed sampling via sample_spark()."""
+
+    def test_sample_spark_basic(self, spark_simple_copula, spark_copula_session):
+        """Test basic Spark sampling."""
+        samples_df = spark_simple_copula.sample_spark(n=1000, spark=spark_copula_session)
+
+        assert samples_df.count() == 1000
+        assert set(samples_df.columns) == {"col_a", "col_b", "col_c"}
+
+    def test_sample_spark_reproducibility(self, spark_simple_copula, spark_copula_session):
+        """Test Spark sampling reproducibility."""
+        df1 = spark_simple_copula.sample_spark(
+            n=100, spark=spark_copula_session, num_partitions=2, random_seed=42
+        )
+        df2 = spark_simple_copula.sample_spark(
+            n=100, spark=spark_copula_session, num_partitions=2, random_seed=42
+        )
+
+        # Convert to pandas and sort for comparison
+        pdf1 = df1.toPandas().sort_values("col_a").reset_index(drop=True)
+        pdf2 = df2.toPandas().sort_values("col_a").reset_index(drop=True)
+
+        for col in spark_simple_copula.column_names:
+            np.testing.assert_array_almost_equal(pdf1[col].values, pdf2[col].values)
+
+    def test_sample_spark_different_seeds(self, spark_simple_copula, spark_copula_session):
+        """Test that different seeds produce different results."""
+        df1 = spark_simple_copula.sample_spark(n=100, spark=spark_copula_session, random_seed=42)
+        df2 = spark_simple_copula.sample_spark(n=100, spark=spark_copula_session, random_seed=123)
+
+        pdf1 = df1.toPandas()
+        pdf2 = df2.toPandas()
+
+        # Sample values should be different (not identical)
+        # Check that at least some values differ
+        assert not np.allclose(
+            pdf1["col_a"].sort_values().values,
+            pdf2["col_a"].sort_values().values,
+        )
+
+    def test_sample_spark_preserves_correlation(self, spark_simple_copula, spark_copula_session):
+        """Test that Spark sampling preserves correlation."""
+        samples_df = spark_simple_copula.sample_spark(
+            n=5000, spark=spark_copula_session, random_seed=42
+        )
+        pdf = samples_df.toPandas()
+
+        # Compute Spearman correlation of samples
+        sampled_corr = pdf[spark_simple_copula.column_names].corr(method="spearman").values
+
+        # Should be close to original correlation matrix
+        np.testing.assert_array_almost_equal(
+            sampled_corr, spark_simple_copula.correlation_matrix, decimal=1
+        )
+
+    def test_sample_spark_custom_partitions(self, spark_simple_copula, spark_copula_session):
+        """Test sampling with custom partition count."""
+        samples_df = spark_simple_copula.sample_spark(
+            n=1000, spark=spark_copula_session, num_partitions=4, random_seed=42
+        )
+        assert samples_df.count() == 1000
+
+    def test_sample_spark_return_uniform(self, spark_simple_copula, spark_copula_session):
+        """Test return_uniform=True in sample_spark()."""
+        samples_df = spark_simple_copula.sample_spark(
+            n=1000, spark=spark_copula_session, random_seed=42, return_uniform=True
+        )
+
+        pdf = samples_df.toPandas()
+        for col in spark_simple_copula.column_names:
+            arr = pdf[col].values
+            # Uniform samples should be in [0, 1]
+            assert np.all(arr >= 0.0)
+            assert np.all(arr <= 1.0)
+            # Should be roughly uniformly distributed
+            assert 0.3 < np.mean(arr) < 0.7  # Mean should be ~0.5
+
+    def test_sample_spark_with_one_sample(self, spark_simple_copula, spark_copula_session):
+        """Test Spark sampling with exactly 1 sample."""
+        df = spark_simple_copula.sample_spark(n=1, spark=spark_copula_session, random_seed=42)
+        assert df.count() == 1
+
+    def test_save_load_sample_spark_workflow(self, spark_simple_copula, spark_copula_session):
         """Test serialization then distributed sampling."""
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = Path(f.name)
 
         try:
             # Save
-            simple_copula.save(path)
+            spark_simple_copula.save(path)
 
             # Load
             loaded = GaussianCopula.load(path)
 
             # Sample via Spark
-            samples_df = loaded.sample_spark(n=1000, spark=spark_session, random_seed=42)
+            samples_df = loaded.sample_spark(n=1000, spark=spark_copula_session, random_seed=42)
 
             assert samples_df.count() == 1000
-            assert set(samples_df.columns) == set(simple_copula.column_names)
+            assert set(samples_df.columns) == set(spark_simple_copula.column_names)
         finally:
             path.unlink()

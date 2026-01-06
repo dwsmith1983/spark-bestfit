@@ -1,8 +1,12 @@
-"""Tests for core distribution fitting module."""
+"""Tests for core distribution fitting module.
+
+Uses LocalBackend for most tests. Spark-specific tests are in test_spark_backend.py.
+"""
 
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from spark_bestfit import (
@@ -10,9 +14,11 @@ from spark_bestfit import (
     DEFAULT_EXCLUDED_DISTRIBUTIONS,
     DiscreteDistributionFitter,
     DistributionFitter,
+    LocalBackend,
 )
 from spark_bestfit.distributions import DistributionRegistry
 from spark_bestfit.results import FitResults
+
 
 class TestDistributionFitter:
     """Tests for DistributionFitter class."""
@@ -22,15 +28,14 @@ class TestDistributionFitter:
         (("norm", "expon"), 123, ("norm", "expon"), 123),  # custom
         ((), 42, (), 42),  # empty exclusions
     ])
-    def test_initialization(self, spark_session, excluded, seed, expected_excluded, expected_seed):
+    def test_initialization(self, local_backend, excluded, seed, expected_excluded, expected_seed):
         """Test fitter initialization with various configurations."""
-        fitter = DistributionFitter(spark_session, excluded_distributions=excluded, random_seed=seed)
+        fitter = DistributionFitter(backend=local_backend, excluded_distributions=excluded, random_seed=seed)
 
-        assert fitter.spark is spark_session
         assert fitter.excluded_distributions == expected_excluded
         assert fitter.random_seed == expected_seed
 
-    def test_empty_exclusions_uses_all_distributions(self, spark_session):
+    def test_empty_exclusions_uses_all_distributions(self, local_backend):
         """Test that excluded_distributions=() enables ALL scipy distributions.
 
         This is a regression test for issue #78 where excluded_distributions=()
@@ -46,7 +51,7 @@ class TestDistributionFitter:
         assert len(all_dists) > len(default_dists), "ALL should have more distributions than default"
 
         # Create fitter with empty exclusions
-        fitter = DistributionFitter(spark_session, excluded_distributions=())
+        fitter = DistributionFitter(backend=local_backend, excluded_distributions=())
 
         # Verify the fitter's registry has ALL distributions
         fitter_dists = fitter._registry.get_distributions()
@@ -55,14 +60,14 @@ class TestDistributionFitter:
             f"got {len(fitter_dists)}"
         )
 
-    def test_default_exclusions_applied(self, spark_session):
+    def test_default_exclusions_applied(self, local_backend):
         """Test that default behavior applies DEFAULT_EXCLUSIONS."""
         from spark_bestfit.distributions import DistributionRegistry
 
         default_dists = DistributionRegistry().get_distributions()
 
         # Create fitter with default exclusions (excluded_distributions=None)
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Verify the fitter's registry uses default exclusions
         fitter_dists = fitter._registry.get_distributions()
@@ -70,10 +75,10 @@ class TestDistributionFitter:
             f"Default fitter should have {len(default_dists)} distributions, got {len(fitter_dists)}"
         )
 
-    def test_fit_basic(self, spark_session, small_dataset):
+    def test_fit_basic(self, local_backend, pandas_dataset):
         """Test basic fitting operation returns valid results."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
 
         # Should return results
         assert results.count() == 5  # Requested 5 distributions
@@ -86,11 +91,11 @@ class TestDistributionFitter:
         assert isinstance(best.ks_statistic, float) and 0 <= best.ks_statistic <= 1
         assert isinstance(best.pvalue, float) and 0 <= best.pvalue <= 1
 
-    def test_fit_identifies_correct_distribution(self, spark_session, normal_data):
+    def test_fit_identifies_correct_distribution(self, local_backend, normal_data):
         """Test that fitter can fit normal data well with appropriate distributions."""
-        df = spark_session.createDataFrame([(float(x),) for x in normal_data], ["value"])
+        df = pd.DataFrame({"value": normal_data})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         # Fit a smaller set to ensure norm is included (distributions sorted alphabetically)
         results = fitter.fit(df, column="value", max_distributions=5)
 
@@ -99,33 +104,37 @@ class TestDistributionFitter:
         assert best.sse < 0.1, f"Best fit SSE too high: {best.sse}"
         assert best.ks_statistic < 0.1, f"Best fit KS too high: {best.ks_statistic}"
 
-    def test_fit_with_custom_bins(self, spark_session, small_dataset):
+    def test_fit_with_custom_bins(self, local_backend, pandas_dataset):
         """Test fitting with custom number of bins."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", bins=25, max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", bins=25, max_distributions=5)
 
         # Should fit all 5 requested distributions
         assert results.count() == 5
 
-    def test_fit_support_at_zero(self, spark_session, positive_dataset):
+    def test_fit_support_at_zero(self, local_backend, pandas_positive_dataset):
         """Test fitting only non-negative distributions."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(positive_dataset, column="value", support_at_zero=True, max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_positive_dataset, column="value", support_at_zero=True, max_distributions=5)
 
         # Should fit all 5 requested non-negative distributions
         assert results.count() == 5
 
         # All distributions should be non-negative
         registry = DistributionRegistry()
-        df_pandas = results.df.toPandas()
-        for dist_name in df_pandas["distribution"]:
+        df_results = results.df
+        for dist_name in df_results["distribution"]:
             assert registry._has_support_at_zero(dist_name) is True
 
-    def test_fit_with_sampling(self, spark_session, medium_dataset):
+    def test_fit_with_sampling(self, local_backend):
         """Test fitting with sampling enabled."""
-        fitter = DistributionFitter(spark_session)
+        np.random.seed(42)
+        large_data = np.random.normal(loc=50, scale=10, size=100_000)
+        df = pd.DataFrame({"value": large_data})
+
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(
-            medium_dataset,
+            df,
             column="value",
             enable_sampling=True,
             sample_fraction=0.5,
@@ -140,45 +149,53 @@ class TestDistributionFitter:
         (False, 10_000_000, "sampling disabled"),
         (True, 100_000, "below threshold"),
     ])
-    def test_apply_sampling_returns_original(self, spark_session, small_dataset, enable, threshold, desc):
+    def test_apply_sampling_returns_original(self, local_backend, pandas_dataset, enable, threshold, desc):
         """Test that original DataFrame is returned when sampling doesn't apply."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         df_sampled = fitter._apply_sampling(
-            small_dataset, row_count=10_000, enable_sampling=enable,
+            pandas_dataset, row_count=10_000, enable_sampling=enable,
             sample_fraction=None, max_sample_size=1_000_000, sample_threshold=threshold
         )
-        assert df_sampled.count() == small_dataset.count()
+        assert len(df_sampled) == len(pandas_dataset)
 
-    def test_apply_sampling_with_fraction(self, spark_session, medium_dataset):
+    def test_apply_sampling_with_fraction(self, local_backend):
         """Test sampling with specified fraction."""
-        fitter = DistributionFitter(spark_session)
+        np.random.seed(42)
+        medium_data = np.random.normal(loc=50, scale=10, size=100_000)
+        df = pd.DataFrame({"value": medium_data})
+
+        fitter = DistributionFitter(backend=local_backend)
         df_sampled = fitter._apply_sampling(
-            medium_dataset, row_count=100_000, enable_sampling=True,
+            df, row_count=100_000, enable_sampling=True,
             sample_fraction=0.5, max_sample_size=1_000_000, sample_threshold=50_000
         )
 
         # Should sample ~50% of data
-        sampled_count = df_sampled.count()
+        sampled_count = len(df_sampled)
         assert 45_000 < sampled_count < 55_000  # Allow some variance
 
-    def test_apply_sampling_auto_fraction(self, spark_session, medium_dataset):
+    def test_apply_sampling_auto_fraction(self, local_backend):
         """Test sampling with auto-determined fraction."""
-        fitter = DistributionFitter(spark_session)
+        np.random.seed(42)
+        medium_data = np.random.normal(loc=50, scale=10, size=100_000)
+        df = pd.DataFrame({"value": medium_data})
+
+        fitter = DistributionFitter(backend=local_backend)
         df_sampled = fitter._apply_sampling(
-            medium_dataset, row_count=100_000, enable_sampling=True,
+            df, row_count=100_000, enable_sampling=True,
             sample_fraction=None, max_sample_size=50_000, sample_threshold=50_000
         )
 
         # Should sample to max_sample_size
-        sampled_count = df_sampled.count()
+        sampled_count = len(df_sampled)
         assert sampled_count <= 55_000  # Allow some variance
 
-    def test_create_fitting_sample(self, spark_session, small_dataset):
+    def test_create_fitting_sample(self, local_backend, pandas_dataset):
         """Test creating sample for distribution fitting."""
-        fitter = DistributionFitter(spark_session)
-        row_count = small_dataset.count()
+        fitter = DistributionFitter(backend=local_backend)
+        row_count = len(pandas_dataset)
 
-        sample = fitter._create_fitting_sample(small_dataset, "value", row_count)
+        sample = fitter._create_fitting_sample(pandas_dataset, "value", row_count)
 
         # Should be numpy array
         assert isinstance(sample, np.ndarray)
@@ -187,19 +204,19 @@ class TestDistributionFitter:
         assert len(sample) <= 10_000
 
     @pytest.mark.parametrize("num_dists", [5, 100])
-    def test_calculate_partitions(self, spark_session, num_dists):
+    def test_calculate_partitions(self, local_backend, num_dists):
         """Test partition calculation returns reasonable values."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         # _calculate_partitions now takes a list of distribution names
         dists = ["norm", "expon", "gamma", "beta", "uniform"][:num_dists] if num_dists <= 5 else \
                 DistributionRegistry().get_distributions()[:num_dists]
         partitions = fitter._calculate_partitions(dists)
         assert 1 <= partitions <= len(dists) * 3  # Allow for slow distribution weighting
 
-    def test_fit_caches_results(self, spark_session, small_dataset):
+    def test_fit_caches_results(self, local_backend, pandas_dataset):
         """Test that fit results are cached and consistent."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
 
         # Access results multiple times (should use cache)
         count1 = results.count()
@@ -217,60 +234,63 @@ class TestDistributionFitter:
         assert best1.parameters == best2.parameters
 
         # DataFrame should also be consistent
-        df1 = results.df.toPandas()
-        df2 = results.df.toPandas()
+        df1 = results.df
+        df2 = results.df
         assert len(df1) == len(df2)
         assert list(df1["distribution"]) == list(df2["distribution"])
 
-    def test_fit_filters_failed_fits(self, spark_session, small_dataset):
+    def test_fit_filters_failed_fits(self, local_backend, pandas_dataset):
         """Test that failed fits are filtered out."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
 
         # All results should have finite SSE
-        df_pandas = results.df.toPandas()
-        assert all(np.isfinite(df_pandas["sse"]))
+        df_results = results.df
+        assert all(np.isfinite(df_results["sse"]))
 
-    def test_fit_with_constant_data(self, spark_session, constant_dataset):
+    def test_fit_with_constant_data(self, local_backend):
         """Test fitting with constant data (edge case)."""
-        fitter = DistributionFitter(spark_session)
+        data = np.full(1000, 42.0)
+        df = pd.DataFrame({"value": data})
+
+        fitter = DistributionFitter(backend=local_backend)
 
         # Should handle gracefully without crashing
-        results = fitter.fit(constant_dataset, column="value", max_distributions=5)
+        results = fitter.fit(df, column="value", max_distributions=5)
 
         # Returns valid FitResults (may have 0 or more distributions)
         assert isinstance(results, FitResults)
         # Verify we can call methods on it without error
-        _ = results.df.toPandas()
+        _ = results.df
 
-    def test_fit_with_rice_rule(self, spark_session, small_dataset):
+    def test_fit_with_rice_rule(self, local_backend, pandas_dataset):
         """Test fitting with Rice rule for bins."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", use_rice_rule=True, max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", use_rice_rule=True, max_distributions=5)
 
         # Should fit all 5 requested distributions
         assert results.count() == 5
 
-    def test_fit_excluded_distributions(self, spark_session, small_dataset):
+    def test_fit_excluded_distributions(self, local_backend, pandas_dataset):
         """Test that excluded distributions are not fitted."""
-        fitter = DistributionFitter(spark_session, excluded_distributions=("norm", "expon"))
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend, excluded_distributions=("norm", "expon"))
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
 
         # norm and expon should not be in results
-        df_pandas = results.df.toPandas()
-        assert "norm" not in df_pandas["distribution"].values
-        assert "expon" not in df_pandas["distribution"].values
+        df_results = results.df
+        assert "norm" not in df_results["distribution"].values
+        assert "expon" not in df_results["distribution"].values
 
-    def test_fit_multiple_columns_sequential(self, spark_session):
+    def test_fit_multiple_columns_sequential(self, local_backend):
         """Test fitting multiple columns sequentially."""
         # Create DataFrame with multiple columns
         np.random.seed(42)
         data1 = np.random.normal(50, 10, 10_000)
         data2 = np.random.exponential(5, 10_000)
 
-        df = spark_session.createDataFrame([(float(x), float(y)) for x, y in zip(data1, data2)], ["col1", "col2"])
+        df = pd.DataFrame({"col1": data1, "col2": data2})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Fit first column
         results1 = fitter.fit(df, column="col1", max_distributions=5)
@@ -292,14 +312,14 @@ class TestDistributionFitter:
         assert "norm" in top1 or best1.sse < 0.01
         assert "expon" in top2 or best2.sse < 0.01
 
-    def test_fit_reproducibility(self, spark_session, small_dataset):
+    def test_fit_reproducibility(self, local_backend, pandas_dataset):
         """Test that fitting is reproducible with same seed."""
-        fitter1 = DistributionFitter(spark_session, random_seed=42)
-        fitter2 = DistributionFitter(spark_session, random_seed=42)
+        fitter1 = DistributionFitter(backend=local_backend, random_seed=42)
+        fitter2 = DistributionFitter(backend=local_backend, random_seed=42)
 
         # Use max_distributions to speed up test
-        results1 = fitter1.fit(small_dataset, column="value", max_distributions=5)
-        results2 = fitter2.fit(small_dataset, column="value", max_distributions=5)
+        results1 = fitter1.fit(pandas_dataset, column="value", max_distributions=5)
+        results2 = fitter2.fit(pandas_dataset, column="value", max_distributions=5)
 
         # Should get same best distribution
         best1 = results1.best(n=1)[0]
@@ -313,36 +333,30 @@ class TestDistributionFitter:
 class TestMultiColumnFitting:
     """Tests for multi-column distribution fitting."""
 
-    def test_fit_multiple_columns_basic(self, spark_session):
+    def test_fit_multiple_columns_basic(self, local_backend):
         """Test basic multi-column fitting."""
         np.random.seed(42)
         data1 = np.random.normal(50, 10, 5000)
         data2 = np.random.exponential(5, 5000)
 
-        df = spark_session.createDataFrame(
-            [(float(a), float(b)) for a, b in zip(data1, data2)],
-            ["col1", "col2"]
-        )
+        df = pd.DataFrame({"col1": data1, "col2": data2})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(df, columns=["col1", "col2"], max_distributions=3)
 
         # Should have results for both columns
         assert results.count() == 6  # 2 columns × 3 distributions
         assert set(results.column_names) == {"col1", "col2"}
 
-    def test_fit_multiple_columns_filtering(self, spark_session):
+    def test_fit_multiple_columns_filtering(self, local_backend):
         """Test filtering multi-column results by column."""
         np.random.seed(42)
         data1 = np.random.normal(50, 10, 5000)
         data2 = np.random.exponential(5, 5000)
 
-        df = spark_session.createDataFrame(
-            [(float(a), float(b)) for a, b in zip(data1, data2)],
-            ["normal_col", "expon_col"]
-        )
+        df = pd.DataFrame({"normal_col": data1, "expon_col": data2})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(df, columns=["normal_col", "expon_col"], max_distributions=3)
 
         # Filter to single column
@@ -352,18 +366,15 @@ class TestMultiColumnFitting:
         expon_results = results.for_column("expon_col")
         assert expon_results.count() == 3
 
-    def test_fit_multiple_columns_best_per_column(self, spark_session):
+    def test_fit_multiple_columns_best_per_column(self, local_backend):
         """Test best_per_column method."""
         np.random.seed(42)
         data1 = np.random.normal(50, 10, 5000)
         data2 = np.random.exponential(5, 5000)
 
-        df = spark_session.createDataFrame(
-            [(float(a), float(b)) for a, b in zip(data1, data2)],
-            ["col1", "col2"]
-        )
+        df = pd.DataFrame({"col1": data1, "col2": data2})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(df, columns=["col1", "col2"], max_distributions=5)
 
         best_per_col = results.best_per_column(n=1)
@@ -375,198 +386,137 @@ class TestMultiColumnFitting:
         assert best_per_col["col1"][0].column_name == "col1"
         assert best_per_col["col2"][0].column_name == "col2"
 
-    def test_fit_backward_compatibility(self, spark_session, small_dataset):
+    def test_fit_backward_compatibility(self, local_backend, pandas_dataset):
         """Test that single column API still works with positional arg."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         # Using positional argument (backward compatible)
-        results = fitter.fit(small_dataset, "value", max_distributions=3)
+        results = fitter.fit(pandas_dataset, "value", max_distributions=3)
 
         assert results.count() == 3
         best = results.best(n=1)[0]
         assert best.column_name == "value"
 
-    def test_fit_mutually_exclusive_params(self, spark_session, small_dataset):
+    def test_fit_mutually_exclusive_params(self, local_backend, pandas_dataset):
         """Test error when both column and columns provided."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="Cannot provide both"):
-            fitter.fit(small_dataset, column="value", columns=["value"])
+            fitter.fit(pandas_dataset, column="value", columns=["value"])
 
-    def test_fit_no_column_params(self, spark_session, small_dataset):
+    def test_fit_no_column_params(self, local_backend, pandas_dataset):
         """Test error when neither column nor columns provided."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="Must provide either"):
-            fitter.fit(small_dataset)
+            fitter.fit(pandas_dataset)
 
-    def test_fit_invalid_column_in_list(self, spark_session, small_dataset):
+    def test_fit_invalid_column_in_list(self, local_backend, pandas_dataset):
         """Test error when invalid column in columns list."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="not found"):
-            fitter.fit(small_dataset, columns=["value", "nonexistent"])
+            fitter.fit(pandas_dataset, columns=["value", "nonexistent"])
 
-    def test_fit_single_column_via_columns_param(self, spark_session, small_dataset):
+    def test_fit_single_column_via_columns_param(self, local_backend, pandas_dataset):
         """Test fitting single column using columns parameter."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, columns=["value"], max_distributions=3)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, columns=["value"], max_distributions=3)
 
         assert results.count() == 3
         assert results.column_names == ["value"]
 
 
-class TestBroadcastCleanup:
-    """Tests for broadcast variable cleanup.
+class TestDistributionFitterPlotting:
+    """Tests for plotting functionality.
 
-    These tests verify that fit() properly cleans up broadcast variables by
-    patching Broadcast.unpersist at the class level to track calls.
+    Note: The fitter's plot() and plot_qq() methods currently use Spark DataFrame API
+    directly (df.select, df.sample, etc.) which isn't backend-agnostic. These tests
+    use the plotting module directly with numpy arrays instead.
     """
 
-    def test_broadcast_cleanup_on_success(self, spark_session, small_dataset):
-        """Verify unpersist() is called on broadcast variables after successful fit."""
-        from pyspark import Broadcast
+    def test_plot_after_fit(self, local_backend, pandas_dataset):
+        """Test plotting after fitting using the plotting module directly."""
+        from spark_bestfit.plotting import plot_distribution
 
-        fitter = DistributionFitter(spark_session)
-
-        # Track unpersist calls at Broadcast class level
-        unpersist_calls = []
-        original_unpersist = Broadcast.unpersist
-
-        def tracked_unpersist(self, blocking=False):
-            unpersist_calls.append(self._jbroadcast.id())
-            return original_unpersist(self, blocking)
-
-        with patch.object(Broadcast, "unpersist", tracked_unpersist):
-            results = fitter.fit(small_dataset, column="value", max_distributions=3)
-            assert results.count() > 0
-
-        # Verify both broadcasts (histogram_bc and data_sample_bc) were unpersisted
-        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls, got {len(unpersist_calls)}"
-
-    def test_discrete_broadcast_cleanup_on_success(self, spark_session):
-        """Verify unpersist() is called for discrete fitter broadcasts."""
-        from pyspark import Broadcast
-
-        # Create discrete data
-        data = [(int(x),) for x in np.random.poisson(lam=5, size=1000)]
-        df = spark_session.createDataFrame(data, ["value"])
-
-        fitter = DiscreteDistributionFitter(spark_session)
-
-        # Track unpersist calls at Broadcast class level
-        unpersist_calls = []
-        original_unpersist = Broadcast.unpersist
-
-        def tracked_unpersist(self, blocking=False):
-            unpersist_calls.append(self._jbroadcast.id())
-            return original_unpersist(self, blocking)
-
-        with patch.object(Broadcast, "unpersist", tracked_unpersist):
-            results = fitter.fit(df, column="value", max_distributions=3)
-            assert results.count() > 0
-
-        # Verify both broadcasts were unpersisted
-        assert len(unpersist_calls) == 2, f"Expected 2 unpersist calls, got {len(unpersist_calls)}"
-
-    def test_broadcast_cleanup_on_get_distributions_exception(self, spark_session, small_dataset):
-        """Verify no broadcasts leak when get_distributions() raises.
-
-        With the refactored architecture, broadcasts are created inside
-        _fit_single_column(), which is called AFTER get_distributions().
-        If get_distributions() fails, no broadcasts have been created yet,
-        so no cleanup is needed. This is actually better than the old design
-        because it minimizes resource allocation before potential failures.
-        """
-        fitter = DistributionFitter(spark_session)
-
-        with patch.object(
-            fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
-        ):
-            with pytest.raises(ValueError, match="Injected error"):
-                fitter.fit(small_dataset, column="value", max_distributions=3)
-
-        # No broadcasts should have been created, so no cleanup needed
-
-    def test_discrete_broadcast_cleanup_on_get_distributions_exception(self, spark_session):
-        """Verify no discrete broadcasts leak when get_distributions() raises.
-
-        Broadcasts are created after get_distributions() is called, so if
-        get_distributions() fails, no broadcasts have been created yet.
-        """
-        data = [(int(x),) for x in np.random.poisson(lam=5, size=1000)]
-        df = spark_session.createDataFrame(data, ["value"])
-
-        fitter = DiscreteDistributionFitter(spark_session)
-
-        with patch.object(
-            fitter._registry, "get_distributions", side_effect=ValueError("Injected error")
-        ):
-            with pytest.raises(ValueError, match="Injected error"):
-                fitter.fit(df, column="value", max_distributions=3)
-
-        # No broadcasts should have been created, so no cleanup needed
-
-
-class TestDistributionFitterPlotting:
-    """Tests for plotting functionality."""
-
-    def test_plot_after_fit(self, spark_session, small_dataset):
-        """Test plotting after fitting."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
         best = results.best(n=1)[0]
 
-        # Should not raise error (df and column are now required)
-        fig, ax = fitter.plot(best, small_dataset, "value")
+        # Create histogram from data for plotting
+        data = pandas_dataset["value"].values
+        y_hist, bin_edges = np.histogram(data, bins=30, density=True)
+        x_hist = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        fig, ax = plot_distribution(result=best, y_hist=y_hist, x_hist=x_hist)
 
         assert fig is not None
         assert ax is not None
 
-    def test_plot_with_title(self, spark_session, small_dataset):
+    def test_plot_with_title(self, local_backend, pandas_dataset):
         """Test plotting with title."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        from spark_bestfit.plotting import plot_distribution
+
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
         best = results.best(n=1)[0]
 
-        # Should work with explicit data and title
-        fig, ax = fitter.plot(best, small_dataset, "value", title="Test Plot")
+        # Create histogram from data for plotting
+        data = pandas_dataset["value"].values
+        y_hist, bin_edges = np.histogram(data, bins=30, density=True)
+        x_hist = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        fig, ax = plot_distribution(result=best, y_hist=y_hist, x_hist=x_hist, title="Test Plot")
 
         assert fig is not None
         assert ax is not None
 
-    def test_plot_with_custom_params(self, spark_session, small_dataset):
+    def test_plot_with_custom_params(self, local_backend, pandas_dataset):
         """Test plotting with custom parameters."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        from spark_bestfit.plotting import plot_distribution
+
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
         best = results.best(n=1)[0]
 
-        # Should work with custom figsize, dpi, etc.
-        fig, ax = fitter.plot(
-            best, small_dataset, "value",
+        # Create histogram from data for plotting with custom params
+        data = pandas_dataset["value"].values
+        y_hist, bin_edges = np.histogram(data, bins=30, density=True)
+        x_hist = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        fig, ax = plot_distribution(
+            result=best, y_hist=y_hist, x_hist=x_hist,
             figsize=(16, 10), dpi=150, title="Custom Plot"
         )
 
         assert fig is not None
         assert ax is not None
 
-    def test_plot_qq_after_fit(self, spark_session, small_dataset):
+    def test_plot_qq_after_fit(self, local_backend, pandas_dataset):
         """Test Q-Q plotting after fitting."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        from spark_bestfit.plotting import plot_qq
+
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
         best = results.best(n=1)[0]
 
-        fig, ax = fitter.plot_qq(best, small_dataset, "value")
+        # Use plotting module directly with numpy array
+        data = pandas_dataset["value"].values
+        fig, ax = plot_qq(result=best, data=data)
 
         assert fig is not None
         assert ax is not None
 
-    def test_plot_qq_with_max_points(self, spark_session, small_dataset):
+    def test_plot_qq_with_max_points(self, local_backend, pandas_dataset):
         """Test Q-Q plotting with custom max_points."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=5)
+        from spark_bestfit.plotting import plot_qq
+
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
         best = results.best(n=1)[0]
 
-        fig, ax = fitter.plot_qq(best, small_dataset, "value", max_points=500, title="Q-Q Test")
+        # Use plotting module directly - sample data manually
+        data = pandas_dataset["value"].values[:500]  # Limit to 500 points
+        fig, ax = plot_qq(result=best, data=data, title="Q-Q Test")
 
         assert fig is not None
         assert ax is not None
@@ -575,43 +525,43 @@ class TestDistributionFitterPlotting:
 class TestEdgeCases:
     """Tests for edge cases and error handling."""
 
-    def test_very_small_dataset(self, spark_session):
+    def test_very_small_dataset(self, local_backend):
         """Test with very small dataset."""
         data = np.array([1.0, 2.0, 3.0])
-        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+        df = pd.DataFrame({"value": data})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Should handle gracefully without crashing
         results = fitter.fit(df, column="value", max_distributions=5)
 
         # Returns valid FitResults
         assert isinstance(results, FitResults)
-        _ = results.df.toPandas()
+        _ = results.df
 
-    def test_single_value_dataset(self, spark_session):
+    def test_single_value_dataset(self, local_backend):
         """Test with single value."""
-        df = spark_session.createDataFrame([(42.0,)], ["value"])
+        df = pd.DataFrame({"value": [42.0]})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Should handle gracefully without crashing
         results = fitter.fit(df, column="value", max_distributions=5)
 
         # Returns valid FitResults
         assert isinstance(results, FitResults)
-        _ = results.df.toPandas()
+        _ = results.df
 
-    def test_dataset_with_outliers(self, spark_session):
+    def test_dataset_with_outliers(self, local_backend):
         """Test with dataset containing extreme outliers."""
         np.random.seed(42)
         normal_data = np.random.normal(50, 10, 9995)
         outliers = np.array([1000, -1000, 2000, -2000, 3000])
         data = np.concatenate([normal_data, outliers])
 
-        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+        df = pd.DataFrame({"value": data})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Should handle outliers and fit all 5 requested distributions
         results = fitter.fit(df, column="value", max_distributions=5)
@@ -620,89 +570,87 @@ class TestEdgeCases:
         best = results.best(n=1)[0]
         assert best.sse < np.inf
 
-    def test_apply_sampling_at_threshold(self, spark_session, small_dataset):
+    def test_apply_sampling_at_threshold(self, local_backend, pandas_dataset):
         """Test that data at threshold doesn't sample."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         df_result = fitter._apply_sampling(
-            small_dataset, row_count=10_000, enable_sampling=True,
+            pandas_dataset, row_count=10_000, enable_sampling=True,
             sample_fraction=None, max_sample_size=1_000_000, sample_threshold=10_000
         )
 
         # At threshold should return original data (uses <=)
-        assert df_result.count() == small_dataset.count()
+        assert len(df_result) == len(pandas_dataset)
 
-    def test_fit_max_distributions_zero(self, spark_session, small_dataset):
+    def test_fit_max_distributions_zero(self, local_backend, pandas_dataset):
         """Test fitting with max_distributions=0 raises error."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError):
-            fitter.fit(small_dataset, column="value", max_distributions=0)
+            fitter.fit(pandas_dataset, column="value", max_distributions=0)
 
-    def test_fit_with_different_columns(self, spark_session):
+    def test_fit_with_different_columns(self, local_backend):
         """Test fitting on different column names."""
         np.random.seed(42)
         data = np.random.normal(50, 10, 1000)
-        df = spark_session.createDataFrame([(float(x),) for x in data], ["custom_column_name"])
+        df = pd.DataFrame({"custom_column_name": data})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(df, column="custom_column_name", max_distributions=3)
 
         # Should fit all 3 requested distributions
         assert results.count() == 3
 
-    def test_fit_invalid_bins(self, spark_session, small_dataset):
+    def test_fit_invalid_bins(self, local_backend, pandas_dataset):
         """Test that invalid bins raises error."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="bins must be positive"):
-            fitter.fit(small_dataset, column="value", bins=0)
+            fitter.fit(pandas_dataset, column="value", bins=0)
 
-    def test_fit_invalid_sample_fraction(self, spark_session, small_dataset):
+    def test_fit_invalid_sample_fraction(self, local_backend, pandas_dataset):
         """Test that invalid sample_fraction raises error."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="sample_fraction must be in"):
-            fitter.fit(small_dataset, column="value", sample_fraction=1.5)
+            fitter.fit(pandas_dataset, column="value", sample_fraction=1.5)
+
 
 class TestCoreNegativePaths:
     """Tests for negative/error paths in core module."""
 
-    def test_fit_invalid_column(self, spark_session, small_dataset):
+    def test_fit_invalid_column(self, local_backend, pandas_dataset):
         """Test that fit raises error for invalid column."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="not found"):
-            fitter.fit(small_dataset, column="nonexistent_column", max_distributions=3)
+            fitter.fit(pandas_dataset, column="nonexistent_column", max_distributions=3)
 
-    def test_fit_non_numeric_column(self, spark_session):
+    def test_fit_non_numeric_column(self, local_backend):
         """Test that fit raises error for non-numeric column."""
-        df = spark_session.createDataFrame([("a",), ("b",), ("c",)], ["value"])
-        fitter = DistributionFitter(spark_session)
+        df = pd.DataFrame({"value": ["a", "b", "c"]})
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(TypeError, match="must be numeric"):
             fitter.fit(df, column="value", max_distributions=3)
 
-    def test_fit_empty_dataframe(self, spark_session):
+    def test_fit_empty_dataframe(self, local_backend):
         """Test that fit raises error for empty DataFrame."""
-        from pyspark.sql.types import DoubleType, StructField, StructType
-
-        schema = StructType([StructField("value", DoubleType(), True)])
-        df = spark_session.createDataFrame([], schema)
-        fitter = DistributionFitter(spark_session)
+        df = pd.DataFrame({"value": pd.Series([], dtype=float)})
+        fitter = DistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="empty"):
             fitter.fit(df, column="value", max_distributions=3)
 
-    def test_plot_with_different_data(self, spark_session):
+    def test_plot_with_different_data(self, local_backend):
         """Test that plot works with different data than fit."""
         np.random.seed(42)
         data1 = np.random.normal(50, 10, 1000)
         data2 = np.random.normal(100, 20, 1000)
 
-        df1 = spark_session.createDataFrame([(float(x),) for x in data1], ["value"])
-        df2 = spark_session.createDataFrame([(float(x),) for x in data2], ["value"])
+        df1 = pd.DataFrame({"value": data1})
+        df2 = pd.DataFrame({"value": data2})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Fit on first dataset
         results = fitter.fit(df1, column="value", max_distributions=3)
@@ -716,17 +664,17 @@ class TestCoreNegativePaths:
 class TestDiscreteDistributionFitter:
     """Tests for DiscreteDistributionFitter class."""
 
-    def test_initialization(self, spark_session):
+    def test_initialization(self, local_backend):
         """Test discrete fitter initialization with custom exclusions."""
         custom_exclusions = ("poisson", "geom")
         fitter = DiscreteDistributionFitter(
-            spark_session, excluded_distributions=custom_exclusions, random_seed=123
+            backend=local_backend, excluded_distributions=custom_exclusions, random_seed=123
         )
 
         assert fitter.excluded_distributions == custom_exclusions
         assert fitter.random_seed == 123
 
-    def test_empty_exclusions_disables_registry_defaults(self, spark_session):
+    def test_empty_exclusions_disables_registry_defaults(self, local_backend):
         """Test that excluded_distributions=() disables registry's DEFAULT_EXCLUSIONS.
 
         This is a regression test for issue #78.
@@ -738,7 +686,7 @@ class TestDiscreteDistributionFitter:
         from spark_bestfit.distributions import DiscreteDistributionRegistry
 
         # Create fitter with empty exclusions
-        fitter = DiscreteDistributionFitter(spark_session, excluded_distributions=())
+        fitter = DiscreteDistributionFitter(backend=local_backend, excluded_distributions=())
 
         # Verify the fitter's registry has custom_exclusions=set() (empty)
         assert fitter._registry._excluded == set(), (
@@ -747,31 +695,32 @@ class TestDiscreteDistributionFitter:
         )
 
         # Verify default fitter uses DEFAULT_EXCLUSIONS
-        default_fitter = DiscreteDistributionFitter(spark_session)
+        default_fitter = DiscreteDistributionFitter(backend=local_backend)
         assert default_fitter._registry._excluded == DiscreteDistributionRegistry.DEFAULT_EXCLUSIONS, (
             "Default fitter should use DEFAULT_EXCLUSIONS"
         )
 
-    def test_fit_identifies_poisson(self, spark_session, poisson_dataset):
+    def test_fit_identifies_poisson(self, local_backend, pandas_poisson_dataset):
         """Test that fitter identifies Poisson for Poisson data."""
-        fitter = DiscreteDistributionFitter(spark_session)
-        results = fitter.fit(poisson_dataset, column="counts")
+        fitter = DiscreteDistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_poisson_dataset, column="counts")
 
         top_5 = [r.distribution for r in results.best(n=5)]
         assert "poisson" in top_5
 
-    def test_fit_identifies_nbinom(self, spark_session, nbinom_dataset):
+    def test_fit_identifies_nbinom(self, local_backend, nbinom_data):
         """Test that fitter identifies negative binomial for nbinom data."""
-        fitter = DiscreteDistributionFitter(spark_session)
-        results = fitter.fit(nbinom_dataset, column="counts")
+        df = pd.DataFrame({"counts": nbinom_data})
+        fitter = DiscreteDistributionFitter(backend=local_backend)
+        results = fitter.fit(df, column="counts")
 
         top_5 = [r.distribution for r in results.best(n=5)]
         assert "nbinom" in top_5
 
-    def test_fit_parameters_accuracy(self, spark_session, poisson_dataset, poisson_data):
+    def test_fit_parameters_accuracy(self, local_backend, pandas_poisson_dataset, poisson_data):
         """Test that Poisson lambda is estimated accurately."""
-        fitter = DiscreteDistributionFitter(spark_session)
-        results = fitter.fit(poisson_dataset, column="counts")
+        fitter = DiscreteDistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_poisson_dataset, column="counts")
 
         poisson_fit = next(r for r in results.best(n=10) if r.distribution == "poisson")
         fitted_lambda = poisson_fit.parameters[0]
@@ -779,44 +728,41 @@ class TestDiscreteDistributionFitter:
 
         assert np.isclose(fitted_lambda, true_lambda, rtol=0.05)
 
-    def test_fit_excluded_distributions(self, spark_session, poisson_dataset):
+    def test_fit_excluded_distributions(self, local_backend, pandas_poisson_dataset):
         """Test that excluded distributions are not fitted."""
         fitter = DiscreteDistributionFitter(
-            spark_session, excluded_distributions=("poisson", "nbinom")
+            backend=local_backend, excluded_distributions=("poisson", "nbinom")
         )
-        results = fitter.fit(poisson_dataset, column="counts")
+        results = fitter.fit(pandas_poisson_dataset, column="counts")
 
         all_dists = [r.distribution for r in results.best(n=20)]
         assert "poisson" not in all_dists
         assert "nbinom" not in all_dists
 
-    def test_fit_empty_dataframe_raises(self, spark_session):
+    def test_fit_empty_dataframe_raises(self, local_backend):
         """Test that fit raises error for empty DataFrame."""
-        from pyspark.sql.types import IntegerType, StructField, StructType
-
-        schema = StructType([StructField("counts", IntegerType(), True)])
-        df = spark_session.createDataFrame([], schema)
-        fitter = DiscreteDistributionFitter(spark_session)
+        df = pd.DataFrame({"counts": pd.Series([], dtype=int)})
+        fitter = DiscreteDistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="empty"):
             fitter.fit(df, column="counts")
 
-    def test_fit_invalid_column_raises(self, spark_session, poisson_dataset):
+    def test_fit_invalid_column_raises(self, local_backend, pandas_poisson_dataset):
         """Test that fit raises error for invalid column."""
-        fitter = DiscreteDistributionFitter(spark_session)
+        fitter = DiscreteDistributionFitter(backend=local_backend)
 
         with pytest.raises(ValueError, match="not found"):
-            fitter.fit(poisson_dataset, column="nonexistent")
+            fitter.fit(pandas_poisson_dataset, column="nonexistent")
 
-    def test_plot_produces_stem_plot(self, spark_session, poisson_dataset):
+    def test_plot_produces_stem_plot(self, local_backend, pandas_poisson_dataset):
         """Test that discrete plot produces expected stem plot elements."""
         import matplotlib.pyplot as plt
 
-        fitter = DiscreteDistributionFitter(spark_session)
-        results = fitter.fit(poisson_dataset, column="counts", max_distributions=3)
+        fitter = DiscreteDistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_poisson_dataset, column="counts", max_distributions=3)
         best = results.best(n=1)[0]
 
-        fig, ax = fitter.plot(best, poisson_dataset, "counts", title="Test Plot")
+        fig, ax = fitter.plot(best, pandas_poisson_dataset, "counts", title="Test Plot")
 
         # Verify plot has expected elements
         assert ax.get_title().startswith("Test Plot")
@@ -831,20 +777,20 @@ class TestDiscreteDistributionFitter:
 class TestPrefilter:
     """Tests for distribution pre-filtering feature (v1.6.0)."""
 
-    def test_prefilter_false_no_filtering(self, spark_session, small_dataset):
+    def test_prefilter_false_no_filtering(self, local_backend, pandas_dataset):
         """Test that prefilter=False doesn't filter any distributions."""
-        fitter = DistributionFitter(spark_session)
-        results = fitter.fit(small_dataset, column="value", max_distributions=10, prefilter=False)
+        fitter = DistributionFitter(backend=local_backend)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=10, prefilter=False)
         assert results.count() == 10
 
-    def test_prefilter_true_filters_incompatible(self, spark_session):
+    def test_prefilter_true_filters_incompatible(self, local_backend):
         """Test that prefilter=True filters incompatible distributions."""
         # Create left-skewed data with negative values
         np.random.seed(42)
         left_skewed = -np.abs(np.random.exponential(5, 5000))
-        df = spark_session.createDataFrame([(float(x),) for x in left_skewed], ["value"])
+        df = pd.DataFrame({"value": left_skewed})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Without prefilter
         results_no_filter = fitter.fit(df, "value", max_distributions=20, prefilter=False, lazy_metrics=True)
@@ -857,12 +803,12 @@ class TestPrefilter:
         # Should filter out positive-skew-only and non-negative-support distributions
         assert count_filter < count_no_filter, "prefilter should reduce distribution count"
 
-    def test_prefilter_discrete_warns(self, spark_session, poisson_dataset):
+    def test_prefilter_discrete_warns(self, local_backend, pandas_poisson_dataset):
         """Test that prefilter on discrete fitter logs a warning."""
-        fitter = DiscreteDistributionFitter(spark_session)
+        fitter = DiscreteDistributionFitter(backend=local_backend)
 
         with patch("spark_bestfit.discrete_fitter.logger") as mock_logger:
-            results = fitter.fit(poisson_dataset, column="counts", max_distributions=3, prefilter=True)
+            results = fitter.fit(pandas_poisson_dataset, column="counts", max_distributions=3, prefilter=True)
             mock_logger.warning.assert_called_once()
             assert "not yet supported" in str(mock_logger.warning.call_args)
 
@@ -874,9 +820,9 @@ class TestPrefilterUnit:
     """Unit tests for _prefilter_distributions() method directly."""
 
     @pytest.fixture
-    def fitter(self, spark_session):
+    def fitter(self, local_backend):
         """Create a fitter instance for testing."""
-        return DistributionFitter(spark_session)
+        return DistributionFitter(backend=local_backend)
 
     def test_no_support_filtering_with_negative_data(self, fitter):
         """Test that negative data does NOT filter distributions (loc can shift them)."""
@@ -1016,14 +962,14 @@ class TestPrefilterUnit:
 class TestPrefilterIntegration:
     """Integration tests for prefilter with full fitting pipeline."""
 
-    def test_prefilter_no_support_filtering_integration(self, spark_session):
+    def test_prefilter_no_support_filtering_integration(self, local_backend):
         """Test that prefilter does NOT filter by support (loc/scale can shift distributions)."""
         np.random.seed(42)
         # Symmetric data around 0 - no skewness filtering triggered
         data = np.random.normal(0, 1, 5000)
-        df = spark_session.createDataFrame([(float(x),) for x in data], ["value"])
+        df = pd.DataFrame({"value": data})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
 
         fitted_dists = {r.distribution for r in results.best(n=100)}
@@ -1033,16 +979,16 @@ class TestPrefilterIntegration:
         # Since data is symmetric, no skewness filtering should occur
         assert len(fitted_dists) > 0, "Should have fit some distributions"
 
-    def test_prefilter_skewness_filtering_integration(self, spark_session):
+    def test_prefilter_skewness_filtering_integration(self, local_backend):
         """Test that prefilter correctly filters by skewness in full pipeline."""
         np.random.seed(42)
         left_skewed = -np.random.exponential(5, 5000)
         from scipy.stats import skew
         assert skew(left_skewed) < -1.0, "Test data should be clearly left-skewed"
 
-        df = spark_session.createDataFrame([(float(x),) for x in left_skewed], ["value"])
+        df = pd.DataFrame({"value": left_skewed})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
 
         fitted_dists = {r.distribution for r in results.best(n=100)}
@@ -1052,14 +998,14 @@ class TestPrefilterIntegration:
         for dist in positive_skew_only:
             assert dist not in fitted_dists, f"{dist} should be filtered (positive-skew only)"
 
-    def test_prefilter_aggressive_filters_more(self, spark_session):
+    def test_prefilter_aggressive_filters_more(self, local_backend):
         """Test that aggressive mode filters additional distributions."""
         np.random.seed(42)
         # Heavy-tailed data with very high kurtosis
         heavy_tailed = np.random.standard_t(2, 5000) * 10
-        df = spark_session.createDataFrame([(float(x),) for x in heavy_tailed], ["value"])
+        df = pd.DataFrame({"value": heavy_tailed})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Get results with both modes
         results_safe = fitter.fit(df, "value", max_distributions=20, prefilter=True, lazy_metrics=True)
@@ -1076,7 +1022,7 @@ class TestPrefilterIntegration:
         if "uniform" in safe_dists:
             assert "uniform" not in aggressive_dists, "uniform should be filtered in aggressive mode"
 
-    def test_prefilter_multicolumn(self, spark_session):
+    def test_prefilter_multicolumn(self, local_backend):
         """Test that prefilter works correctly for multi-column fitting."""
         np.random.seed(42)
         # Column 1: left-skewed data (should filter positive-skew-only dists by skewness)
@@ -1088,10 +1034,9 @@ class TestPrefilterIntegration:
         assert skew(col1) < -1.0, "col1 should be left-skewed"
         assert skew(col2) > 1.0, "col2 should be right-skewed"
 
-        data = [(float(c1), float(c2)) for c1, c2 in zip(col1, col2)]
-        df = spark_session.createDataFrame(data, ["col1", "col2"])
+        df = pd.DataFrame({"col1": col1, "col2": col2})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
         # Use max_distributions=30 to ensure expon/gamma are included
         results = fitter.fit(df, columns=["col1", "col2"], max_distributions=30, prefilter=True, lazy_metrics=True)
 
@@ -1107,15 +1052,15 @@ class TestPrefilterIntegration:
         assert "expon" in col2_dists, "expon should be kept for right-skewed data"
         assert "gamma" in col2_dists, "gamma should be kept for right-skewed data"
 
-    def test_prefilter_fallback_logs_warning(self, spark_session):
+    def test_prefilter_fallback_logs_warning(self, local_backend):
         """Test that fallback when all filtered logs appropriate warning."""
         np.random.seed(42)
         negative_data = np.random.normal(-100, 10, 1000)
-        df = spark_session.createDataFrame([(float(x),) for x in negative_data], ["value"])
+        df = pd.DataFrame({"value": negative_data})
 
         # Create fitter that only has non-negative distributions
         # by using a very restrictive exclusion list
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with patch("spark_bestfit.continuous_fitter.logger") as mock_logger:
             results = fitter.fit(
@@ -1127,14 +1072,14 @@ class TestPrefilterIntegration:
             # Should still return results
             assert results.count() > 0
 
-    def test_prefilter_logs_filtered_distributions(self, spark_session):
+    def test_prefilter_logs_filtered_distributions(self, local_backend):
         """Test that prefilter logs which distributions were filtered."""
         np.random.seed(42)
         # Use left-skewed data to trigger skewness filtering
         left_skewed_data = -np.random.exponential(5, 1000)
-        df = spark_session.createDataFrame([(float(x),) for x in left_skewed_data], ["value"])
+        df = pd.DataFrame({"value": left_skewed_data})
 
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         with patch("spark_bestfit.continuous_fitter.logger") as mock_logger:
             results = fitter.fit(df, "value", max_distributions=30, prefilter=True, lazy_metrics=True)
@@ -1240,12 +1185,12 @@ class TestInterleaveDistributions:
 class TestDistributionAwarePartitioning:
     """Tests for distribution-aware partition calculation."""
 
-    def test_slow_distributions_weighted_3x(self, spark_session):
+    def test_slow_distributions_weighted_3x(self, local_backend):
         """Slow distributions should count as 3x for partition calculation."""
-        fitter = DistributionFitter(spark_session)
+        fitter = DistributionFitter(backend=local_backend)
 
         # Get default parallelism for comparison
-        total_cores = spark_session.sparkContext.defaultParallelism
+        total_cores = local_backend.get_parallelism()
 
         # Test with fast distributions only
         fast_dists = ["norm", "expon", "gamma", "beta"]  # 4 fast
@@ -1261,10 +1206,10 @@ class TestDistributionAwarePartitioning:
         if total_cores * 2 > 4:
             assert mixed_partitions >= fast_partitions
 
-    def test_partitions_capped_at_2x_cores(self, spark_session):
+    def test_partitions_capped_at_2x_cores(self, local_backend):
         """Partition count should not exceed 2x available cores."""
-        fitter = DistributionFitter(spark_session)
-        total_cores = spark_session.sparkContext.defaultParallelism
+        fitter = DistributionFitter(backend=local_backend)
+        total_cores = local_backend.get_parallelism()
 
         # Create a large list with many slow distributions
         slow_set = DistributionRegistry.SLOW_DISTRIBUTIONS
@@ -1274,11 +1219,11 @@ class TestDistributionAwarePartitioning:
 
         assert partitions <= total_cores * 2
 
-    def test_discrete_fitter_has_same_partitioning(self, spark_session):
+    def test_discrete_fitter_has_same_partitioning(self, local_backend):
         """Discrete fitter should use the same partitioning logic."""
         from spark_bestfit import DiscreteDistributionFitter
 
-        discrete_fitter = DiscreteDistributionFitter(spark_session)
+        discrete_fitter = DiscreteDistributionFitter(backend=local_backend)
 
         # Verify discrete fitter has _calculate_partitions with list signature
         fast_dists = ["poisson", "geom", "binom"]

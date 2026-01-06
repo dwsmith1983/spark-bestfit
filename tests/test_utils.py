@@ -1,9 +1,16 @@
 """Tests for utils module."""
 
 import pytest
+
+# Skip all tests if pyspark not installed
+pyspark = pytest.importorskip("pyspark")
+
 from pyspark.sql import SparkSession
 
 from spark_bestfit.utils import get_spark_session
+
+# Mark all tests in this module as requiring Spark
+pytestmark = pytest.mark.spark
 
 
 class TestGetSparkSession:
