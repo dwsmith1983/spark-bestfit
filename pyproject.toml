@@ -66,6 +66,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
     "pytest-benchmark>=5.0.0",
+    "mutmut>=3.2.0",
     "ruff>=0.8.0",
     "black>=24.10.0",
     "isort>=5.13.0",
@@ -245,3 +246,38 @@ prerelease = false
 allowed_tags = ["feat", "fix", "perf", "refactor", "build"]
 minor_tags = ["feat"]
 patch_tags = ["fix", "perf", "refactor", "build"]
+
+# Mutation testing configuration
+# See: https://mutmut.readthedocs.io/
+# Note: Uses LocalBackend tests only (mutmut 3's trampoline is incompatible with distributed workers)
+[tool.mutmut]
+# Paths to mutate (core fitting logic)
+paths_to_mutate = ["src/spark_bestfit/"]
+# Exclude distributed backends and plotting from mutation (not testable via LocalBackend)
+do_not_mutate = [
+    "src/spark_bestfit/backends/spark.py",
+    "src/spark_bestfit/backends/ray.py",
+    "src/spark_bestfit/progress.py",
+    "src/spark_bestfit/plotting.py",
+    "src/spark_bestfit/sampling.py",
+]
+# Test selection: ALL tests that work without Spark/Ray
+pytest_add_cli_args_test_selection = [
+    # Pure unit tests (numpy/scipy only)
+    "tests/test_fitting.py",
+    "tests/test_discrete_fitting.py",
+    "tests/test_distributions.py",
+    "tests/test_serialization.py",
+    "tests/test_results.py",
+    "tests/test_numerical_stability.py",
+    "tests/test_lazy_metrics.py",
+    # Using LocalBackend
+    "tests/test_core.py",
+    "tests/test_histogram.py",
+    "tests/test_backends.py",
+    # TODO: Refactor these to use LocalBackend
+    # "tests/test_bounded_fitting.py",
+    # "tests/test_copula.py",
+]
+# Additional pytest args: disable spark plugin, quiet output
+pytest_add_cli_args = ["-p", "no:spark", "-q", "--tb=no"]
