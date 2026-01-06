@@ -6,10 +6,17 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
+# Skip all tests if pyspark not installed
+pyspark = pytest.importorskip("pyspark")
+
 from pyspark.sql import SparkSession
 
-from spark_bestfit import DistributionFitter, DiscreteDistributionFitter
+from spark_bestfit import DiscreteDistributionFitter, DistributionFitter
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
+
+# Mark all tests in this module as requiring Spark
+pytestmark = pytest.mark.spark
 
 
 class TestProgressTracker:

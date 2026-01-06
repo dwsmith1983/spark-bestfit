@@ -86,8 +86,9 @@ jobs:
           fail_ci_if_error: false
 
   # Spark integration tests: only Spark-marked tests (run in matrix)
+  # Depends on unit-tests to fail fast - don't run slow Spark tests if unit tests fail
   spark-tests:
-    needs: [changes, pre-commit]
+    needs: [changes, pre-commit, unit-tests]
     if: |
       needs.changes.outputs.src == 'true' ||
       needs.changes.outputs.tests == 'true' ||
@@ -148,8 +149,9 @@ jobs:
           pytest -m spark -v
 
   # Ray backend tests: separate job without Spark
+  # Depends on unit-tests to fail fast - don't run Ray tests if unit tests fail
   ray-tests:
-    needs: [changes, pre-commit]
+    needs: [changes, pre-commit, unit-tests]
     if: |
       needs.changes.outputs.src == 'true' ||
       needs.changes.outputs.tests == 'true' ||
