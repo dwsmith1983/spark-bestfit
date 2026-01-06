@@ -121,6 +121,7 @@ norecursedirs = ["tests/benchmarks"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "benchmark: performance benchmarks (run with: make benchmark)",
+    "spark: tests requiring Spark (skip for mutation testing with '-m \"not spark\"')",
 ]
 
 [tool.coverage.run]
@@ -269,7 +270,6 @@ pytest_add_cli_args_test_selection = [
     "tests/test_serialization.py",
     "tests/test_results.py",
     "tests/test_numerical_stability.py",
-    "tests/test_lazy_metrics.py",
     # Using LocalBackend
     "tests/test_core.py",
     "tests/test_histogram.py",
@@ -278,5 +278,5 @@ pytest_add_cli_args_test_selection = [
     "tests/test_copula.py",
     "tests/test_sampling.py",
 ]
-# Additional pytest args: disable spark plugin, quiet output
-pytest_add_cli_args = ["-p", "no:spark", "-q", "--tb=no"]
+# Additional pytest args: disable spark plugin, skip spark tests, quiet output
+pytest_add_cli_args = ["-p", "no:spark", "-m", "not spark", "-q", "--tb=no"]

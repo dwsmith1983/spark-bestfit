@@ -393,6 +393,7 @@ except ImportError:
     PYSPARK_AVAILABLE = False
 
 
+@pytest.mark.spark
 @pytest.mark.skipif(not PYSPARK_AVAILABLE, reason="PySpark not installed")
 class TestSampleSpark:
     """Tests for sample_spark function (Spark-specific).

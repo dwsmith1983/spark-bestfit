@@ -515,6 +515,7 @@ def spark_simple_copula(spark_multi_column_results, spark_correlated_data):
     return GaussianCopula.fit(spark_multi_column_results, spark_correlated_data)
 
 
+@pytest.mark.spark
 @pytest.mark.skipif(not PYSPARK_AVAILABLE, reason="PySpark not installed")
 class TestGaussianCopulaSampleSpark:
     """Tests for distributed sampling via sample_spark()."""
