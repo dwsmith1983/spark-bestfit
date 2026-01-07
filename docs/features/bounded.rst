@@ -55,6 +55,19 @@ For precise control, specify bounds explicitly:
        upper_bound=1.0,
    )
 
+**Using FitterConfig (v2.2+):**
+
+.. code-block:: python
+
+   from spark_bestfit import FitterConfigBuilder
+
+   # Create reusable bounded config
+   config = (FitterConfigBuilder()
+       .with_bounds(lower=0.0, upper=100.0)
+       .build())
+
+   results = fitter.fit(df, column="percentage", config=config)
+
 .. note::
    When only one bound is specified and ``bounded=True``, the other bound is
    auto-detected from the data. Use ``-inf`` or ``inf`` to explicitly disable

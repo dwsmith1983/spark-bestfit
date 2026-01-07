@@ -25,6 +25,7 @@ Example:
 
 from spark_bestfit._version import __version__
 from spark_bestfit.backends.local import LocalBackend
+from spark_bestfit.config import FitterConfig, FitterConfigBuilder
 
 # Conditional Spark import (only if pyspark is installed)
 try:
@@ -72,6 +73,9 @@ __all__ = [
     "DistributionFitter",
     "DiscreteDistributionFitter",
     "GaussianCopula",
+    # Configuration (v2.2)
+    "FitterConfig",
+    "FitterConfigBuilder",
     # Backends (v2.0)
     "ExecutionBackend",
     "LocalBackend",

@@ -224,6 +224,55 @@ and simulate scenarios.
 
    # Run what-if scenarios (add agents, change volume, etc.)
 
+Capital Budgeting Monte Carlo (Ray)
+-----------------------------------
+
+**Business Context:** Finance teams evaluate capital investments (new plants, equipment,
+acquisitions) under uncertainty. Traditional DCF analysis uses single "best estimate"
+values, but Monte Carlo simulation provides probability distributions for NPV, IRR,
+and payback period—enabling risk-informed decision making.
+
+**spark-bestfit Features Used:**
+
+- ``FitterConfigBuilder`` for reusable configuration
+- ``RayBackend`` for distributed computation
+- ``GaussianCopula`` for correlated economic parameters
+- Multi-column fitting for uncertain inputs (growth rates, costs, discount rates)
+
+**Notebook:** `examples/ray/usecase_capital_budgeting.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_capital_budgeting.ipynb>`_
+
+.. code-block:: python
+
+   from spark_bestfit import (
+       DistributionFitter, FitterConfigBuilder,
+       GaussianCopula, RayBackend
+   )
+
+   # Create reusable configuration
+   config = (FitterConfigBuilder()
+       .with_bins(50)
+       .with_sampling(enabled=False)
+       .with_lazy_metrics(False)
+       .build())
+
+   # Fit distributions to uncertain parameters
+   backend = RayBackend()
+   fitter = DistributionFitter(backend=backend)
+   results = fitter.fit(
+       historical_data,
+       columns=['revenue_growth', 'cost_ratio', 'discount_rate'],
+       config=config
+   )
+
+   # Capture parameter correlations
+   copula = GaussianCopula.fit(results, historical_data, backend=backend)
+
+   # Generate 10,000 correlated scenarios
+   scenarios = copula.sample(n=10000, random_state=42)
+
+   # Calculate NPV, IRR, Payback for each scenario
+   # Analyze P(NPV > 0), VaR, sensitivity rankings
+
 Which Use Case Fits Your Needs?
 -------------------------------
 
@@ -252,11 +301,15 @@ Which Use Case Fits Your Needs?
    * - Discrete Event Simulation
      - get_scipy_dist(), sampling
      - Operations, staffing, capacity planning
+   * - Capital Budgeting (Ray)
+     - FitterConfigBuilder, RayBackend, NPV/IRR
+     - Investment decisions, project evaluation
 
 See Also
 --------
 
 - :doc:`quickstart` - Basic usage and installation
+- :doc:`/features/config` - FitterConfig builder pattern
 - :doc:`/features/copula` - Detailed copula documentation
 - :doc:`/features/sampling` - Distributed sampling guide
 - :doc:`/features/bounded` - Bounded distribution fitting

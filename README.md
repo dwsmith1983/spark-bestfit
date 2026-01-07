@@ -222,12 +222,48 @@ samples = copula.sample(n=10_000)
 samples_df = copula.sample_spark(n=100_000_000)
 ```
 
+## FitterConfig Builder (v2.2+)
+
+For complex configurations, use the fluent builder pattern:
+
+```python
+from spark_bestfit import DistributionFitter, FitterConfigBuilder
+
+# Build a reusable configuration
+config = (FitterConfigBuilder()
+    .with_bins(100)
+    .with_bounds(lower=0, upper=100)
+    .with_sampling(fraction=0.1)
+    .with_lazy_metrics()
+    .with_prefilter()
+    .build())
+
+# Use across multiple fits
+fitter = DistributionFitter(spark)
+for col in ["price", "quantity", "revenue"]:
+    results = fitter.fit(df, column=col, config=config)
+```
+
+**Why use FitterConfig?**
+- **Cleaner code**: No more 15+ parameters in function calls
+- **Reusable**: Same config works across multiple fits
+- **IDE-friendly**: Better autocomplete and discoverability
+- **Immutable**: Frozen dataclass prevents accidental mutation
+
+Individual parameters still work for simple cases (backward compatible).
+
+> See [Configuration Guide](https://spark-bestfit.readthedocs.io/en/latest/features/config.html) for full details.
+
 ## Performance Tips
 
 **Lazy metrics** for faster model selection:
 
 ```python
-# Skip expensive KS/AD computation during fitting
+# Using FitterConfig (recommended)
+config = FitterConfigBuilder().with_lazy_metrics().build()
+results = fitter.fit(df, column="value", config=config)
+
+# Or using parameters directly
 results = fitter.fit(df, column="value", lazy_metrics=True)
 
 # Fast model selection by AIC
@@ -241,7 +277,8 @@ best_ks = results.best(n=1, metric="ks_statistic")[0]
 
 ```python
 # Skip incompatible distributions (20-50% faster)
-results = fitter.fit(df, column="value", prefilter=True)
+config = FitterConfigBuilder().with_prefilter().build()
+results = fitter.fit(df, column="value", config=config)
 ```
 
 > See [Performance & Scaling](https://spark-bestfit.readthedocs.io/en/latest/performance.html) for benchmarks.
@@ -262,7 +299,7 @@ results = fitter.fit(df, column="value", prefilter=True)
 
 | Version | Focus | Key Features |
 |---------|-------|--------------|
-| **2.1.0** | API Polish & Performance | User-defined distributions, FitterConfig builder |
+| **2.2.0** | API Polish | FitterConfig builder, user-defined distributions |
 | **3.0.0** | Advanced | Mixture models, streaming support, right-censored data |
 
 See [GitHub milestones](https://github.com/dwsmith1983/spark-bestfit/milestones) for details.

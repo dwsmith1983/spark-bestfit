@@ -15,6 +15,7 @@ except ImportError:
     _PYSPARK_AVAILABLE = False
 
 from spark_bestfit.base_fitter import BaseFitter
+from spark_bestfit.config import FitterConfig
 from spark_bestfit.discrete_fitting import (
     DISCRETE_FIT_RESULT_SCHEMA,
     compute_discrete_histogram,
@@ -106,6 +107,8 @@ class DiscreteDistributionFitter(BaseFitter):
         df: DataFrame,
         column: Optional[str] = None,
         columns: Optional[List[str]] = None,
+        config: Optional[FitterConfig] = None,
+        *,
         max_distributions: Optional[int] = None,
         enable_sampling: bool = True,
         sample_fraction: Optional[float] = None,
@@ -125,6 +128,12 @@ class DiscreteDistributionFitter(BaseFitter):
             df: Spark DataFrame containing integer count data
             column: Name of single column to fit distributions to
             columns: List of column names for multi-column fitting
+            config: FitterConfig object (v2.2.0). Provides a cleaner way to
+                configure fitting with many parameters. If provided, individual
+                parameters below are ignored (except progress_callback which
+                can override the config's callback). Note: bins, use_rice_rule,
+                support_at_zero, and prefilter in config are ignored for
+                discrete fitting.
             max_distributions: Limit number of distributions (for testing)
             enable_sampling: Enable sampling for large datasets
             sample_fraction: Fraction to sample (None = auto-determine)
@@ -160,7 +169,15 @@ class DiscreteDistributionFitter(BaseFitter):
             TypeError: If column is not numeric
 
         Example:
-            >>> # Single column
+            >>> # Using FitterConfig (v2.2.0)
+            >>> from spark_bestfit import FitterConfigBuilder
+            >>> config = (FitterConfigBuilder()
+            ...     .with_bounds(lower=0, upper=100)
+            ...     .with_sampling(fraction=0.1)
+            ...     .build())
+            >>> results = fitter.fit(df, column='counts', config=config)
+            >>>
+            >>> # Single column (backward compatible)
             >>> results = fitter.fit(df, column='counts')
             >>> best = results.best(n=1, metric='aic')
             >>>
@@ -171,31 +188,46 @@ class DiscreteDistributionFitter(BaseFitter):
             >>> # Bounded fitting
             >>> results = fitter.fit(df, column='counts', bounded=True, lower_bound=0, upper_bound=100)
             >>>
-            >>> # Per-column bounds (v1.5.0)
-            >>> results = fitter.fit(
-            ...     df, columns=['counts1', 'counts2'],
-            ...     bounded=True,
-            ...     lower_bound={'counts1': 0, 'counts2': 5},
-            ...     upper_bound={'counts1': 100, 'counts2': 200}
-            ... )
-            >>>
             >>> # Lazy metrics for faster fitting when only using AIC/BIC (v1.5.0)
             >>> results = fitter.fit(df, 'counts', lazy_metrics=True)
             >>> best_aic = results.best(n=1, metric='aic')[0]  # Fast, no KS computed
         """
+        # Resolve config: explicit config takes precedence over individual parameters
+        if config is not None:
+            # Use config values, but allow progress_callback override
+            cfg = config
+            if progress_callback is not None:
+                cfg = config.with_progress_callback(progress_callback)
+        else:
+            # Create config from individual parameters (backward compatibility)
+            cfg = FitterConfig(
+                max_distributions=max_distributions,
+                prefilter=prefilter,
+                enable_sampling=enable_sampling,
+                sample_fraction=sample_fraction,
+                max_sample_size=max_sample_size,
+                sample_threshold=sample_threshold,
+                bounded=bounded,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
+                num_partitions=num_partitions,
+                lazy_metrics=lazy_metrics,
+                progress_callback=progress_callback,
+            )
+
         # Normalize column/columns to list
         target_columns = self._normalize_columns(column, columns)
 
         # Input validation for all columns
         for col in target_columns:
-            self._validate_inputs(df, col, max_distributions, sample_fraction)
+            self._validate_inputs(df, col, cfg.max_distributions, cfg.sample_fraction)
 
         # Warn if prefilter is enabled (not yet supported for discrete)
-        if prefilter:
+        if cfg.prefilter:
             logger.warning("prefilter is not yet supported for discrete distributions; ignoring")
 
         # Validate bounds - handle both scalar and dict forms
-        self._validate_bounds(lower_bound, upper_bound, target_columns)
+        self._validate_bounds(cfg.lower_bound, cfg.upper_bound, target_columns)
 
         # Get row count (single operation for all columns)
         row_count = self._get_row_count(df)
@@ -205,20 +237,25 @@ class DiscreteDistributionFitter(BaseFitter):
 
         # Build per-column bounds dict: {col: (lower, upper)}
         column_bounds: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
-        if bounded:
-            column_bounds = self._resolve_bounds(df, target_columns, lower_bound, upper_bound)
+        if cfg.bounded:
+            column_bounds = self._resolve_bounds(df, target_columns, cfg.lower_bound, cfg.upper_bound)
 
         # Sample if needed (single operation for all columns)
         df_sample = self._apply_sampling(
-            df, row_count, enable_sampling, sample_fraction, max_sample_size, sample_threshold
+            df,
+            row_count,
+            cfg.enable_sampling,
+            cfg.sample_fraction,
+            cfg.max_sample_size,
+            cfg.sample_threshold,
         )
 
         # Get distributions to fit (same for all columns)
         distributions = self._registry.get_distributions(
             additional_exclusions=list(self.excluded_distributions),
         )
-        if max_distributions is not None and max_distributions > 0:
-            distributions = distributions[:max_distributions]
+        if cfg.max_distributions is not None and cfg.max_distributions > 0:
+            distributions = distributions[: cfg.max_distributions]
 
         # Fit each column and collect results
         all_results_dfs = []
@@ -233,16 +270,16 @@ class DiscreteDistributionFitter(BaseFitter):
                 column=col,
                 row_count=row_count,
                 distributions=distributions,
-                num_partitions=num_partitions,
+                num_partitions=cfg.num_partitions,
                 lower_bound=col_lower,
                 upper_bound=col_upper,
-                lazy_metrics=lazy_metrics,
-                progress_callback=progress_callback,
+                lazy_metrics=cfg.lazy_metrics,
+                progress_callback=cfg.progress_callback,
             )
             all_results_dfs.append(results_df)
 
             # Build lazy context for on-demand metric computation
-            if lazy_metrics:
+            if cfg.lazy_metrics:
                 lazy_contexts[col] = LazyMetricsContext(
                     source_df=df_sample,
                     column=col,
@@ -271,7 +308,7 @@ class DiscreteDistributionFitter(BaseFitter):
         )
 
         # Pass lazy contexts to FitResults for on-demand metric computation
-        return FitResults(combined_df, lazy_contexts=lazy_contexts if lazy_metrics else None)
+        return FitResults(combined_df, lazy_contexts=lazy_contexts if cfg.lazy_metrics else None)
 
     def _fit_single_column(
         self,

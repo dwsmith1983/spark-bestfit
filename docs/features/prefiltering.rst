@@ -48,19 +48,33 @@ Pre-filtering uses a layered approach based on **intrinsic shape properties**
 Using Pre-filtering
 -------------------
 
+**Using FitterConfig (v2.2+, recommended):**
+
 .. code-block:: python
 
-   from spark_bestfit import DistributionFitter
+   from spark_bestfit import DistributionFitter, FitterConfigBuilder
 
    fitter = DistributionFitter(spark)
 
    # Safe mode (recommended) - skewness filtering
-   results = fitter.fit(df, "value", prefilter=True)
+   config = FitterConfigBuilder().with_prefilter().build()
+   results = fitter.fit(df, "value", config=config)
 
    # Aggressive mode - adds kurtosis filtering
+   config = FitterConfigBuilder().with_prefilter(mode="aggressive").build()
+   results = fitter.fit(df, "value", config=config)
+
+**Using parameter directly:**
+
+.. code-block:: python
+
+   # Safe mode
+   results = fitter.fit(df, "value", prefilter=True)
+
+   # Aggressive mode
    results = fitter.fit(df, "value", prefilter="aggressive")
 
-   # Disabled (default) - fit all distributions
+   # Disabled (default)
    results = fitter.fit(df, "value", prefilter=False)
 
 Performance Impact
@@ -130,17 +144,32 @@ Combining with Lazy Metrics
 
 Pre-filtering and lazy metrics are complementary optimizations:
 
+**Using FitterConfig (v2.2+, recommended):**
+
 .. code-block:: python
 
+   from spark_bestfit import FitterConfigBuilder
+
    # Maximum performance: fewer distributions + deferred KS/AD
-   results = fitter.fit(
-       df, "value",
-       prefilter=True,      # Skip incompatible distributions
-       lazy_metrics=True,   # Defer KS/AD computation
-   )
+   config = (FitterConfigBuilder()
+       .with_prefilter()      # Skip incompatible distributions
+       .with_lazy_metrics()   # Defer KS/AD computation
+       .build())
+
+   results = fitter.fit(df, "value", config=config)
 
    # Fast model selection
    best = results.best(n=1, metric="aic")[0]
+
+**Using parameters directly:**
+
+.. code-block:: python
+
+   results = fitter.fit(
+       df, "value",
+       prefilter=True,
+       lazy_metrics=True,
+   )
 
 **Combined benefit:** Pre-filtering reduces the number of distributions to fit,
 and lazy metrics defers expensive KS/AD computation. Together, they can reduce
