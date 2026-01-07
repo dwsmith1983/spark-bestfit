@@ -17,7 +17,7 @@ from spark_bestfit import (
     LocalBackend,
 )
 from spark_bestfit.distributions import DistributionRegistry
-from spark_bestfit.results import FitResults
+from spark_bestfit.results import BaseFitResults, FitResults
 
 
 class TestDistributionFitter:
@@ -259,7 +259,7 @@ class TestDistributionFitter:
         results = fitter.fit(df, column="value", max_distributions=5)
 
         # Returns valid FitResults (may have 0 or more distributions)
-        assert isinstance(results, FitResults)
+        assert isinstance(results, BaseFitResults)
         # Verify we can call methods on it without error
         _ = results.df
 
@@ -536,7 +536,7 @@ class TestEdgeCases:
         results = fitter.fit(df, column="value", max_distributions=5)
 
         # Returns valid FitResults
-        assert isinstance(results, FitResults)
+        assert isinstance(results, BaseFitResults)
         _ = results.df
 
     def test_single_value_dataset(self, local_backend):
@@ -549,7 +549,7 @@ class TestEdgeCases:
         results = fitter.fit(df, column="value", max_distributions=5)
 
         # Returns valid FitResults
-        assert isinstance(results, FitResults)
+        assert isinstance(results, BaseFitResults)
         _ = results.df
 
     def test_dataset_with_outliers(self, local_backend):

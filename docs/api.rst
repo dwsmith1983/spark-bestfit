@@ -25,9 +25,19 @@ Results
    :show-inheritance:
    :no-index:
 
-.. autoclass:: spark_bestfit.results.FitResults
+.. autoclass:: spark_bestfit.results.BaseFitResults
    :members:
    :show-inheritance:
+
+.. autoclass:: spark_bestfit.results.EagerFitResults
+   :members:
+   :show-inheritance:
+
+.. autoclass:: spark_bestfit.results.LazyFitResults
+   :members:
+   :show-inheritance:
+
+.. autofunction:: spark_bestfit.results.create_fit_results
 
 Sampling
 --------

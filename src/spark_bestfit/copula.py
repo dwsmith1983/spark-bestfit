@@ -35,7 +35,7 @@ from spark_bestfit.serialization import SCHEMA_VERSION, SerializationError, dete
 
 if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
-    from spark_bestfit.results import FitResults
+    from spark_bestfit.results import FitResultsType
 
 
 @dataclass
@@ -79,7 +79,7 @@ class GaussianCopula:
     @classmethod
     def fit(
         cls,
-        results: "FitResults",
+        results: "FitResultsType",
         df: Any,
         columns: Optional[List[str]] = None,
         metric: MetricName = "ks_statistic",

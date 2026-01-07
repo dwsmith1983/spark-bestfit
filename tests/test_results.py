@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import scipy.stats as st
 
-from spark_bestfit.results import DistributionFitResult, FitResults
+from spark_bestfit.results import BaseFitResults, DistributionFitResult, FitResults
 
 
 # Fixtures normal_result and gamma_result are now in conftest.py
@@ -358,7 +358,8 @@ class TestFitResults:
         results = FitResults(sample_results_df)
         filtered = results.filter(sse_threshold=0.01)
 
-        assert isinstance(filtered, FitResults)
+        # FitResults is now a factory function; use BaseFitResults for isinstance
+        assert isinstance(filtered, BaseFitResults)
 
     def test_filter_no_criteria(self, sample_results_df):
         """Test filter with no criteria returns all results."""
@@ -1024,3 +1025,138 @@ class TestQualityReport:
 
         assert report["n_acceptable"] == 1
         assert any("only 1 distribution" in w.lower() for w in report["warnings"])
+
+
+class TestFitResultsClassHierarchy:
+    """Tests for the FitResults class hierarchy (v2.1.0+)."""
+
+    @pytest.fixture
+    def sample_df(self, spark_session):
+        """Create sample results DataFrame."""
+        data = [
+            ("norm", [50.0, 10.0], 0.005, 1500.0, 1520.0, 0.025, 0.90, 0.35, 0.15),
+            ("gamma", [2.0, 0.0, 2.0], 0.003, 1400.0, 1430.0, 0.020, 0.95, 0.40, 0.10),
+        ]
+        return spark_session.createDataFrame(
+            data, ["distribution", "parameters", "sse", "aic", "bic", "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue"]
+        )
+
+    def test_factory_returns_eager_without_context(self, sample_df):
+        """Test that FitResults() returns EagerFitResults without lazy_contexts."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = FitResults(sample_df)
+        assert isinstance(results, EagerFitResults)
+        assert not results.is_lazy
+
+    def test_factory_returns_lazy_with_context(self, sample_df, spark_session):
+        """Test that FitResults() returns LazyFitResults with lazy_contexts."""
+        from spark_bestfit.results import LazyFitResults, LazyMetricsContext
+
+        # Create a mock lazy context
+        context = LazyMetricsContext(
+            source_df=sample_df,
+            column="test",
+            random_seed=42,
+            row_count=100,
+        )
+        results = FitResults(sample_df, lazy_contexts={"test": context})
+
+        assert isinstance(results, LazyFitResults)
+        assert results.is_lazy
+
+    def test_eager_is_not_lazy(self, sample_df):
+        """Test that EagerFitResults.is_lazy returns False."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(sample_df)
+        assert results.is_lazy is False
+
+    def test_eager_materialize_returns_self(self, sample_df):
+        """Test that EagerFitResults.materialize() returns self."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(sample_df)
+        materialized = results.materialize()
+
+        assert materialized is results
+
+    def test_eager_filter_returns_eager(self, sample_df):
+        """Test that EagerFitResults.filter() returns EagerFitResults."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(sample_df)
+        filtered = results.filter(sse_threshold=0.01)
+
+        assert isinstance(filtered, EagerFitResults)
+        assert not filtered.is_lazy
+
+    def test_both_classes_inherit_base(self, sample_df, spark_session):
+        """Test that both classes inherit from BaseFitResults."""
+        from spark_bestfit.results import EagerFitResults, LazyFitResults, LazyMetricsContext
+
+        eager = EagerFitResults(sample_df)
+        context = LazyMetricsContext(
+            source_df=sample_df,
+            column="test",
+            random_seed=42,
+            row_count=100,
+        )
+        lazy = LazyFitResults(sample_df, lazy_contexts={"test": context})
+
+        assert isinstance(eager, BaseFitResults)
+        assert isinstance(lazy, BaseFitResults)
+
+    def test_repr_shows_class_name(self, sample_df):
+        """Test that __repr__ shows the correct class name."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(sample_df)
+        repr_str = repr(results)
+
+        assert "EagerFitResults" in repr_str
+        assert "2 distributions fitted" in repr_str
+
+    def test_lazy_source_dataframes_property(self, sample_df, spark_session):
+        """Test LazyFitResults.source_dataframes property."""
+        from spark_bestfit.results import LazyFitResults, LazyMetricsContext
+
+        context = LazyMetricsContext(
+            source_df=sample_df,
+            column="test",
+            random_seed=42,
+            row_count=100,
+        )
+        results = LazyFitResults(sample_df, lazy_contexts={"test": context})
+
+        sources = results.source_dataframes
+        assert "test" in sources
+        assert sources["test"] is sample_df
+
+    def test_lazy_is_source_available(self, sample_df, spark_session):
+        """Test LazyFitResults.is_source_available() method."""
+        from spark_bestfit.results import LazyFitResults, LazyMetricsContext
+
+        context = LazyMetricsContext(
+            source_df=sample_df,
+            column="test",
+            random_seed=42,
+            row_count=100,
+        )
+        results = LazyFitResults(sample_df, lazy_contexts={"test": context})
+
+        # Source should be available
+        assert results.is_source_available() is True
+
+    def test_type_alias_usage(self, sample_df):
+        """Test FitResultsType type alias includes both classes."""
+        from spark_bestfit.results import EagerFitResults, FitResultsType, LazyFitResults
+
+        # Just verify the type alias is a Union of both
+        import typing
+        origin = typing.get_origin(FitResultsType)
+        args = typing.get_args(FitResultsType)
+
+        assert origin is typing.Union
+        assert EagerFitResults in args
+        assert LazyFitResults in args
