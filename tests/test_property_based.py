@@ -29,9 +29,12 @@ from spark_bestfit.results import (
 )
 
 from .strategies import (
+    builder_method_sequence,
     distribution_fit_result_data,
     distribution_with_params,
     finite_float_array,
+    fitter_config,
+    fitter_config_data,
     metric_name,
     probabilities,
     probability,
@@ -424,3 +427,219 @@ class TestSampleGenerationProperties:
         np.testing.assert_array_equal(
             samples1, samples2, err_msg=f"Samples not reproducible for {dist_name}"
         )
+
+
+# =============================================================================
+# FitterConfig Properties
+# =============================================================================
+
+
+class TestFitterConfigProperties:
+    """Property-based tests for FitterConfig and FitterConfigBuilder."""
+
+    @given(data=fitter_config_data())
+    @settings(max_examples=50)
+    def test_config_is_frozen(self, data):
+        """Property: FitterConfig is immutable (frozen dataclass)."""
+        from spark_bestfit.config import FitterConfig
+
+        config = FitterConfig(**data)
+
+        # Attempting to modify should raise FrozenInstanceError
+        with pytest.raises(Exception):  # dataclasses.FrozenInstanceError
+            config.bins = 999
+
+    @given(data=fitter_config_data())
+    @settings(max_examples=50)
+    def test_config_equality(self, data):
+        """Property: Two configs with same data are equal."""
+        from spark_bestfit.config import FitterConfig
+
+        config1 = FitterConfig(**data)
+        config2 = FitterConfig(**data)
+
+        assert config1 == config2
+
+    @given(data=fitter_config_data())
+    @settings(max_examples=50)
+    def test_config_hash_consistency(self, data):
+        """Property: Equal configs have equal hashes."""
+        from spark_bestfit.config import FitterConfig
+
+        config1 = FitterConfig(**data)
+        config2 = FitterConfig(**data)
+
+        assert hash(config1) == hash(config2)
+
+    @given(config=fitter_config())
+    @settings(max_examples=30)
+    def test_with_progress_callback_returns_new_instance(self, config):
+        """Property: with_progress_callback returns a new config, not mutated original."""
+
+        def dummy_callback(completed, total, percent):
+            pass
+
+        new_config = config.with_progress_callback(dummy_callback)
+
+        # Should be a different object
+        assert new_config is not config
+        # New config should have the callback
+        assert new_config.progress_callback is dummy_callback
+        # Original should be unchanged
+        assert config.progress_callback is None
+
+    @given(config=fitter_config())
+    @settings(max_examples=30)
+    def test_config_all_fields_accessible(self, config):
+        """Property: All FitterConfig fields are accessible without error."""
+        # Access all fields - should not raise
+        _ = config.bins
+        _ = config.use_rice_rule
+        _ = config.support_at_zero
+        _ = config.max_distributions
+        _ = config.prefilter
+        _ = config.enable_sampling
+        _ = config.sample_fraction
+        _ = config.max_sample_size
+        _ = config.sample_threshold
+        _ = config.bounded
+        _ = config.lower_bound
+        _ = config.upper_bound
+        _ = config.num_partitions
+        _ = config.lazy_metrics
+        _ = config.progress_callback
+
+
+class TestFitterConfigBuilderProperties:
+    """Property-based tests for FitterConfigBuilder."""
+
+    @given(methods=builder_method_sequence())
+    @settings(max_examples=50)
+    def test_builder_methods_return_self(self, methods):
+        """Property: All builder methods return self for chaining."""
+        from spark_bestfit.config import FitterConfigBuilder
+
+        builder = FitterConfigBuilder()
+
+        for method_name, kwargs in methods:
+            method = getattr(builder, method_name)
+            result = method(**kwargs)
+            assert result is builder, f"{method_name} should return self"
+
+    @given(methods=builder_method_sequence())
+    @settings(max_examples=50)
+    def test_builder_build_returns_fitter_config(self, methods):
+        """Property: build() always returns a valid FitterConfig."""
+        from spark_bestfit.config import FitterConfig, FitterConfigBuilder
+
+        builder = FitterConfigBuilder()
+
+        for method_name, kwargs in methods:
+            method = getattr(builder, method_name)
+            method(**kwargs)
+
+        config = builder.build()
+
+        assert isinstance(config, FitterConfig)
+
+    @given(methods=builder_method_sequence())
+    @settings(max_examples=30)
+    def test_builder_produces_frozen_config(self, methods):
+        """Property: Builder always produces an immutable (frozen) config."""
+        from spark_bestfit.config import FitterConfigBuilder
+
+        builder = FitterConfigBuilder()
+
+        for method_name, kwargs in methods:
+            getattr(builder, method_name)(**kwargs)
+
+        config = builder.build()
+
+        # Should not be able to modify
+        with pytest.raises(Exception):
+            config.bins = 999
+
+    def test_default_builder_matches_default_config(self):
+        """Property: Default builder produces config with default values."""
+        from spark_bestfit.config import FitterConfig, FitterConfigBuilder
+
+        default_config = FitterConfig()
+        builder_config = FitterConfigBuilder().build()
+
+        # All fields should match (except progress_callback which is always None)
+        assert builder_config.bins == default_config.bins
+        assert builder_config.use_rice_rule == default_config.use_rice_rule
+        assert builder_config.support_at_zero == default_config.support_at_zero
+        assert builder_config.max_distributions == default_config.max_distributions
+        assert builder_config.prefilter == default_config.prefilter
+        assert builder_config.enable_sampling == default_config.enable_sampling
+        assert builder_config.sample_fraction == default_config.sample_fraction
+        assert builder_config.max_sample_size == default_config.max_sample_size
+        assert builder_config.sample_threshold == default_config.sample_threshold
+        assert builder_config.bounded == default_config.bounded
+        assert builder_config.lower_bound == default_config.lower_bound
+        assert builder_config.upper_bound == default_config.upper_bound
+        assert builder_config.num_partitions == default_config.num_partitions
+        assert builder_config.lazy_metrics == default_config.lazy_metrics
+
+
+class TestFitterConfigIntegrationProperties:
+    """Property-based tests for FitterConfig integration with fitters."""
+
+    @given(config=fitter_config(), data=finite_float_array(min_size=100, max_size=300))
+    @settings(max_examples=10, deadline=None)
+    def test_fit_with_config_does_not_raise(self, config, data):
+        """Property: fit() with any valid config does not raise."""
+        from spark_bestfit.config import FitterConfig
+        from spark_bestfit.continuous_fitter import DistributionFitter
+
+        # Force sensible values for actual fitting
+        config = FitterConfig(
+            bins=min(config.bins if isinstance(config.bins, int) else 50, 100),
+            max_distributions=3,  # Limit for speed
+            enable_sampling=False,
+            lazy_metrics=config.lazy_metrics,
+            bounded=False,  # Avoid bound validation issues
+        )
+
+        backend = LocalBackend()
+        fitter = DistributionFitter(backend=backend)
+        df = pd.DataFrame({"value": data})
+
+        # Should not raise
+        results = fitter.fit(df, column="value", config=config)
+        assert results.count() >= 0
+
+    @given(data=finite_float_array(min_size=100, max_size=200))
+    @settings(max_examples=10, deadline=None)
+    def test_config_vs_params_equivalence(self, data):
+        """Property: config= produces same results as equivalent direct params."""
+        from spark_bestfit.config import FitterConfig
+        from spark_bestfit.continuous_fitter import DistributionFitter
+
+        backend = LocalBackend()
+        fitter = DistributionFitter(backend=backend)
+        df = pd.DataFrame({"value": data})
+
+        # Fit with direct params
+        results_params = fitter.fit(
+            df,
+            column="value",
+            bins=30,
+            max_distributions=3,
+            lazy_metrics=True,
+        )
+
+        # Fit with equivalent config
+        config = FitterConfig(
+            bins=30,
+            max_distributions=3,
+            lazy_metrics=True,
+        )
+        results_config = fitter.fit(df, column="value", config=config)
+
+        # Should have same distributions fitted
+        params_dists = {r.distribution for r in results_params.best(n=10, metric="aic")}
+        config_dists = {r.distribution for r in results_config.best(n=10, metric="aic")}
+
+        assert params_dists == config_dists

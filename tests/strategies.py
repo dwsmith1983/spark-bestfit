@@ -5,6 +5,7 @@ This module provides reusable hypothesis strategies for generating:
 - Valid distribution parameters
 - Finite numeric data samples
 - Valid metric names
+- FitterConfig and FitterConfigBuilder configurations
 
 These strategies enable comprehensive property-based testing of
 distribution fitting, serialization, and result handling.
@@ -331,3 +332,141 @@ def distribution_fit_result_data(draw: st.DrawFn) -> dict:
         "data_count": draw(st.floats(min_value=1, max_value=1e9, allow_nan=False) | st.none()),
         "column_name": draw(st.text(min_size=0, max_size=50) | st.none()),
     }
+
+
+# =============================================================================
+# FitterConfig Strategies
+# =============================================================================
+
+# Valid prefilter modes
+VALID_PREFILTER_MODES = [False, True, "aggressive"]
+
+
+@st.composite
+def fitter_config_data(draw: st.DrawFn) -> dict:
+    """Generate valid data for constructing a FitterConfig.
+
+    Returns a dict suitable for passing as kwargs to FitterConfig().
+    Excludes progress_callback as it's not serializable/comparable.
+    """
+    # Generate bounds that make sense together
+    lower = draw(st.floats(min_value=-1000, max_value=500, allow_nan=False) | st.none())
+    upper = draw(st.floats(min_value=-500, max_value=1000, allow_nan=False) | st.none())
+
+    # Ensure lower <= upper if both are set
+    if lower is not None and upper is not None and lower > upper:
+        lower, upper = upper, lower
+
+    # Bounded should be True if bounds are set
+    bounded = draw(st.booleans()) if lower is None and upper is None else True
+
+    return {
+        "bins": draw(st.integers(min_value=5, max_value=500) | st.just(50)),
+        "use_rice_rule": draw(st.booleans()),
+        "support_at_zero": draw(st.booleans()),
+        "max_distributions": draw(st.integers(min_value=1, max_value=100) | st.none()),
+        "prefilter": draw(st.sampled_from(VALID_PREFILTER_MODES)),
+        "enable_sampling": draw(st.booleans()),
+        "sample_fraction": draw(
+            st.floats(min_value=0.001, max_value=1.0, allow_nan=False) | st.none()
+        ),
+        "max_sample_size": draw(st.integers(min_value=100, max_value=10_000_000)),
+        "sample_threshold": draw(st.integers(min_value=1000, max_value=100_000_000)),
+        "bounded": bounded,
+        "lower_bound": lower,
+        "upper_bound": upper,
+        "num_partitions": draw(st.integers(min_value=1, max_value=100) | st.none()),
+        "lazy_metrics": draw(st.booleans()),
+    }
+
+
+@st.composite
+def fitter_config(draw: st.DrawFn):
+    """Generate a valid FitterConfig instance.
+
+    Returns a FitterConfig with random valid parameters.
+    """
+    from spark_bestfit.config import FitterConfig
+
+    data = draw(fitter_config_data())
+    return FitterConfig(**data)
+
+
+@st.composite
+def builder_method_sequence(draw: st.DrawFn) -> List[Tuple[str, dict]]:
+    """Generate a sequence of builder method calls.
+
+    Returns a list of (method_name, kwargs) tuples representing
+    a valid sequence of FitterConfigBuilder method calls.
+    """
+    methods = []
+
+    # Randomly include each builder method
+    if draw(st.booleans()):
+        methods.append(
+            (
+                "with_bins",
+                {
+                    "bins": draw(st.integers(min_value=10, max_value=200)),
+                    "use_rice_rule": draw(st.booleans()),
+                },
+            )
+        )
+
+    if draw(st.booleans()):
+        lower = draw(st.floats(min_value=0, max_value=50, allow_nan=False) | st.none())
+        upper = draw(st.floats(min_value=50, max_value=100, allow_nan=False) | st.none())
+        methods.append(
+            (
+                "with_bounds",
+                {
+                    "lower": lower,
+                    "upper": upper,
+                    "auto_detect": draw(st.booleans()) if lower is None and upper is None else False,
+                },
+            )
+        )
+
+    if draw(st.booleans()):
+        methods.append(
+            (
+                "with_sampling",
+                {
+                    "fraction": draw(
+                        st.floats(min_value=0.01, max_value=1.0, allow_nan=False) | st.none()
+                    ),
+                    "max_size": draw(st.integers(min_value=1000, max_value=1_000_000)),
+                    "threshold": draw(st.integers(min_value=10000, max_value=10_000_000)),
+                    "enabled": draw(st.booleans()),
+                },
+            )
+        )
+
+    if draw(st.booleans()):
+        methods.append(("with_lazy_metrics", {"lazy": draw(st.booleans())}))
+
+    if draw(st.booleans()):
+        methods.append(
+            ("with_prefilter", {"mode": draw(st.sampled_from(VALID_PREFILTER_MODES))})
+        )
+
+    if draw(st.booleans()):
+        methods.append(("with_support_at_zero", {"enabled": draw(st.booleans())}))
+
+    if draw(st.booleans()):
+        methods.append(
+            (
+                "with_max_distributions",
+                {"n": draw(st.integers(min_value=1, max_value=50) | st.none())},
+            )
+        )
+
+    if draw(st.booleans()):
+        methods.append(
+            (
+                "with_partitions",
+                {"n": draw(st.integers(min_value=1, max_value=32) | st.none())},
+            )
+        )
+
+    return methods
