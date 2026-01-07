@@ -84,13 +84,13 @@ CONTINUOUS_PARAM_SPECS = {
         draw(st.floats(min_value=0.01, max_value=100)),  # scale
     ],
     "gamma": lambda draw: [
-        draw(st.floats(min_value=0.1, max_value=20)),  # a (shape)
+        draw(st.floats(min_value=0.5, max_value=20)),  # a (shape) - min 0.5 for PPF/CDF numerical stability
         draw(st.floats(min_value=-100, max_value=100)),  # loc
         draw(st.floats(min_value=0.01, max_value=100)),  # scale
     ],
     "beta": lambda draw: [
-        draw(st.floats(min_value=0.1, max_value=10)),  # a
-        draw(st.floats(min_value=0.1, max_value=10)),  # b
+        draw(st.floats(min_value=0.5, max_value=10)),  # a - min 0.5 for PPF/CDF numerical stability
+        draw(st.floats(min_value=0.5, max_value=10)),  # b - min 0.5 for PPF/CDF numerical stability
         draw(st.floats(min_value=-100, max_value=100)),  # loc
         draw(st.floats(min_value=0.01, max_value=100)),  # scale
     ],

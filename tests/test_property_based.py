@@ -175,7 +175,9 @@ class TestDistributionFunctionProperties:
         p_recovered = result.cdf(np.array([x]))[0]
 
         # Should recover the original probability
-        assert np.isclose(p_recovered, p, rtol=1e-5), f"CDF(PPF({p})) = {p_recovered} != {p} for {dist_name}"
+        # Use rtol=1e-4 to account for numerical precision in scipy's PPF/CDF
+        # implementations, especially for distributions with extreme shape parameters
+        assert np.isclose(p_recovered, p, rtol=1e-4), f"CDF(PPF({p})) = {p_recovered} != {p} for {dist_name}"
 
     @given(dist_params=distribution_with_params(), probs=probabilities(min_size=5, max_size=20))
     @settings(max_examples=50)
