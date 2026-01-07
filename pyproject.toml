@@ -277,6 +277,7 @@ pytest_add_cli_args_test_selection = [
     "tests/test_results.py",
     "tests/test_numerical_stability.py",
     "tests/test_property_based.py",
+    "tests/test_config.py",
     # Using LocalBackend
     "tests/test_core.py",
     "tests/test_histogram.py",
