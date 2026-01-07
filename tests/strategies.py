@@ -282,19 +282,23 @@ def probability(draw: st.DrawFn) -> float:
     """Generate a probability value in (0, 1) exclusive.
 
     Useful for testing PPF (inverse CDF) which is undefined at 0 and 1.
+    Uses 1e-4 to 1-1e-4 to avoid scipy numerical precision issues at extreme tails.
     """
-    p = draw(st.floats(min_value=1e-6, max_value=1 - 1e-6))
+    p = draw(st.floats(min_value=1e-4, max_value=1 - 1e-4))
     assume(0 < p < 1)
     return p
 
 
 @st.composite
 def probabilities(draw: st.DrawFn, min_size: int = 1, max_size: int = 100) -> np.ndarray:
-    """Generate an array of probability values in (0, 1)."""
+    """Generate an array of probability values in (0, 1).
+
+    Uses 1e-4 to 1-1e-4 to avoid scipy numerical precision issues at extreme tails.
+    """
     size = draw(st.integers(min_value=min_size, max_value=max_size))
     probs = draw(
         st.lists(
-            st.floats(min_value=1e-6, max_value=1 - 1e-6),
+            st.floats(min_value=1e-4, max_value=1 - 1e-4),
             min_size=size,
             max_size=size,
         )

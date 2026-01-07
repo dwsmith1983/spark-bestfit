@@ -51,7 +51,7 @@ class TestSerializationProperties:
     """Property-based tests for serialization round-trips."""
 
     @given(data=distribution_fit_result_data())
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
     def test_json_round_trip_preserves_distribution(self, data):
         """Property: JSON round-trip preserves distribution name exactly."""
         result = DistributionFitResult(**data)
@@ -63,7 +63,7 @@ class TestSerializationProperties:
             assert loaded.distribution == result.distribution
 
     @given(data=distribution_fit_result_data())
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
     def test_json_round_trip_preserves_parameters(self, data):
         """Property: JSON round-trip preserves parameters (within floating point precision)."""
         result = DistributionFitResult(**data)
@@ -78,7 +78,7 @@ class TestSerializationProperties:
                 assert abs(orig - loaded_val) < 1e-10 or np.isclose(orig, loaded_val, rtol=1e-10)
 
     @given(data=distribution_fit_result_data())
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
     def test_pickle_round_trip_preserves_all_fields(self, data):
         """Property: Pickle round-trip preserves all fields exactly."""
         result = DistributionFitResult(**data)
@@ -94,7 +94,7 @@ class TestSerializationProperties:
             assert loaded.bic == result.bic
 
     @given(data=distribution_fit_result_data())
-    @settings(max_examples=30)
+    @settings(max_examples=30, suppress_health_check=[HealthCheck.too_slow])
     def test_round_trip_produces_functional_result(self, data):
         """Property: Loaded results can generate samples without error."""
         result = DistributionFitResult(**data)
