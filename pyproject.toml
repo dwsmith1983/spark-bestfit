@@ -276,8 +276,8 @@ pytest_add_cli_args_test_selection = [
     "tests/test_serialization.py",
     "tests/test_results.py",
     "tests/test_numerical_stability.py",
-    "tests/test_property_based.py",
     "tests/test_config.py",
+    # Note: test_property_based.py excluded - hypothesis incompatible with mutmut trampoline
     # Using LocalBackend
     "tests/test_core.py",
     "tests/test_histogram.py",
