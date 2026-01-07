@@ -52,7 +52,15 @@ from spark_bestfit.core import (
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
 from spark_bestfit.protocols import ExecutionBackend
-from spark_bestfit.results import DistributionFitResult, FitResults, MetricName
+from spark_bestfit.results import (
+    BaseFitResults,
+    DistributionFitResult,
+    EagerFitResults,
+    FitResults,
+    FitResultsType,
+    LazyFitResults,
+    MetricName,
+)
 from spark_bestfit.serialization import SerializationError
 from spark_bestfit.utils import get_spark_session
 
@@ -77,6 +85,10 @@ __all__ = [
     "DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS",
     # Results
     "FitResults",
+    "FitResultsType",
+    "BaseFitResults",
+    "EagerFitResults",
+    "LazyFitResults",
     "DistributionFitResult",
     # Type aliases
     "MetricName",

@@ -20,7 +20,7 @@ from spark_bestfit.base_fitter import BaseFitter
 from spark_bestfit.distributions import DistributionRegistry
 from spark_bestfit.fitting import FIT_RESULT_SCHEMA, FITTING_SAMPLE_SIZE, compute_data_stats, fit_single_distribution
 from spark_bestfit.histogram import HistogramComputer
-from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
+from spark_bestfit.results import DistributionFitResult, FitResults, FitResultsType, LazyMetricsContext
 
 if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
@@ -115,7 +115,7 @@ class DistributionFitter(BaseFitter):
         upper_bound: Optional[Union[float, Dict[str, float]]] = None,
         lazy_metrics: bool = False,
         prefilter: Union[bool, str] = False,
-    ) -> FitResults:
+    ) -> FitResultsType:
         """Fit distributions to data column(s).
 
         Args:

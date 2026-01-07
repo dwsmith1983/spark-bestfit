@@ -70,7 +70,35 @@ Benchmark comparison:
 Breaking Changes
 ----------------
 
-**Result Schema Change**
+**FitResults Type Check Change (v2.1)**
+
+``FitResults`` is now a factory function that returns either ``EagerFitResults`` or
+``LazyFitResults``. Type checking with ``isinstance`` must use ``BaseFitResults``:
+
+.. code-block:: python
+
+   # Before (v2.0) - No longer works
+   from spark_bestfit import FitResults
+   if isinstance(result, FitResults):  # TypeError!
+       ...
+
+   # After (v2.1+) - Use BaseFitResults
+   from spark_bestfit import BaseFitResults
+   if isinstance(result, BaseFitResults):
+       ...
+
+   # Or check specific types
+   from spark_bestfit import EagerFitResults, LazyFitResults
+   if isinstance(result, LazyFitResults):
+       result = result.materialize()  # Returns EagerFitResults
+
+The class hierarchy is now:
+
+- ``BaseFitResults`` (ABC) - Use for type checking
+- ``EagerFitResults`` - All metrics pre-computed
+- ``LazyFitResults`` - KS/AD computed on-demand, has ``source_dataframes`` property
+
+**Result Schema Change (v2.0)**
 
 The ``data_summary`` field changed from ``MapType`` to individual columns:
 
@@ -154,6 +182,13 @@ If you're in the Ray ecosystem:
 
 Version History
 ---------------
+
+**v2.1.0 (January 2026)**
+
+- FitResults class hierarchy: ``BaseFitResults``, ``EagerFitResults``, ``LazyFitResults``
+- ``FitResults`` is now a factory function (breaking: use ``BaseFitResults`` for isinstance)
+- New ``LazyFitResults.source_dataframes`` property for DataFrame lifecycle visibility
+- Property-based testing with Hypothesis for better edge case coverage
 
 **v2.0.0 (January 2026)**
 

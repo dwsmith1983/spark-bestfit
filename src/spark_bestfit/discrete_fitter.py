@@ -23,7 +23,7 @@ from spark_bestfit.discrete_fitting import (
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_stats
-from spark_bestfit.results import DistributionFitResult, FitResults, LazyMetricsContext
+from spark_bestfit.results import DistributionFitResult, FitResults, FitResultsType, LazyMetricsContext
 
 if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
@@ -118,7 +118,7 @@ class DiscreteDistributionFitter(BaseFitter):
         upper_bound: Optional[Union[float, Dict[str, float]]] = None,
         lazy_metrics: bool = False,
         prefilter: Union[bool, str] = False,
-    ) -> FitResults:
+    ) -> FitResultsType:
         """Fit discrete distributions to integer data column(s).
 
         Args:

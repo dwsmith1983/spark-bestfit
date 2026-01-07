@@ -1,6 +1,7 @@
 """Results handling for fitted distributions."""
 
 import warnings
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
@@ -608,16 +609,16 @@ class DistributionFitResult:
         )
 
 
-class FitResults:
-    """Container for multiple distribution fit results.
+class BaseFitResults(ABC):
+    """Abstract base class for distribution fit results.
 
     Provides convenient methods for accessing, filtering, and analyzing
     fitted distributions. Wraps a Spark DataFrame but provides pandas-like
     interface for common operations.
 
-    When created with lazy_metrics=True, KS/AD metrics are computed on-demand
-    when first accessed via best() with metric='ks_statistic' or 'ad_statistic'.
-    This provides Spark-like lazy evaluation for expensive computations.
+    Subclasses:
+        - EagerFitResults: All metrics pre-computed during fitting
+        - LazyFitResults: KS/AD metrics computed on-demand
 
     Example:
         >>> results = fitter.fit(df, 'value')
@@ -629,28 +630,15 @@ class FitResults:
         >>> df_pandas = results.df.toPandas()
         >>> # Filter by SSE threshold
         >>> good_fits = results.filter(sse_threshold=0.01)
-
-        >>> # With lazy metrics (v1.5.0+)
-        >>> results = fitter.fit(df, 'value', lazy_metrics=True)
-        >>> best_aic = results.best(n=1, metric='aic')[0]  # Fast, no KS/AD
-        >>> best_ks = results.best(n=1, metric='ks_statistic')[0]  # Computes on-demand
     """
 
-    def __init__(
-        self,
-        results_df: Union[DataFrame, pd.DataFrame],
-        lazy_contexts: Optional[Dict[str, "LazyMetricsContext"]] = None,
-    ):
-        """Initialize FitResults.
+    def __init__(self, results_df: Union[DataFrame, pd.DataFrame]):
+        """Initialize BaseFitResults.
 
         Args:
             results_df: Spark DataFrame or pandas DataFrame with fit results
-            lazy_contexts: Optional dict mapping column names to LazyMetricsContext
-                for on-demand KS/AD computation. When provided, enables true lazy
-                metric evaluation.
         """
         self._df = results_df
-        self._lazy_contexts = lazy_contexts or {}
         # Cache whether this is a Spark DataFrame for fast access
         self._is_spark = hasattr(results_df, "sparkSession")
 
@@ -664,16 +652,18 @@ class FitResults:
         return self._is_spark
 
     @property
+    @abstractmethod
     def is_lazy(self) -> bool:
         """Check if lazy metrics are available for on-demand computation.
 
         Returns:
-            True if this FitResults has lazy contexts that can compute
-            KS/AD metrics on-demand.
+            True if this is a LazyFitResults with lazy contexts,
+            False if this is an EagerFitResults with all metrics computed.
         """
-        return bool(self._lazy_contexts)
+        pass
 
-    def materialize(self) -> "FitResults":
+    @abstractmethod
+    def materialize(self) -> "EagerFitResults":
         """Force computation of all lazy metrics.
 
         When lazy_metrics=True was used during fitting, this method computes
@@ -681,10 +671,10 @@ class FitResults:
         the source DataFrame if you need the metrics later.
 
         Returns:
-            New FitResults with all metrics computed (non-lazy).
+            EagerFitResults with all metrics computed.
 
         Raises:
-            RuntimeError: If the source DataFrame is no longer available.
+            RuntimeError: If the source DataFrame is no longer available (LazyFitResults only).
 
         Example:
             >>> results = fitter.fit(df, 'value', lazy_metrics=True)
@@ -698,91 +688,9 @@ class FitResults:
             >>> # Access KS on materialized results
             >>> best_ks = materialized.best(n=1, metric='ks_statistic')[0]
         """
-        if not self._lazy_contexts:
-            # Already materialized or never was lazy
-            return self
+        pass
 
-        # Collect all rows - handle both Spark and pandas DataFrames
-        if self._is_spark:
-            all_rows = self._df.collect()
-        else:
-            # Convert pandas DataFrame rows to list of dicts
-            all_rows = self._df.to_dict("records")
-
-        column_names = self.column_names if self.column_names else [None]
-
-        # Group rows by column
-        rows_by_column: Dict[Optional[str], list] = {}
-        for row in all_rows:
-            if self._is_spark:
-                col = row["column_name"] if hasattr(row, "column_name") else None
-            else:
-                col = row.get("column_name")
-            if col not in rows_by_column:
-                rows_by_column[col] = []
-            rows_by_column[col].append(row)
-
-        # Compute metrics for each column
-        materialized_results: List[Dict] = []
-
-        for col_name in column_names:
-            context_key = col_name or "_single_column_"
-            if context_key not in self._lazy_contexts:
-                if self._lazy_contexts:
-                    context_key = next(iter(self._lazy_contexts.keys()))
-                else:
-                    # No context, just pass through
-                    for row in rows_by_column.get(col_name, []):
-                        if self._is_spark:
-                            materialized_results.append(dict(row.asDict()))
-                        else:
-                            materialized_results.append(dict(row))
-                    continue
-
-            context = self._lazy_contexts[context_key]
-            data_sample = self._recreate_sample(context)
-
-            # Select appropriate metric computation function
-            if context.is_discrete:
-                from spark_bestfit.discrete_fitting import compute_ks_ad_metrics_discrete as compute_metrics
-            else:
-                from spark_bestfit.fitting import compute_ks_ad_metrics as compute_metrics
-
-            for row in rows_by_column.get(col_name, []):
-                if self._is_spark:
-                    row_dict = dict(row.asDict())
-                else:
-                    row_dict = dict(row)
-
-                # Compute metrics if they're None
-                if row_dict.get("ks_statistic") is None:
-                    ks_stat, pvalue, ad_stat, ad_pvalue = compute_metrics(
-                        dist_name=row_dict["distribution"],
-                        params=list(row_dict["parameters"]),
-                        data_sample=data_sample,
-                        lower_bound=context.lower_bound,
-                        upper_bound=context.upper_bound,
-                    )
-                    row_dict["ks_statistic"] = ks_stat
-                    row_dict["pvalue"] = pvalue
-                    row_dict["ad_statistic"] = ad_stat
-                    row_dict["ad_pvalue"] = ad_pvalue
-
-                materialized_results.append(row_dict)
-
-        # Create new DataFrame from materialized results
-        if self._is_spark:
-            from spark_bestfit.fitting import FIT_RESULT_SCHEMA
-
-            spark = self._df.sparkSession
-            materialized_df = spark.createDataFrame(materialized_results, schema=FIT_RESULT_SCHEMA)
-            return FitResults(materialized_df.cache(), lazy_contexts=None)
-        else:
-            # pandas DataFrame
-            materialized_df = pd.DataFrame(materialized_results)
-            return FitResults(materialized_df, lazy_contexts=None)
-
-    def unpersist(self, blocking: bool = False) -> "FitResults":
+    def unpersist(self, blocking: bool = False) -> "BaseFitResults":
         """Release the cached DataFrame from memory.
 
         Call this method when you no longer need the FitResults to free
@@ -945,6 +853,7 @@ class FitResults:
         """
         return self._df
 
+    @abstractmethod
     def best(
         self,
         n: int = 1,
@@ -966,26 +875,23 @@ class FitResults:
         Returns:
             List of DistributionFitResult objects
 
-        Note:
-            When using lazy_metrics=True during fitting, KS and AD metrics are
-            computed on-demand when you call best() with metric='ks_statistic'
-            or 'ad_statistic'. This enables Spark-like lazy evaluation where
-            expensive computations only happen when needed.
-
         Example:
-            >>> # Get best distribution (by K-S statistic, the default)
             >>> best = results.best(n=1)[0]
-            >>> # Get top 5 by AIC
             >>> top_5 = results.best(n=5, metric='aic')
-            >>> # Get best by SSE
-            >>> best_sse = results.best(n=1, metric='sse')[0]
-            >>> # Get best by Anderson-Darling statistic
-            >>> best_ad = results.best(n=1, metric='ad_statistic')[0]
-            >>> # Get best with warning if poor fit
-            >>> best = results.best(n=1, warn_if_poor=True)[0]
-            >>> # With lazy metrics - computes KS on-demand
-            >>> results = fitter.fit(df, 'value', lazy_metrics=True)
-            >>> best_ks = results.best(n=1, metric='ks_statistic')[0]
+        """
+        pass
+
+    def _best_from_dataframe(
+        self,
+        n: int,
+        metric: MetricName,
+        warn_if_poor: bool,
+        pvalue_threshold: float,
+    ) -> List[DistributionFitResult]:
+        """Shared helper to get best results from DataFrame.
+
+        Used by both EagerFitResults and LazyFitResults for the common
+        sort-and-return logic.
         """
         # Validate inputs
         if n <= 0:
@@ -994,30 +900,6 @@ class FitResults:
         valid_metrics = {"sse", "aic", "bic", "ks_statistic", "ad_statistic"}
         if metric not in valid_metrics:
             raise ValueError(f"metric must be one of {valid_metrics}")
-
-        # Check if this is a lazy metrics request
-        lazy_metric_names = {"ks_statistic", "ad_statistic"}
-        if metric in lazy_metric_names:
-            # Check if the first row has the metric as None (lazy mode)
-            if self._is_spark:
-                sample_row = self._df.limit(1).collect()
-                first_metric_value = sample_row[0][metric] if sample_row else None
-            else:
-                first_metric_value = self._df[metric].iloc[0] if len(self._df) > 0 else None
-
-            if first_metric_value is None or (isinstance(first_metric_value, float) and np.isnan(first_metric_value)):
-                # True lazy computation: compute metrics on-demand
-                if self._lazy_contexts:
-                    return self._best_with_lazy_computation(n, metric, warn_if_poor, pvalue_threshold)
-                else:
-                    # No lazy context - warn the user
-                    warnings.warn(
-                        f"Requested metric '{metric}' is None (lazy_metrics=True was used during fitting). "
-                        f"Cannot compute on-demand without lazy context. "
-                        f"Use 'aic', 'bic', or 'sse' instead, or re-fit with lazy_metrics=False.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
 
         # Get top N results sorted by metric (ascending, nulls last)
         if self._is_spark:
@@ -1071,101 +953,7 @@ class FitResults:
 
         return results
 
-    def _best_with_lazy_computation(
-        self,
-        n: int,
-        metric: MetricName,
-        warn_if_poor: bool,
-        pvalue_threshold: float,
-    ) -> List[DistributionFitResult]:
-        """Get best distributions with on-demand KS/AD computation.
-
-        This is called when lazy_metrics=True was used and the user requests
-        sorting by ks_statistic or ad_statistic. We:
-        1. Get more candidates than needed (N*3) sorted by AIC (proxy)
-        2. Compute KS/AD only for those candidates
-        3. Re-sort by the actual requested metric
-        4. Return top N
-
-        Args:
-            n: Number of results to return
-            metric: The lazy metric to sort by ('ks_statistic' or 'ad_statistic')
-            warn_if_poor: Whether to warn about poor fits
-            pvalue_threshold: P-value threshold for poor fit warning
-
-        Returns:
-            List of DistributionFitResult with computed metrics
-        """
-        # Determine candidate count - get extra candidates to account for
-        # the fact that AIC ranking != KS/AD ranking
-        total_count = self._df.count() if self._is_spark else len(self._df)
-        candidate_count = min(n * 3 + 5, total_count)
-
-        # Group by column name and process each column separately
-        column_names = self.column_names if self.column_names else [None]
-
-        all_results: List[DistributionFitResult] = []
-
-        for col_name in column_names:
-            # Get context for this column
-            context_key = col_name or "_single_column_"
-            if context_key not in self._lazy_contexts:
-                # Fallback: try the first available context
-                if self._lazy_contexts:
-                    context_key = next(iter(self._lazy_contexts.keys()))
-                else:
-                    continue
-
-            context = self._lazy_contexts[context_key]
-
-            # Get candidate rows sorted by AIC (proxy for likely good fits)
-            if self._is_spark:
-                if col_name:
-                    candidates_df = self._df.filter(F.col("column_name") == col_name)
-                else:
-                    candidates_df = self._df
-
-                # Sort by AIC (always computed, never NULL) with nulls_last for safety
-                candidate_rows = candidates_df.orderBy(F.col("aic").asc_nulls_last()).limit(candidate_count).collect()
-            else:
-                # pandas DataFrame
-                if col_name:
-                    candidates_df = self._df[self._df["column_name"] == col_name]
-                else:
-                    candidates_df = self._df
-
-                # Sort by AIC, NaN values at end
-                sorted_df = candidates_df.sort_values(by="aic", ascending=True, na_position="last")
-                candidate_rows = sorted_df.head(candidate_count).to_dict("records")
-
-            # Compute lazy metrics for candidates
-            computed_results = self._compute_lazy_metrics_for_results(candidate_rows, context)
-
-            all_results.extend(computed_results)
-
-        # Sort by the requested metric
-        if metric == "ks_statistic":
-            all_results.sort(key=lambda r: r.ks_statistic if r.ks_statistic is not None else float("inf"))
-        else:  # ad_statistic
-            all_results.sort(key=lambda r: r.ad_statistic if r.ad_statistic is not None else float("inf"))
-
-        # Take top N
-        results = all_results[:n]
-
-        # Emit warning if requested and best fit has poor p-value
-        if warn_if_poor and results:
-            best_result = results[0]
-            if best_result.pvalue is not None and best_result.pvalue < pvalue_threshold:
-                warnings.warn(
-                    f"Best fit '{best_result.distribution}' has p-value {best_result.pvalue:.4f} "
-                    f"< {pvalue_threshold}, indicating a potentially poor fit. "
-                    f"Consider using quality_report() for detailed diagnostics.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-
-        return results
-
+    @abstractmethod
     def filter(
         self,
         sse_threshold: Optional[float] = None,
@@ -1174,7 +962,7 @@ class FitResults:
         ks_threshold: Optional[float] = None,
         pvalue_threshold: Optional[float] = None,
         ad_threshold: Optional[float] = None,
-    ) -> "FitResults":
+    ) -> "BaseFitResults":
         """Filter results by metric thresholds.
 
         Args:
@@ -1186,36 +974,26 @@ class FitResults:
             ad_threshold: Maximum A-D statistic to include
 
         Returns:
-            New FitResults with filtered data
-
-        Note:
-            If `lazy_metrics=True` was used during fitting, KS and AD metrics
-            will be None. Filtering by these thresholds will exclude all results.
-            Use 'aic', 'bic', or 'sse' thresholds instead when using lazy metrics.
+            New FitResults with filtered data (same type as self)
 
         Example:
-            >>> # Get only good fits
             >>> good_fits = results.filter(sse_threshold=0.01)
-            >>> # Get models with low AIC
-            >>> low_aic = results.filter(aic_threshold=1000)
-            >>> # Get fits with p-value > 0.05
-            >>> significant = results.filter(pvalue_threshold=0.05)
-            >>> # Get fits with A-D statistic < 1.0
-            >>> good_ad = results.filter(ad_threshold=1.0)
         """
-        # Check for lazy metrics warning
-        lazy_filter_requested = ks_threshold is not None or pvalue_threshold is not None or ad_threshold is not None
-        if lazy_filter_requested and self._is_spark:
-            sample_row = self._df.limit(1).collect()
-            if sample_row and sample_row[0]["ks_statistic"] is None:
-                warnings.warn(
-                    "Filtering by KS/AD metrics when lazy_metrics=True was used during fitting. "
-                    "These metrics are None, so filtering will exclude all results. "
-                    "Use aic/bic/sse thresholds instead, or re-fit with lazy_metrics=False.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+        pass
 
+    def _filter_dataframe(
+        self,
+        sse_threshold: Optional[float] = None,
+        aic_threshold: Optional[float] = None,
+        bic_threshold: Optional[float] = None,
+        ks_threshold: Optional[float] = None,
+        pvalue_threshold: Optional[float] = None,
+        ad_threshold: Optional[float] = None,
+    ) -> Union[DataFrame, pd.DataFrame]:
+        """Shared helper to filter the DataFrame by thresholds.
+
+        Returns the filtered DataFrame for subclasses to wrap appropriately.
+        """
         filtered = self._df
 
         if self._is_spark:
@@ -1247,38 +1025,33 @@ class FitResults:
             if ad_threshold is not None:
                 filtered = filtered[filtered["ad_statistic"] < ad_threshold]
 
-        # Preserve lazy contexts for the filtered results
-        # Note: Don't cache here - parent DataFrame is already cached
-        return FitResults(filtered, lazy_contexts=self._lazy_contexts)
+        return filtered
 
-    def for_column(self, column_name: str) -> "FitResults":
+    @abstractmethod
+    def for_column(self, column_name: str) -> "BaseFitResults":
         """Filter results to a single column.
 
         Args:
             column_name: Column to filter for
 
         Returns:
-            New FitResults containing only results for the specified column.
-            If the original had lazy contexts, the filtered results will retain
-            the lazy context for the specified column.
+            New FitResults containing only results for the specified column
+            (same type as self).
 
         Example:
-            >>> results = fitter.fit(df, columns=["col1", "col2"])
             >>> col1_results = results.for_column("col1")
-            >>> best = col1_results.best(n=1)[0]
+        """
+        pass
+
+    def _filter_for_column(self, column_name: str) -> Union[DataFrame, pd.DataFrame]:
+        """Shared helper to filter DataFrame to a single column.
+
+        Returns the filtered DataFrame for subclasses to wrap appropriately.
         """
         if self._is_spark:
-            filtered = self._df.filter(F.col("column_name") == column_name)
+            return self._df.filter(F.col("column_name") == column_name)
         else:
-            filtered = self._df[self._df["column_name"] == column_name].copy()
-
-        # Preserve only the relevant lazy context for this column
-        filtered_contexts = {}
-        if column_name in self._lazy_contexts:
-            filtered_contexts[column_name] = self._lazy_contexts[column_name]
-
-        # Note: Don't cache here - parent DataFrame is already cached
-        return FitResults(filtered, lazy_contexts=filtered_contexts)
+            return self._df[self._df["column_name"] == column_name].copy()
 
     @property
     def column_names(self) -> List[str]:
@@ -1504,10 +1277,471 @@ class FitResults:
     def __repr__(self) -> str:
         """String representation of results."""
         count = self.count()
+        class_name = self.__class__.__name__
         if count > 0:
             best = self.best(n=1)[0]
-            return (
-                f"FitResults({count} distributions fitted, "
-                f"best: {best.distribution} with KS={best.ks_statistic:.6f})"
-            )
-        return f"FitResults({count} distributions fitted)"
+            ks_str = f"{best.ks_statistic:.6f}" if best.ks_statistic is not None else "N/A"
+            return f"{class_name}({count} distributions fitted, " f"best: {best.distribution} with KS={ks_str})"
+        return f"{class_name}({count} distributions fitted)"
+
+
+class EagerFitResults(BaseFitResults):
+    """Fit results with all metrics pre-computed.
+
+    This class represents distribution fit results where all metrics
+    (SSE, AIC, BIC, KS, AD) have been computed during fitting.
+
+    Example:
+        >>> results = fitter.fit(df, 'value')  # Default: eager evaluation
+        >>> best = results.best(n=1)[0]
+        >>> print(f"KS: {best.ks_statistic:.4f}")
+    """
+
+    @property
+    def is_lazy(self) -> Literal[False]:
+        """Return False - eager results have all metrics computed."""
+        return False
+
+    def materialize(self) -> "EagerFitResults":
+        """Return self - already materialized.
+
+        For eager results, this is a no-op since all metrics are
+        already computed.
+
+        Returns:
+            Self (no copy needed).
+        """
+        return self
+
+    def best(
+        self,
+        n: int = 1,
+        metric: MetricName = "ks_statistic",
+        warn_if_poor: bool = False,
+        pvalue_threshold: float = 0.05,
+    ) -> List[DistributionFitResult]:
+        """Get top n distributions by specified metric.
+
+        Args:
+            n: Number of results to return
+            metric: Metric to sort by ('ks_statistic', 'sse', 'aic', 'bic', or 'ad_statistic')
+            warn_if_poor: If True, warn when best fit has poor p-value
+            pvalue_threshold: P-value threshold for poor fit warning
+
+        Returns:
+            List of DistributionFitResult objects
+        """
+        return self._best_from_dataframe(n, metric, warn_if_poor, pvalue_threshold)
+
+    def filter(
+        self,
+        sse_threshold: Optional[float] = None,
+        aic_threshold: Optional[float] = None,
+        bic_threshold: Optional[float] = None,
+        ks_threshold: Optional[float] = None,
+        pvalue_threshold: Optional[float] = None,
+        ad_threshold: Optional[float] = None,
+    ) -> "EagerFitResults":
+        """Filter results by metric thresholds.
+
+        Args:
+            sse_threshold: Maximum SSE to include
+            aic_threshold: Maximum AIC to include
+            bic_threshold: Maximum BIC to include
+            ks_threshold: Maximum K-S statistic to include
+            pvalue_threshold: Minimum p-value to include
+            ad_threshold: Maximum A-D statistic to include
+
+        Returns:
+            New EagerFitResults with filtered data
+        """
+        filtered_df = self._filter_dataframe(
+            sse_threshold, aic_threshold, bic_threshold, ks_threshold, pvalue_threshold, ad_threshold
+        )
+        return EagerFitResults(filtered_df)
+
+    def for_column(self, column_name: str) -> "EagerFitResults":
+        """Filter results to a single column.
+
+        Args:
+            column_name: Column to filter for
+
+        Returns:
+            New EagerFitResults for the specified column
+        """
+        filtered_df = self._filter_for_column(column_name)
+        return EagerFitResults(filtered_df)
+
+
+class LazyFitResults(BaseFitResults):
+    """Fit results with lazy KS/AD metric computation.
+
+    This class represents distribution fit results where only fast metrics
+    (SSE, AIC, BIC) are pre-computed. KS and AD statistics are computed
+    on-demand when first accessed via best() with those metrics.
+
+    Important:
+        The source DataFrame must remain valid (not unpersisted) for lazy
+        metric computation to work. Call materialize() before unpersisting
+        the source DataFrame if you need the metrics later.
+
+    Example:
+        >>> results = fitter.fit(df, 'value', lazy_metrics=True)
+        >>> best_aic = results.best(n=1, metric='aic')[0]  # Fast
+        >>> best_ks = results.best(n=1, metric='ks_statistic')[0]  # Computes on-demand
+        >>>
+        >>> # Before unpersisting source, materialize all metrics
+        >>> materialized = results.materialize()
+        >>> df.unpersist()  # Safe now
+    """
+
+    def __init__(
+        self,
+        results_df: Union[DataFrame, pd.DataFrame],
+        lazy_contexts: Dict[str, LazyMetricsContext],
+    ):
+        """Initialize LazyFitResults.
+
+        Args:
+            results_df: Spark DataFrame or pandas DataFrame with fit results
+            lazy_contexts: Dict mapping column names to LazyMetricsContext
+                for on-demand KS/AD computation. Required (not optional).
+        """
+        super().__init__(results_df)
+        self._lazy_contexts = lazy_contexts
+
+    @property
+    def is_lazy(self) -> Literal[True]:
+        """Return True - lazy results have deferred metric computation."""
+        return True
+
+    @property
+    def source_dataframes(self) -> Dict[str, DataFrame]:
+        """Get source DataFrames for lifecycle visibility.
+
+        Use this to understand what DataFrames the lazy computation depends on.
+
+        Returns:
+            Dict mapping column names to their source DataFrames.
+        """
+        return {k: v.source_df for k, v in self._lazy_contexts.items()}
+
+    def is_source_available(self) -> bool:
+        """Check if source DataFrames are still accessible.
+
+        Use this to verify that lazy metric computation can still succeed.
+
+        Returns:
+            True if all source DataFrames can be accessed, False otherwise.
+        """
+        try:
+            for context in self._lazy_contexts.values():
+                # Attempt a lightweight operation to validate availability
+                if hasattr(context.source_df, "schema"):
+                    # Spark DataFrame - just access schema
+                    _ = context.source_df.schema
+                elif hasattr(context.source_df, "columns"):
+                    # pandas DataFrame
+                    _ = len(context.source_df.columns)
+            return True
+        except Exception:
+            return False
+
+    def materialize(self) -> EagerFitResults:
+        """Force computation of all lazy metrics.
+
+        Computes KS and AD statistics for all distributions, returning
+        an EagerFitResults that no longer depends on the source DataFrame.
+
+        Returns:
+            EagerFitResults with all metrics computed.
+
+        Raises:
+            RuntimeError: If the source DataFrame is no longer available.
+        """
+        # Collect all rows - handle both Spark and pandas DataFrames
+        if self._is_spark:
+            all_rows = self._df.collect()
+        else:
+            all_rows = self._df.to_dict("records")
+
+        column_names = self.column_names if self.column_names else [None]
+
+        # Group rows by column
+        rows_by_column: Dict[Optional[str], list] = {}
+        for row in all_rows:
+            if self._is_spark:
+                col = row["column_name"] if hasattr(row, "column_name") else None
+            else:
+                col = row.get("column_name")
+            if col not in rows_by_column:
+                rows_by_column[col] = []
+            rows_by_column[col].append(row)
+
+        # Compute metrics for each column
+        materialized_results: List[Dict] = []
+
+        for col_name in column_names:
+            context_key = col_name or "_single_column_"
+            if context_key not in self._lazy_contexts:
+                if self._lazy_contexts:
+                    context_key = next(iter(self._lazy_contexts.keys()))
+                else:
+                    # No context, just pass through
+                    for row in rows_by_column.get(col_name, []):
+                        if self._is_spark:
+                            materialized_results.append(dict(row.asDict()))
+                        else:
+                            materialized_results.append(dict(row))
+                    continue
+
+            context = self._lazy_contexts[context_key]
+            data_sample = self._recreate_sample(context)
+
+            # Select appropriate metric computation function
+            if context.is_discrete:
+                from spark_bestfit.discrete_fitting import compute_ks_ad_metrics_discrete as compute_metrics
+            else:
+                from spark_bestfit.fitting import compute_ks_ad_metrics as compute_metrics
+
+            for row in rows_by_column.get(col_name, []):
+                if self._is_spark:
+                    row_dict = dict(row.asDict())
+                else:
+                    row_dict = dict(row)
+
+                # Compute metrics if they're None
+                if row_dict.get("ks_statistic") is None:
+                    ks_stat, pvalue, ad_stat, ad_pvalue = compute_metrics(
+                        dist_name=row_dict["distribution"],
+                        params=list(row_dict["parameters"]),
+                        data_sample=data_sample,
+                        lower_bound=context.lower_bound,
+                        upper_bound=context.upper_bound,
+                    )
+                    row_dict["ks_statistic"] = ks_stat
+                    row_dict["pvalue"] = pvalue
+                    row_dict["ad_statistic"] = ad_stat
+                    row_dict["ad_pvalue"] = ad_pvalue
+
+                materialized_results.append(row_dict)
+
+        # Create new DataFrame from materialized results
+        if self._is_spark:
+            from spark_bestfit.fitting import FIT_RESULT_SCHEMA
+
+            spark = self._df.sparkSession
+            materialized_df = spark.createDataFrame(materialized_results, schema=FIT_RESULT_SCHEMA)
+            return EagerFitResults(materialized_df.cache())
+        else:
+            materialized_df = pd.DataFrame(materialized_results)
+            return EagerFitResults(materialized_df)
+
+    def best(
+        self,
+        n: int = 1,
+        metric: MetricName = "ks_statistic",
+        warn_if_poor: bool = False,
+        pvalue_threshold: float = 0.05,
+    ) -> List[DistributionFitResult]:
+        """Get top n distributions by specified metric.
+
+        For KS and AD metrics, computation happens on-demand using the
+        stored lazy context.
+
+        Args:
+            n: Number of results to return
+            metric: Metric to sort by ('ks_statistic', 'sse', 'aic', 'bic', or 'ad_statistic')
+            warn_if_poor: If True, warn when best fit has poor p-value
+            pvalue_threshold: P-value threshold for poor fit warning
+
+        Returns:
+            List of DistributionFitResult objects
+        """
+        # Validate inputs
+        if n <= 0:
+            raise ValueError(f"n must be a positive integer, got {n}")
+
+        valid_metrics = {"sse", "aic", "bic", "ks_statistic", "ad_statistic"}
+        if metric not in valid_metrics:
+            raise ValueError(f"metric must be one of {valid_metrics}")
+
+        # For lazy metrics (KS/AD), compute on-demand
+        lazy_metric_names = {"ks_statistic", "ad_statistic"}
+        if metric in lazy_metric_names:
+            # Check if the first row has the metric as None (lazy mode)
+            if self._is_spark:
+                sample_row = self._df.limit(1).collect()
+                first_metric_value = sample_row[0][metric] if sample_row else None
+            else:
+                first_metric_value = self._df[metric].iloc[0] if len(self._df) > 0 else None
+
+            if first_metric_value is None or (isinstance(first_metric_value, float) and np.isnan(first_metric_value)):
+                return self._best_with_lazy_computation(n, metric, warn_if_poor, pvalue_threshold)
+
+        # Fall back to standard DataFrame query
+        return self._best_from_dataframe(n, metric, warn_if_poor, pvalue_threshold)
+
+    def _best_with_lazy_computation(
+        self,
+        n: int,
+        metric: MetricName,
+        warn_if_poor: bool,
+        pvalue_threshold: float,
+    ) -> List[DistributionFitResult]:
+        """Get best distributions with on-demand KS/AD computation.
+
+        Computes metrics only for top N*3+5 candidates (sorted by AIC as proxy),
+        then re-sorts by the actual requested metric.
+        """
+        total_count = self._df.count() if self._is_spark else len(self._df)
+        candidate_count = min(n * 3 + 5, total_count)
+
+        column_names = self.column_names if self.column_names else [None]
+        all_results: List[DistributionFitResult] = []
+
+        for col_name in column_names:
+            context_key = col_name or "_single_column_"
+            if context_key not in self._lazy_contexts:
+                if self._lazy_contexts:
+                    context_key = next(iter(self._lazy_contexts.keys()))
+                else:
+                    continue
+
+            context = self._lazy_contexts[context_key]
+
+            # Get candidate rows sorted by AIC (proxy for good fits)
+            if self._is_spark:
+                if col_name:
+                    candidates_df = self._df.filter(F.col("column_name") == col_name)
+                else:
+                    candidates_df = self._df
+                candidate_rows = candidates_df.orderBy(F.col("aic").asc_nulls_last()).limit(candidate_count).collect()
+            else:
+                if col_name:
+                    candidates_df = self._df[self._df["column_name"] == col_name]
+                else:
+                    candidates_df = self._df
+                sorted_df = candidates_df.sort_values(by="aic", ascending=True, na_position="last")
+                candidate_rows = sorted_df.head(candidate_count).to_dict("records")
+
+            # Compute lazy metrics for candidates
+            computed_results = self._compute_lazy_metrics_for_results(candidate_rows, context)
+            all_results.extend(computed_results)
+
+        # Sort by the requested metric
+        if metric == "ks_statistic":
+            all_results.sort(key=lambda r: r.ks_statistic if r.ks_statistic is not None else float("inf"))
+        else:
+            all_results.sort(key=lambda r: r.ad_statistic if r.ad_statistic is not None else float("inf"))
+
+        results = all_results[:n]
+
+        # Emit warning if requested
+        if warn_if_poor and results:
+            best_result = results[0]
+            if best_result.pvalue is not None and best_result.pvalue < pvalue_threshold:
+                warnings.warn(
+                    f"Best fit '{best_result.distribution}' has p-value {best_result.pvalue:.4f} "
+                    f"< {pvalue_threshold}, indicating a potentially poor fit. "
+                    f"Consider using quality_report() for detailed diagnostics.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        return results
+
+    def filter(
+        self,
+        sse_threshold: Optional[float] = None,
+        aic_threshold: Optional[float] = None,
+        bic_threshold: Optional[float] = None,
+        ks_threshold: Optional[float] = None,
+        pvalue_threshold: Optional[float] = None,
+        ad_threshold: Optional[float] = None,
+    ) -> "LazyFitResults":
+        """Filter results by metric thresholds.
+
+        Note:
+            Filtering by KS/AD thresholds with lazy metrics will exclude all
+            results since those metrics are None. Use AIC/BIC/SSE thresholds
+            or call materialize() first.
+
+        Returns:
+            New LazyFitResults with filtered data (preserves lazy contexts)
+        """
+        # Warn if filtering by lazy metrics
+        lazy_filter_requested = ks_threshold is not None or pvalue_threshold is not None or ad_threshold is not None
+        if lazy_filter_requested and self._is_spark:
+            sample_row = self._df.limit(1).collect()
+            if sample_row and sample_row[0]["ks_statistic"] is None:
+                warnings.warn(
+                    "Filtering by KS/AD metrics when lazy_metrics=True was used during fitting. "
+                    "These metrics are None, so filtering will exclude all results. "
+                    "Use aic/bic/sse thresholds instead, or call materialize() first.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        filtered_df = self._filter_dataframe(
+            sse_threshold, aic_threshold, bic_threshold, ks_threshold, pvalue_threshold, ad_threshold
+        )
+        return LazyFitResults(filtered_df, lazy_contexts=self._lazy_contexts)
+
+    def for_column(self, column_name: str) -> "LazyFitResults":
+        """Filter results to a single column.
+
+        Args:
+            column_name: Column to filter for
+
+        Returns:
+            New LazyFitResults for the specified column (preserves lazy context)
+        """
+        filtered_df = self._filter_for_column(column_name)
+
+        # Preserve only the relevant lazy context for this column
+        filtered_contexts = {}
+        if column_name in self._lazy_contexts:
+            filtered_contexts[column_name] = self._lazy_contexts[column_name]
+
+        return LazyFitResults(filtered_df, lazy_contexts=filtered_contexts)
+
+
+# Type alias for annotations
+FitResultsType = Union[EagerFitResults, LazyFitResults]
+
+
+def create_fit_results(
+    results_df: Union[DataFrame, pd.DataFrame],
+    lazy_contexts: Optional[Dict[str, LazyMetricsContext]] = None,
+) -> FitResultsType:
+    """Factory function for creating FitResults.
+
+    Creates the appropriate FitResults variant based on whether lazy contexts
+    are provided.
+
+    Args:
+        results_df: Spark DataFrame or pandas DataFrame with fit results
+        lazy_contexts: Optional dict mapping column names to LazyMetricsContext
+            for on-demand KS/AD computation
+
+    Returns:
+        LazyFitResults if lazy_contexts provided, EagerFitResults otherwise
+
+    Example:
+        >>> # From fitter (automatic)
+        >>> results = fitter.fit(df, 'value')  # Returns EagerFitResults
+        >>> lazy = fitter.fit(df, 'value', lazy_metrics=True)  # Returns LazyFitResults
+        >>>
+        >>> # Direct construction (rare)
+        >>> eager = create_fit_results(df)  # EagerFitResults
+        >>> lazy = create_fit_results(df, lazy_contexts={...})  # LazyFitResults
+    """
+    if lazy_contexts:
+        return LazyFitResults(results_df, lazy_contexts)
+    return EagerFitResults(results_df)
+
+
+# Backward-compatible alias (PascalCase to match original class name)
+# This allows existing code `FitResults(df)` to continue working
+FitResults = create_fit_results

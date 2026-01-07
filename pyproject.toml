@@ -66,6 +66,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
     "pytest-benchmark>=5.0.0",
+    "hypothesis>=6.100.0",
     "mutmut>=3.2.0",
     "ruff>=0.8.0",
     "black>=24.10.0",
@@ -85,6 +86,7 @@ test = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
+    "hypothesis>=6.100.0",
 ]
 
 # Base test dependencies without pyspark/pyarrow
@@ -93,6 +95,7 @@ test-base = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
+    "hypothesis>=6.100.0",
 ]
 
 # Documentation dependencies
@@ -273,6 +276,7 @@ pytest_add_cli_args_test_selection = [
     "tests/test_serialization.py",
     "tests/test_results.py",
     "tests/test_numerical_stability.py",
+    "tests/test_property_based.py",
     # Using LocalBackend
     "tests/test_core.py",
     "tests/test_histogram.py",
