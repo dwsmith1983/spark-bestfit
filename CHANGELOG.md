@@ -2,6 +2,31 @@
 
 <!-- version list -->
 
+## v2.1.0 (2026-01-07)
+
+### Bug Fixes
+
+- Adjust shape parameter minimums for numerical stability in property tests
+  ([#92](https://github.com/dwsmith1983/spark-bestfit/pull/92),
+  [`45c1f91`](https://github.com/dwsmith1983/spark-bestfit/commit/45c1f911dc8fc3035e71ac191f674d021d4f9aaa))
+
+### Features
+
+- Split FitResults into lazy/eager hierarchy + property-based testing
+  ([#92](https://github.com/dwsmith1983/spark-bestfit/pull/92),
+  [`45c1f91`](https://github.com/dwsmith1983/spark-bestfit/commit/45c1f911dc8fc3035e71ac191f674d021d4f9aaa))
+
+### Refactoring
+
+- Add property-based testing with hypothesis
+  ([#92](https://github.com/dwsmith1983/spark-bestfit/pull/92),
+  [`45c1f91`](https://github.com/dwsmith1983/spark-bestfit/commit/45c1f911dc8fc3035e71ac191f674d021d4f9aaa))
+
+- Split FitResults into lazy/eager class hierarchy
+  ([#92](https://github.com/dwsmith1983/spark-bestfit/pull/92),
+  [`45c1f91`](https://github.com/dwsmith1983/spark-bestfit/commit/45c1f911dc8fc3035e71ac191f674d021d4f9aaa))
+
+
 ## v2.0.3 (2026-01-06)
 
 ### Bug Fixes
