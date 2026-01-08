@@ -2,6 +2,54 @@
 
 <!-- version list -->
 
+## v2.2.0 (2026-01-08)
+
+### Bug Fixes
+
+- Add proper skip markers for optional dependency tests
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- Exclude hypothesis tests from mutmut ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- Improve hypothesis test stability for mutmut
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- Make ray import conditional in test_backend_factory.py
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- Pin mutmut <3.0 to avoid trampoline segfaults
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+### Features
+
+- Add BackendFactory and deprecate sample_spark() methods
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- Add FitterConfig builder pattern for cleaner API
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- V2.2.0 - FitterConfig, BackendFactory, TruncatedFrozenDist consolidation
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+### Refactoring
+
+- Consolidate TruncatedFrozenDist implementations into single module
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+- Remove orphaned code and consolidate duplicates
+  ([#93](https://github.com/dwsmith1983/spark-bestfit/pull/93),
+  [`5da0a95`](https://github.com/dwsmith1983/spark-bestfit/commit/5da0a95e5817568a74550313a292c23df2d86869))
+
+
 ## v2.1.0 (2026-01-07)
 
 ### Bug Fixes
