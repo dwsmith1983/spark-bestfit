@@ -17,3 +17,11 @@ exclude_lines =
     pragma: no cover
     if TYPE_CHECKING:
     raise NotImplementedError
+    # Spark-specific branches (not testable in CI without Spark runtime)
+    if self._is_spark:
+    if self._is_spark and
+    if not _PYSPARK_AVAILABLE:
+    if _PYSPARK_AVAILABLE:
+    \.toPandas\(
+    \.collect\(
+    F\.col\(
