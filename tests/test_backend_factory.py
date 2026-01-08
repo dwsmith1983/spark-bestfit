@@ -8,6 +8,14 @@ import pytest
 from spark_bestfit.backends.factory import BackendFactory
 from spark_bestfit.backends.local import LocalBackend
 
+# PySpark is optional
+try:
+    from pyspark.sql import SparkSession  # noqa: F401
+
+    PYSPARK_AVAILABLE = True
+except ImportError:
+    PYSPARK_AVAILABLE = False
+
 # Ray is optional
 try:
     import ray
@@ -47,6 +55,7 @@ class TestBackendFactoryForDataframe:
         backend = BackendFactory.for_dataframe(df)
         assert isinstance(backend, SparkBackend)
 
+    @pytest.mark.skipif(not RAY_AVAILABLE, reason="Ray not installed")
     def test_for_dataframe_ray_duck_typing(self):
         """Object with Ray Dataset attributes returns RayBackend."""
         from spark_bestfit.backends.ray import RayBackend
@@ -81,6 +90,7 @@ class TestBackendFactoryCreate:
         backend = BackendFactory.create("spark", spark_session=spark_session)
         assert isinstance(backend, SparkBackend)
 
+    @pytest.mark.skipif(not RAY_AVAILABLE, reason="Ray not installed")
     def test_create_ray(self):
         """Create ray backend."""
         from spark_bestfit.backends.ray import RayBackend
@@ -106,15 +116,13 @@ class TestBackendFactoryAvailability:
         """Local is always available (no external dependencies)."""
         assert BackendFactory.is_available("local") is True
 
-    def test_is_available_spark(self):
-        """Spark is available when pyspark installed."""
-        # Since we're in a test environment with pyspark
-        assert BackendFactory.is_available("spark") is True
+    def test_is_available_spark_matches_import(self):
+        """is_available('spark') matches whether pyspark can be imported."""
+        assert BackendFactory.is_available("spark") == PYSPARK_AVAILABLE
 
-    def test_is_available_ray(self):
-        """Ray is available when ray installed."""
-        # Since we're in a test environment with ray
-        assert BackendFactory.is_available("ray") is True
+    def test_is_available_ray_matches_import(self):
+        """is_available('ray') matches whether ray can be imported."""
+        assert BackendFactory.is_available("ray") == RAY_AVAILABLE
 
     def test_get_available_includes_local(self):
         """Local is always in available list."""
@@ -127,10 +135,13 @@ class TestBackendFactoryAvailability:
         assert isinstance(available, list)
         assert all(isinstance(b, str) for b in available)
 
-    def test_get_available_in_test_env(self):
-        """In test environment, all backends should be available."""
+    @pytest.mark.skipif(
+        not (PYSPARK_AVAILABLE and RAY_AVAILABLE),
+        reason="Requires both PySpark and Ray installed",
+    )
+    def test_get_available_full_env(self):
+        """In full environment with all deps, all backends available."""
         available = BackendFactory.get_available()
-        # Since dev environment has pyspark and ray installed
         assert "local" in available
         assert "spark" in available
         assert "ray" in available
