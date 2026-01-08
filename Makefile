@@ -84,7 +84,7 @@ mutate: ## Run mutation testing (uses pyproject.toml config)
 	@echo "Running mutation tests (this may take a while)..."
 	@echo "Using LocalBackend tests only (Spark tests excluded)"
 	@echo "See pyproject.toml [tool.mutmut] for configuration"
-	rm -rf mutants/
+	rm .mutmut-cache
 	PYTHONPATH=src mutmut run
 
 mutate-browse: ## Interactive browser for mutation results
