@@ -3,11 +3,13 @@
 This module provides backward-compatible imports for:
 - DistributionFitter (continuous distributions)
 - DiscreteDistributionFitter (discrete/count data)
+- TruncatedFrozenDist (truncated distribution wrapper)
 - Default exclusion constants
 
 The actual implementations are in:
 - spark_bestfit.continuous_fitter (DistributionFitter)
 - spark_bestfit.discrete_fitter (DiscreteDistributionFitter)
+- spark_bestfit.truncated (TruncatedFrozenDist)
 """
 
 from typing import List
@@ -17,6 +19,9 @@ from typing import List
 from spark_bestfit.continuous_fitter import DistributionFitter
 from spark_bestfit.discrete_fitter import DiscreteDistributionFitter
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
+
+# Re-export TruncatedFrozenDist from truncated module
+from spark_bestfit.truncated import TruncatedFrozenDist
 
 # Re-export constants
 DEFAULT_EXCLUDED_DISTRIBUTIONS = tuple(DistributionRegistry.DEFAULT_EXCLUSIONS)
@@ -65,6 +70,7 @@ def _interleave_distributions(distributions: List[str]) -> List[str]:
 __all__ = [
     "DistributionFitter",
     "DiscreteDistributionFitter",
+    "TruncatedFrozenDist",
     "DEFAULT_EXCLUDED_DISTRIBUTIONS",
     "DEFAULT_EXCLUDED_DISCRETE_DISTRIBUTIONS",
     "_interleave_distributions",
