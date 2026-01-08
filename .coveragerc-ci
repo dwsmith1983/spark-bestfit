@@ -1,10 +1,16 @@
-# Coverage configuration for CI (excludes Spark/Ray backends)
-# These backends require their respective runtimes which aren't available in CI unit tests
+# Coverage configuration for CI (excludes Spark/Ray-specific code)
+# These modules require their respective runtimes which aren't available in CI unit tests
 
 [run]
 omit =
+    # Backend implementations requiring Spark/Ray runtimes
     src/spark_bestfit/backends/spark.py
     src/spark_bestfit/backends/ray.py
+    # Spark-only utilities
+    src/spark_bestfit/progress.py
+    src/spark_bestfit/utils.py
+    # Protocol definitions (abstract method stubs)
+    src/spark_bestfit/protocols.py
 
 [report]
 exclude_lines =
