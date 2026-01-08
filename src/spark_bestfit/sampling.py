@@ -95,8 +95,9 @@ def sample_spark(
 ) -> Any:
     """Generate distributed samples from a fitted distribution using Spark.
 
-    .. deprecated::
-        Use :func:`sample_distributed` with a SparkBackend instead.
+    .. deprecated:: 2.0.0
+        Will be removed in v3.0.0. Use :func:`sample_distributed` with
+        ``SparkBackend`` instead.
 
     This is a backward-compatible wrapper around sample_distributed().
 
@@ -124,7 +125,8 @@ def sample_spark(
         +-------------------+
     """
     warnings.warn(
-        "sample_spark() is deprecated. Use sample_distributed() with SparkBackend instead.",
+        "sample_spark() is deprecated and will be removed in v3.0.0. "
+        "Use sample_distributed(backend=SparkBackend()) instead.",
         DeprecationWarning,
         stacklevel=2,
     )

@@ -183,6 +183,13 @@ If you're in the Ray ecosystem:
 Version History
 ---------------
 
+**v2.2.0 (January 2026)**
+
+- ``BackendFactory`` for centralized backend creation and auto-detection
+- ``FitterConfig`` and ``FitterConfigBuilder`` for configuration management
+- Deprecated ``sample_spark()`` methods (removal in v3.0.0)
+- Use ``sample_distributed(backend=...)`` instead
+
 **v2.1.0 (January 2026)**
 
 - FitResults class hierarchy: ``BaseFitResults``, ``EagerFitResults``, ``LazyFitResults``
@@ -239,6 +246,32 @@ Version History
 
 Deprecations
 ------------
+
+**sample_spark() methods (v2.0, remove in v3.0)**
+
+All ``sample_spark()`` methods are deprecated in favor of ``sample_distributed()``
+with an explicit backend:
+
+.. code-block:: python
+
+   # Deprecated (will be removed in v3.0.0)
+   samples_df = result.sample_spark(n=1_000_000, spark=spark)
+   samples_df = copula.sample_spark(n=1_000_000)
+
+   # New (recommended)
+   from spark_bestfit.backends import BackendFactory
+   from spark_bestfit.sampling import sample_distributed
+
+   backend = BackendFactory.create("spark", spark_session=spark)
+   samples_df = sample_distributed(
+       distribution=result.distribution,
+       parameters=result.parameters,
+       n=1_000_000,
+       backend=backend,
+   )
+
+   # For copula
+   samples_df = copula.sample_distributed(n=1_000_000, backend=backend)
 
 **ray_backend.rst**
 

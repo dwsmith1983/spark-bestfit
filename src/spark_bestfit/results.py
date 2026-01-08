@@ -313,6 +313,10 @@ class DistributionFitResult:
     ) -> DataFrame:
         """Generate distributed samples from the fitted distribution using Spark.
 
+        .. deprecated:: 2.0.0
+            Will be removed in v3.0.0. Use :func:`spark_bestfit.sampling.sample_distributed`
+            with ``SparkBackend`` instead.
+
         Uses Spark's parallelism to generate samples across the cluster,
         enabling efficient generation of millions of samples.
 
@@ -338,13 +342,23 @@ class DistributionFitResult:
             | 1.0093545783546243|
             +-------------------+
         """
-        from spark_bestfit.sampling import sample_spark
+        import warnings
 
-        return sample_spark(
+        warnings.warn(
+            "sample_spark() is deprecated and will be removed in v3.0.0. "
+            "Use sample_distributed(backend=SparkBackend()) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from spark_bestfit.backends.spark import SparkBackend
+        from spark_bestfit.sampling import sample_distributed
+
+        backend = SparkBackend(spark)
+        return sample_distributed(
             distribution=self.distribution,
             parameters=self.parameters,
             n=n,
-            spark=spark,
+            backend=backend,
             num_partitions=num_partitions,
             random_seed=random_seed,
             column_name=column_name,

@@ -142,19 +142,12 @@ class HistogramComputer:
             The configured backend, or auto-detected backend based on DataFrame type.
         """
         if self._backend is None:
-            import pandas as pd
+            if df is not None:
+                from spark_bestfit.backends.factory import BackendFactory
 
-            # Check for Ray Dataset (duck typing)
-            if df is not None and hasattr(df, "select_columns") and hasattr(df, "to_pandas"):
-                from spark_bestfit.backends.ray import RayBackend
-
-                self._backend = RayBackend()
-            elif isinstance(df, pd.DataFrame):
-                from spark_bestfit.backends.local import LocalBackend
-
-                self._backend = LocalBackend()
+                self._backend = BackendFactory.for_dataframe(df)
             else:
-                # Assume Spark DataFrame for backward compatibility
+                # Default to SparkBackend for backward compatibility
                 from spark_bestfit.backends.spark import SparkBackend
 
                 self._backend = SparkBackend()

@@ -395,21 +395,23 @@ except ImportError:
 
 @pytest.mark.spark
 @pytest.mark.skipif(not PYSPARK_AVAILABLE, reason="PySpark not installed")
-class TestSampleSpark:
-    """Tests for sample_spark function (Spark-specific).
+class TestSampleDistributed:
+    """Tests for sample_distributed function with SparkBackend.
 
     Uses the shared spark_session fixture from conftest.py.
     """
 
-    def test_sample_spark_basic(self, spark_session):
+    def test_sample_distributed_basic(self, spark_session):
         """Test basic distributed sampling with Spark."""
-        from spark_bestfit.sampling import sample_spark
+        from spark_bestfit.backends import BackendFactory
+        from spark_bestfit.sampling import sample_distributed
 
-        df = sample_spark(
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        df = sample_distributed(
             distribution="norm",
             parameters=[50.0, 10.0],
             n=1000,
-            spark=spark_session,
+            backend=backend,
             random_seed=42,
         )
 
@@ -417,24 +419,27 @@ class TestSampleSpark:
         assert df.columns == ["sample"]
         assert df.count() == 1000
 
-    def test_sample_spark_reproducibility(self, spark_session):
-        """Test that Spark sampling is reproducible with seed."""
-        from spark_bestfit.sampling import sample_spark
+    def test_sample_distributed_reproducibility(self, spark_session):
+        """Test that distributed sampling is reproducible with seed."""
+        from spark_bestfit.backends import BackendFactory
+        from spark_bestfit.sampling import sample_distributed
 
-        df1 = sample_spark(
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+
+        df1 = sample_distributed(
             distribution="norm",
             parameters=[50.0, 10.0],
             n=100,
-            spark=spark_session,
+            backend=backend,
             num_partitions=2,
             random_seed=42,
         )
 
-        df2 = sample_spark(
+        df2 = sample_distributed(
             distribution="norm",
             parameters=[50.0, 10.0],
             n=100,
-            spark=spark_session,
+            backend=backend,
             num_partitions=2,
             random_seed=42,
         )
@@ -444,18 +449,20 @@ class TestSampleSpark:
 
         assert np.allclose(samples1, samples2)
 
-    def test_sample_spark_statistical_properties(self, spark_session):
-        """Test that Spark samples have expected statistical properties."""
-        from spark_bestfit.sampling import sample_spark
+    def test_sample_distributed_statistical_properties(self, spark_session):
+        """Test that distributed samples have expected statistical properties."""
+        from spark_bestfit.backends import BackendFactory
+        from spark_bestfit.sampling import sample_distributed
 
+        backend = BackendFactory.create("spark", spark_session=spark_session)
         n = 10000
         loc, scale = 100.0, 15.0
 
-        df = sample_spark(
+        df = sample_distributed(
             distribution="norm",
             parameters=[loc, scale],
             n=n,
-            spark=spark_session,
+            backend=backend,
             random_seed=42,
         )
 
@@ -465,22 +472,34 @@ class TestSampleSpark:
         assert abs(samples.mean() - loc) < 1.0
         assert abs(samples.std() - scale) < 1.0
 
-    def test_sample_spark_via_result(self, spark_session):
-        """Test sample_spark method on DistributionFitResult."""
+    def test_sample_distributed_via_result(self, spark_session):
+        """Test sample_distributed with DistributionFitResult parameters."""
+        from spark_bestfit.backends import BackendFactory
+        from spark_bestfit.sampling import sample_distributed
+
         result = DistributionFitResult(
             distribution="norm",
             parameters=[50.0, 10.0],
             sse=0.005,
         )
 
-        df = result.sample_spark(n=500, spark=spark_session, random_seed=42)
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        df = sample_distributed(
+            distribution=result.distribution,
+            parameters=result.parameters,
+            n=500,
+            backend=backend,
+            random_seed=42,
+        )
 
         assert df.count() == 500
         assert df.columns == ["sample"]
 
-    def test_fit_then_sample_spark(self, spark_session):
-        """Test complete workflow: fit distribution then sample via Spark."""
+    def test_fit_then_sample_distributed(self, spark_session):
+        """Test complete workflow: fit distribution then sample via backend."""
         from spark_bestfit import DistributionFitter
+        from spark_bestfit.backends import BackendFactory
+        from spark_bestfit.sampling import sample_distributed
 
         # Generate original data
         np.random.seed(42)
@@ -492,8 +511,15 @@ class TestSampleSpark:
         results = fitter.fit(df, column="value", max_distributions=5)
         best = results.best(n=1)[0]
 
-        # Sample using spark
-        samples_df = best.sample_spark(n=5000, spark=spark_session, random_seed=42)
+        # Sample using sample_distributed
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        samples_df = sample_distributed(
+            distribution=best.distribution,
+            parameters=best.parameters,
+            n=5000,
+            backend=backend,
+            random_seed=42,
+        )
         samples = samples_df.toPandas()["sample"].values
 
         # Original and generated should have similar statistics

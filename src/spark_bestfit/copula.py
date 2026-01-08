@@ -137,22 +137,9 @@ class GaussianCopula:
 
         # Auto-detect backend from DataFrame type if not provided
         if backend is None:
-            import pandas as pd
+            from spark_bestfit.backends.factory import BackendFactory
 
-            # Check for Ray Dataset (duck typing - has select_columns and to_pandas)
-            if hasattr(df, "select_columns") and hasattr(df, "to_pandas"):
-                from spark_bestfit.backends.ray import RayBackend
-
-                backend = RayBackend()
-            elif isinstance(df, pd.DataFrame):
-                from spark_bestfit.backends.local import LocalBackend
-
-                backend = LocalBackend()
-            else:
-                # Assume Spark DataFrame for backward compatibility
-                from spark_bestfit.backends.spark import SparkBackend
-
-                backend = SparkBackend()
+            backend = BackendFactory.for_dataframe(df)
 
         # Compute Spearman correlation via backend
         correlation_matrix = backend.compute_correlation(df, columns, method="spearman")
@@ -343,8 +330,9 @@ class GaussianCopula:
     ) -> Any:
         """Generate correlated samples using Spark distributed computing.
 
-        .. deprecated::
-            Use :meth:`sample_distributed` with a SparkBackend instead.
+        .. deprecated:: 2.0.0
+            Will be removed in v3.0.0. Use :meth:`sample_distributed` with
+            ``SparkBackend`` instead.
 
         This is a backward-compatible wrapper around sample_distributed().
 
@@ -364,6 +352,14 @@ class GaussianCopula:
             >>> samples_df = copula.sample_spark(n=100_000_000, spark=spark)
             >>> samples_df.show(5)
         """
+        import warnings
+
+        warnings.warn(
+            "sample_spark() is deprecated and will be removed in v3.0.0. "
+            "Use sample_distributed(backend=SparkBackend()) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from spark_bestfit.backends.spark import SparkBackend
 
         backend = SparkBackend(spark)

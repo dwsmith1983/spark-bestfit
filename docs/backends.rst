@@ -11,6 +11,33 @@ and infrastructure.
    name for backward compatibility—existing code using ``DistributionFitter(spark)``
    works unchanged. All backends use identical scipy fitting algorithms.
 
+BackendFactory
+--------------
+
+The ``BackendFactory`` provides a centralized way to create backends:
+
+.. code-block:: python
+
+   from spark_bestfit.backends import BackendFactory
+
+   # Auto-detect from DataFrame type
+   backend = BackendFactory.for_dataframe(df)
+
+   # Explicit creation by name
+   backend = BackendFactory.create("spark", spark_session=spark)
+   backend = BackendFactory.create("ray")
+   backend = BackendFactory.create("local", max_workers=4)
+
+   # Check what's available
+   BackendFactory.get_available()  # ["local", "spark", "ray"]
+   BackendFactory.is_available("spark")  # True if pyspark installed
+
+**Auto-detection logic** (``for_dataframe``):
+
+1. Ray Dataset (duck typing: has ``select_columns`` and ``to_pandas``) → RayBackend
+2. pandas DataFrame (isinstance check) → LocalBackend
+3. Default (Spark DataFrame) → SparkBackend
+
 Choosing a Backend
 ------------------
 
@@ -328,6 +355,10 @@ Common Patterns
 
 API Reference
 -------------
+
+.. autoclass:: spark_bestfit.backends.factory.BackendFactory
+   :members:
+   :undoc-members:
 
 .. autoclass:: spark_bestfit.backends.spark.SparkBackend
    :members:

@@ -48,7 +48,7 @@ spark-bestfit is **not faster** than statsmodels for small data. The value is **
      - **Native** (no conversion)
    * - 100M+ samples needed
      - May OOM
-     - **sample_spark()** distributed
+     - **sample_distributed()** scales
 
 Basic Usage
 -----------
@@ -58,6 +58,7 @@ Fit a copula from multi-column fit results:
 .. code-block:: python
 
     from spark_bestfit import DistributionFitter, GaussianCopula
+    from spark_bestfit.backends import BackendFactory
 
     # Fit multiple columns
     fitter = DistributionFitter(spark)
@@ -69,8 +70,9 @@ Fit a copula from multi-column fit results:
     # Generate correlated samples locally
     samples = copula.sample(n=10000)  # Dict[str, np.ndarray]
 
-    # Or distributed via Spark
-    samples_df = copula.sample_spark(n=100_000_000)
+    # Or distributed via any backend
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = copula.sample_distributed(n=100_000_000, backend=backend)
 
 The ``df`` parameter is required to compute the correlation matrix. The copula
 uses Spearman rank correlation, which is robust to non-linear relationships.
@@ -87,11 +89,11 @@ Local vs Distributed Sampling
    * - ``sample(n=N)``
      - Small to medium samples (< 10M)
      - Dict[str, np.ndarray]
-   * - ``sample_spark(n=N)``
+   * - ``sample_distributed(n=N, backend=...)``
      - Large samples (> 10M)
-     - Spark DataFrame
+     - DataFrame (Spark/pandas)
 
-For small samples, ``sample()`` is faster due to Spark overhead:
+For small samples, ``sample()`` is faster due to distributed overhead:
 
 .. code-block:: python
 
@@ -100,12 +102,34 @@ For small samples, ``sample()`` is faster due to Spark overhead:
     df = pd.DataFrame(samples)
 
     # Distributed sampling - efficient for large n
-    samples_df = copula.sample_spark(n=100_000_000, random_seed=42)
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = copula.sample_distributed(n=100_000_000, backend=backend, random_seed=42)
+
+Backend Options
+---------------
+
+Use any backend for distributed copula sampling:
+
+.. code-block:: python
+
+    from spark_bestfit.backends import BackendFactory
+
+    # Spark
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = copula.sample_distributed(n=100_000_000, backend=backend)
+
+    # Ray
+    backend = BackendFactory.create("ray")
+    samples_df = copula.sample_distributed(n=100_000_000, backend=backend)
+
+    # Local (for testing)
+    backend = BackendFactory.create("local", max_workers=4)
+    samples_df = copula.sample_distributed(n=100_000, backend=backend)
 
 Fast Uniform Sampling
 ---------------------
 
-Both ``sample()`` and ``sample_spark()`` support a ``return_uniform=True`` parameter
+Both ``sample()`` and ``sample_distributed()`` support a ``return_uniform=True`` parameter
 that skips the marginal distribution transforms, returning uniform [0,1] samples instead.
 This matches the behavior of statsmodels and is significantly faster:
 
@@ -204,6 +228,26 @@ This ensures that:
 
 - Each column follows its fitted marginal distribution
 - Columns maintain the correlation structure from the original data
+
+Deprecated: sample_spark()
+--------------------------
+
+.. deprecated:: 2.0.0
+   The ``sample_spark()`` method is deprecated and will be removed in v3.0.0.
+   Use ``sample_distributed()`` with an explicit backend instead.
+
+Migration example:
+
+.. code-block:: python
+
+    # Old (deprecated)
+    samples_df = copula.sample_spark(n=100_000_000)
+
+    # New (recommended)
+    from spark_bestfit.backends import BackendFactory
+
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = copula.sample_distributed(n=100_000_000, backend=backend)
 
 API Reference
 -------------

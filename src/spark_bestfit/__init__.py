@@ -24,6 +24,7 @@ Example:
 """
 
 from spark_bestfit._version import __version__
+from spark_bestfit.backends.factory import BackendFactory
 from spark_bestfit.backends.local import LocalBackend
 from spark_bestfit.config import FitterConfig, FitterConfigBuilder
 
@@ -77,6 +78,7 @@ __all__ = [
     "FitterConfig",
     "FitterConfigBuilder",
     # Backends (v2.0)
+    "BackendFactory",
     "ExecutionBackend",
     "LocalBackend",
     # SparkBackend and RayBackend added conditionally below

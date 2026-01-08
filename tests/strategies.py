@@ -71,80 +71,81 @@ def scipy_discrete_distribution(draw: st.DrawFn) -> str:
 
 # Parameter specifications for each distribution
 # Format: (dist_name, param_generators) where param_generators creates valid params
+# Note: allow_subnormal=False prevents extreme values like 1e-313 that cause scipy overflow
 CONTINUOUS_PARAM_SPECS = {
     "norm": lambda draw: [
-        draw(st.floats(min_value=-1000, max_value=1000)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-1000, max_value=1000, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "expon": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "uniform": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "gamma": lambda draw: [
-        draw(st.floats(min_value=0.5, max_value=20)),  # a (shape) - min 0.5 for PPF/CDF numerical stability
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=0.5, max_value=20, allow_subnormal=False)),  # a (shape)
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "beta": lambda draw: [
-        draw(st.floats(min_value=0.5, max_value=10)),  # a - min 0.5 for PPF/CDF numerical stability
-        draw(st.floats(min_value=0.5, max_value=10)),  # b - min 0.5 for PPF/CDF numerical stability
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=0.5, max_value=10, allow_subnormal=False)),  # a
+        draw(st.floats(min_value=0.5, max_value=10, allow_subnormal=False)),  # b
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "lognorm": lambda draw: [
-        draw(st.floats(min_value=0.1, max_value=3)),  # s (shape)
-        draw(st.floats(min_value=-10, max_value=10)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=0.1, max_value=3, allow_subnormal=False)),  # s (shape)
+        draw(st.floats(min_value=-10, max_value=10, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "weibull_min": lambda draw: [
-        draw(st.floats(min_value=0.5, max_value=5)),  # c (shape)
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=0.5, max_value=5, allow_subnormal=False)),  # c (shape)
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "pareto": lambda draw: [
-        draw(st.floats(min_value=1.1, max_value=10)),  # b (shape)
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=1.1, max_value=10, allow_subnormal=False)),  # b (shape)
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "chi2": lambda draw: [
-        draw(st.floats(min_value=1, max_value=50)),  # df
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=1, max_value=50, allow_subnormal=False)),  # df
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "t": lambda draw: [
-        draw(st.floats(min_value=1, max_value=100)),  # df
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=1, max_value=100, allow_subnormal=False)),  # df
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "f": lambda draw: [
-        draw(st.floats(min_value=1, max_value=50)),  # dfn
-        draw(st.floats(min_value=1, max_value=50)),  # dfd
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=1, max_value=50, allow_subnormal=False)),  # dfn
+        draw(st.floats(min_value=1, max_value=50, allow_subnormal=False)),  # dfd
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "logistic": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "gumbel_r": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "gumbel_l": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "laplace": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
     "rayleigh": lambda draw: [
-        draw(st.floats(min_value=-100, max_value=100)),  # loc
-        draw(st.floats(min_value=0.01, max_value=100)),  # scale
+        draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),  # loc
+        draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),  # scale
     ],
 }
 
@@ -162,10 +163,10 @@ def distribution_with_params(draw: st.DrawFn) -> Tuple[str, List[float]]:
     if param_generator:
         params = param_generator(draw)
     else:
-        # Default: loc, scale
+        # Default: loc, scale (allow_subnormal=False prevents scipy overflow)
         params = [
-            draw(st.floats(min_value=-100, max_value=100)),
-            draw(st.floats(min_value=0.01, max_value=100)),
+            draw(st.floats(min_value=-100, max_value=100, allow_subnormal=False)),
+            draw(st.floats(min_value=0.01, max_value=100, allow_subnormal=False)),
         ]
 
     return (dist_name, params)
