@@ -4,10 +4,6 @@ Real-World Use Cases
 This guide demonstrates spark-bestfit in production scenarios. Each use case includes
 a complete Jupyter notebook with working code you can adapt to your needs.
 
-.. contents:: Use Cases
-   :local:
-   :depth: 1
-
 Monte Carlo Risk Simulation
 ---------------------------
 

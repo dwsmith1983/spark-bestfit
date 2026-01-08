@@ -1,0 +1,27 @@
+# Coverage configuration for CI (excludes Spark/Ray-specific code)
+# These modules require their respective runtimes which aren't available in CI unit tests
+
+[run]
+omit =
+    # Backend implementations requiring Spark/Ray runtimes
+    src/spark_bestfit/backends/spark.py
+    src/spark_bestfit/backends/ray.py
+    # Spark-only utilities
+    src/spark_bestfit/progress.py
+    src/spark_bestfit/utils.py
+    # Protocol definitions (abstract method stubs)
+    src/spark_bestfit/protocols.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    # Spark-specific branches (not testable in CI without Spark runtime)
+    if self._is_spark:
+    if self._is_spark and
+    if not _PYSPARK_AVAILABLE:
+    if _PYSPARK_AVAILABLE:
+    \.toPandas\(
+    \.collect\(
+    F\.col\(

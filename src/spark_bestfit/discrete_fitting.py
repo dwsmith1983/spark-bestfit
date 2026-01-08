@@ -52,6 +52,9 @@ if _PYSPARK_AVAILABLE:
             StructField("data_mean", FloatType(), True),
             StructField("data_stddev", FloatType(), True),
             StructField("data_count", FloatType(), True),
+            # Heavy-tail detection stats (v2.3.0)
+            StructField("data_kurtosis", FloatType(), True),
+            StructField("data_skewness", FloatType(), True),
             # Bounded distribution support
             StructField("lower_bound", FloatType(), True),
             StructField("upper_bound", FloatType(), True),

@@ -73,9 +73,13 @@ class TestBackendFactoryCreate:
     """Tests for BackendFactory.create() explicit creation."""
 
     def test_create_local(self):
-        """Create local backend."""
+        """Create local backend with default settings."""
         backend = BackendFactory.create("local")
         assert isinstance(backend, LocalBackend)
+        # Verify backend is functional (has expected method)
+        assert hasattr(backend, "parallel_fit")
+        # Verify default parallelism is set
+        assert backend.get_parallelism() >= 1
 
     def test_create_local_with_max_workers(self):
         """Create local backend with max_workers option."""
@@ -129,11 +133,16 @@ class TestBackendFactoryAvailability:
         available = BackendFactory.get_available()
         assert "local" in available
 
-    def test_get_available_returns_list(self):
-        """get_available returns a list of strings."""
+    def test_get_available_returns_valid_backend_names(self):
+        """get_available returns list of backend names that can be created."""
         available = BackendFactory.get_available()
         assert isinstance(available, list)
         assert all(isinstance(b, str) for b in available)
+        # Each available backend should be creatable
+        for backend_name in available:
+            if backend_name == "local":
+                backend = BackendFactory.create(backend_name)
+                assert backend is not None
 
     @pytest.mark.skipif(
         not (PYSPARK_AVAILABLE and RAY_AVAILABLE),

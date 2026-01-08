@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "spark-bestfit"
 version = "2.2.0"
-description = "Modern Spark distribution fitting library with efficient parallel processing"
+description = "Modern distribution fitting library with Spark, Ray, and local parallel backends"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = {text = "MIT"}
@@ -103,7 +103,8 @@ docs = [
     "pyspark>=3.5.0,<5.0.0",
     "pyarrow>=12.0.0,<19.0.0",
     "sphinx>=8.0.0",
-    "sphinx-rtd-theme>=3.0.0",
+    "furo",
+    "sphinx-copybutton",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -147,7 +148,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.test.scripts]
-run = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+run = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 # Spark 3.5 with Python 3.11
 [[tool.hatch.envs.test.matrix]]
@@ -174,7 +175,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark35-py311.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 [tool.hatch.envs.spark35-py312]
 python = "3.12"
@@ -190,7 +191,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark35-py312.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 [tool.hatch.envs.spark40-py312]
 python = "3.12"
@@ -205,7 +206,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark40-py312.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 [tool.hatch.envs.spark40-py313]
 python = "3.13"
@@ -220,7 +221,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark40-py313.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 # Semantic Release configuration
 [tool.semantic_release]

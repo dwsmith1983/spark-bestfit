@@ -19,7 +19,13 @@ except ImportError:
 from spark_bestfit.base_fitter import BaseFitter
 from spark_bestfit.config import FitterConfig
 from spark_bestfit.distributions import DistributionRegistry
-from spark_bestfit.fitting import FIT_RESULT_SCHEMA, FITTING_SAMPLE_SIZE, compute_data_stats, fit_single_distribution
+from spark_bestfit.fitting import (
+    FIT_RESULT_SCHEMA,
+    FITTING_SAMPLE_SIZE,
+    compute_data_stats,
+    detect_heavy_tail,
+    fit_single_distribution,
+)
 from spark_bestfit.histogram import HistogramComputer
 from spark_bestfit.results import DistributionFitResult, FitResults, FitResultsType, LazyMetricsContext
 
@@ -389,6 +395,8 @@ class DistributionFitter(BaseFitter):
                         "data_mean",
                         "data_stddev",
                         "data_count",
+                        "data_kurtosis",
+                        "data_skewness",
                         "lower_bound",
                         "upper_bound",
                     ]
@@ -415,6 +423,23 @@ class DistributionFitter(BaseFitter):
 
         # Compute data stats for provenance (once per column)
         data_stats = compute_data_stats(data_sample)
+
+        # Detect heavy-tail characteristics and warn (#64)
+        heavy_tail_info = detect_heavy_tail(data_sample)
+        if heavy_tail_info["is_heavy_tailed"]:
+            indicators = ", ".join(heavy_tail_info["indicators"])
+            import warnings
+
+            warnings.warn(
+                f"Column '{column}' exhibits heavy-tail characteristics ({indicators}). "
+                f"Consider: (1) heavy-tail distributions like pareto, cauchy, t; "
+                f"(2) data transformation (log, sqrt); "
+                f"(3) checking for outliers. "
+                f"Standard distributions may provide poor fits.",
+                UserWarning,
+                stacklevel=4,
+            )
+            logger.warning(f"  Heavy-tail detected for '{column}': {indicators}")
 
         # Interleave slow distributions for better partition balance
         # Lazy import to avoid circular dependency with core.py
