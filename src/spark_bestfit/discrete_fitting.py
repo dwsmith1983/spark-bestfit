@@ -18,16 +18,17 @@ try:
 
     _PYSPARK_AVAILABLE = True
 except ImportError:
-    Broadcast = None  # type: ignore[assignment,misc]
-    pandas_udf = None  # type: ignore[assignment,misc]
-    ArrayType = None  # type: ignore[assignment,misc]
-    FloatType = None  # type: ignore[assignment,misc]
-    StringType = None  # type: ignore[assignment,misc]
-    StructField = None  # type: ignore[assignment,misc]
-    StructType = None  # type: ignore[assignment,misc]
+    Broadcast = None  # type: ignore[assignment]
+    pandas_udf = None  # type: ignore[assignment]
+    ArrayType = None  # type: ignore[assignment]
+    FloatType = None  # type: ignore[assignment]
+    StringType = None  # type: ignore[assignment]
+    StructField = None  # type: ignore[assignment]
+    StructType = None  # type: ignore[assignment]
     _PYSPARK_AVAILABLE = False
 
 from spark_bestfit.distributions import DiscreteDistributionRegistry
+from spark_bestfit.fitting import _filter_bootstrap_outliers
 
 # Output schema for discrete fitting results (only if PySpark is available)
 # Note: ad_statistic and ad_pvalue are included for schema compatibility with FitResults
@@ -706,37 +707,3 @@ def bootstrap_discrete_confidence_intervals(
         result[name] = (lower, upper)
 
     return result
-
-
-def _filter_bootstrap_outliers(bootstrap_array: np.ndarray, k: float = 3.0) -> np.ndarray:
-    """Filter bootstrap samples with outlier parameter values using IQR.
-
-    For each parameter, identifies outliers as values beyond Q1 - k*IQR or
-    Q3 + k*IQR. Removes entire bootstrap samples (rows) where ANY parameter
-    is an outlier.
-
-    Args:
-        bootstrap_array: Array of shape (n_bootstrap, n_params)
-        k: IQR multiplier for outlier detection (default 3.0 = far outliers)
-
-    Returns:
-        Filtered array with outlier rows removed
-    """
-    n_params = bootstrap_array.shape[1]
-    mask = np.ones(len(bootstrap_array), dtype=bool)
-
-    for i in range(n_params):
-        col = bootstrap_array[:, i]
-        q1 = np.percentile(col, 25)
-        q3 = np.percentile(col, 75)
-        iqr = q3 - q1
-
-        # Avoid division by zero for constant parameters
-        if iqr == 0:
-            continue
-
-        lower_bound = q1 - k * iqr
-        upper_bound = q3 + k * iqr
-        mask &= (col >= lower_bound) & (col <= upper_bound)
-
-    return bootstrap_array[mask]

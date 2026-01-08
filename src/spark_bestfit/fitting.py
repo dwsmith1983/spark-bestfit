@@ -20,13 +20,13 @@ try:
 
     _PYSPARK_AVAILABLE = True
 except ImportError:
-    Broadcast = None  # type: ignore[assignment,misc]
-    pandas_udf = None  # type: ignore[assignment,misc]
-    ArrayType = None  # type: ignore[assignment,misc]
-    FloatType = None  # type: ignore[assignment,misc]
-    StringType = None  # type: ignore[assignment,misc]
-    StructField = None  # type: ignore[assignment,misc]
-    StructType = None  # type: ignore[assignment,misc]
+    Broadcast = None  # type: ignore[assignment]
+    pandas_udf = None  # type: ignore[assignment]
+    ArrayType = None  # type: ignore[assignment]
+    FloatType = None  # type: ignore[assignment]
+    StringType = None  # type: ignore[assignment]
+    StructField = None  # type: ignore[assignment]
+    StructType = None  # type: ignore[assignment]
     _PYSPARK_AVAILABLE = False
 
 # Constant for fitting sample size
