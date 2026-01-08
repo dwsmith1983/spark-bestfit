@@ -78,7 +78,7 @@ jobs:
       - name: Run unit tests (no Spark)
         run: |
           # Run all tests except Spark-marked tests, disable pytest-spark plugin
-          pytest -m "not spark" -p no:spark --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml -v
+          pytest -m "not spark" -p no:spark --cov=src/spark_bestfit --cov-report=term-missing --cov-report=xml --cov-fail-under=85 -v
       - name: Upload coverage
         uses: codecov/codecov-action@v5
         with:

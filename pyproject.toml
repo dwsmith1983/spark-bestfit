@@ -147,7 +147,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.test.scripts]
-run = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+run = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 # Spark 3.5 with Python 3.11
 [[tool.hatch.envs.test.matrix]]
@@ -174,7 +174,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark35-py311.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 [tool.hatch.envs.spark35-py312]
 python = "3.12"
@@ -190,7 +190,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark35-py312.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 [tool.hatch.envs.spark40-py312]
 python = "3.12"
@@ -205,7 +205,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark40-py312.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 [tool.hatch.envs.spark40-py313]
 python = "3.13"
@@ -220,7 +220,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.spark40-py313.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=75 -v {args}"
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 # Semantic Release configuration
 [tool.semantic_release]
