@@ -714,5 +714,6 @@ class TestFitterEmptySampleHandling:
         df = pd.DataFrame({"value": [np.inf] * 100})
         results = continuous_fitter.fit(df, column="value", max_distributions=1)
 
-        assert len(results._df.columns) == 17
+        # 19 columns: 17 original + data_kurtosis + data_skewness (v2.3.0)
+        assert len(results._df.columns) == 19
         assert len(results.best(n=1, metric="aic")) == 0

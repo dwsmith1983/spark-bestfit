@@ -369,6 +369,8 @@ class DiscreteDistributionFitter(BaseFitter):
                         "data_mean",
                         "data_stddev",
                         "data_count",
+                        "data_kurtosis",
+                        "data_skewness",
                         "lower_bound",
                         "upper_bound",
                     ]

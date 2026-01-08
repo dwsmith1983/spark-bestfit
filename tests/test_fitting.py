@@ -275,6 +275,7 @@ class TestFitSingleDistributionEdgeCases:
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
             "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
             "data_min", "data_max", "data_mean", "data_stddev", "data_count",
+            "data_kurtosis", "data_skewness",  # Added in v2.3.0 for heavy-tail detection
             "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
         }
         assert set(result.keys()) == required_keys

@@ -63,6 +63,9 @@ if _PYSPARK_AVAILABLE:
             StructField("data_mean", FloatType(), True),
             StructField("data_stddev", FloatType(), True),
             StructField("data_count", FloatType(), True),
+            # Heavy-tail detection stats (v2.3.0)
+            StructField("data_kurtosis", FloatType(), True),
+            StructField("data_skewness", FloatType(), True),
             # Bounds for truncated distribution fitting (v1.4.0)
             StructField("lower_bound", FloatType(), True),
             StructField("upper_bound", FloatType(), True),
@@ -82,7 +85,8 @@ def compute_data_stats(data: np.ndarray) -> Dict[str, float]:
         data: Data array used for fitting
 
     Returns:
-        Dictionary with keys: data_min, data_max, data_mean, data_stddev, data_count
+        Dictionary with keys: data_min, data_max, data_mean, data_stddev, data_count,
+        data_kurtosis, data_skewness
     """
     return {
         "data_min": float(np.min(data)),
@@ -90,6 +94,78 @@ def compute_data_stats(data: np.ndarray) -> Dict[str, float]:
         "data_mean": float(np.mean(data)),
         "data_stddev": float(np.std(data)),
         "data_count": float(len(data)),
+        "data_kurtosis": float(st.kurtosis(data, fisher=True)),  # Excess kurtosis (0 for normal)
+        "data_skewness": float(st.skew(data)),
+    }
+
+
+# Heavy-tailed distributions have infinite variance or slow tail decay
+HEAVY_TAIL_DISTRIBUTIONS = frozenset(
+    {
+        "cauchy",  # Undefined mean and variance
+        "levy",  # Infinite variance
+        "levy_l",  # Infinite variance
+        "levy_stable",  # Can have infinite variance
+        "pareto",  # Heavy tail, finite variance only for alpha > 2
+        "powerlaw",  # Heavy tail
+        "t",  # Heavy tail for low df
+        "burr",  # Can be heavy-tailed
+        "burr12",  # Can be heavy-tailed
+        "fisk",  # Log-logistic, can be heavy-tailed
+        "lomax",  # Pareto type II
+        "invgauss",  # Can be heavy-tailed
+        "genhyperbolic",  # Can be heavy-tailed
+        "johnsonsu",  # Can be heavy-tailed for certain parameters
+    }
+)
+
+
+def detect_heavy_tail(data: np.ndarray, kurtosis_threshold: float = 6.0) -> Dict[str, Any]:
+    """Detect heavy-tail characteristics in data.
+
+    Heavy-tailed distributions have slower tail decay than normal/exponential
+    distributions. This function checks multiple indicators:
+    1. Excess kurtosis > threshold (normal has excess kurtosis = 0)
+    2. Extreme value ratio (max / 99th percentile)
+
+    Args:
+        data: Input data array
+        kurtosis_threshold: Excess kurtosis threshold for heavy-tail warning.
+            Default 6.0 (normal=0, t(5)≈6, Cauchy=undefined/inf)
+
+    Returns:
+        Dictionary with:
+            - is_heavy_tailed: bool, True if heavy-tail indicators present
+            - kurtosis: float, excess kurtosis value
+            - extreme_ratio: float, max / 99th percentile ratio
+            - indicators: list of string descriptions of detected indicators
+    """
+    clean_data = data[np.isfinite(data)]
+    if len(clean_data) < 10:
+        return {"is_heavy_tailed": False, "kurtosis": 0.0, "extreme_ratio": 1.0, "indicators": []}
+
+    kurtosis = float(st.kurtosis(clean_data, fisher=True))
+    p99 = float(np.percentile(clean_data, 99))
+    max_val = float(np.max(clean_data))
+
+    # Avoid division by zero
+    extreme_ratio = max_val / p99 if p99 != 0 else 1.0
+
+    indicators = []
+
+    # Check excess kurtosis (normal distribution has excess kurtosis = 0)
+    if kurtosis > kurtosis_threshold:
+        indicators.append(f"high kurtosis ({kurtosis:.1f} > {kurtosis_threshold})")
+
+    # Check extreme value ratio (heavy tails have outliers far from 99th percentile)
+    if extreme_ratio > 3.0:
+        indicators.append(f"extreme values (max/p99 = {extreme_ratio:.1f})")
+
+    return {
+        "is_heavy_tailed": len(indicators) > 0,
+        "kurtosis": kurtosis,
+        "extreme_ratio": extreme_ratio,
+        "indicators": indicators,
     }
 
 
