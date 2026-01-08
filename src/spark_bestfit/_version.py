@@ -1,1 +1,1 @@
-__version__ = "2.2.0"  # pragma: no mutate
+__version__ = "2.3.0"  # pragma: no mutate

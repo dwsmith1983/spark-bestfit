@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v2.3.0 (2026-01-08)
+
+### Bug Fixes
+
+- **ci**: Exclude Spark-specific code branches from coverage
+  ([#98](https://github.com/dwsmith1983/spark-bestfit/pull/98),
+  [`a590c58`](https://github.com/dwsmith1983/spark-bestfit/commit/a590c58f664475c9c7d9f73c409de754468d571d))
+
+- **ci**: Exclude Spark/Ray backends from CI coverage threshold
+  ([#98](https://github.com/dwsmith1983/spark-bestfit/pull/98),
+  [`a590c58`](https://github.com/dwsmith1983/spark-bestfit/commit/a590c58f664475c9c7d9f73c409de754468d571d))
+
+- **ci**: Expand coverage exclusions for Spark-only modules
+  ([#98](https://github.com/dwsmith1983/spark-bestfit/pull/98),
+  [`a590c58`](https://github.com/dwsmith1983/spark-bestfit/commit/a590c58f664475c9c7d9f73c409de754468d571d))
+
+### Features
+
+- Add heavy-tail distribution detection and warnings
+  ([#98](https://github.com/dwsmith1983/spark-bestfit/pull/98),
+  [`a590c58`](https://github.com/dwsmith1983/spark-bestfit/commit/a590c58f664475c9c7d9f73c409de754468d571d))
+
+- V2.3.0 DX Foundation - examples, tests, heavy-tail detection, docs
+  ([#98](https://github.com/dwsmith1983/spark-bestfit/pull/98),
+  [`a590c58`](https://github.com/dwsmith1983/spark-bestfit/commit/a590c58f664475c9c7d9f73c409de754468d571d))
+
+
 ## v2.2.0 (2026-01-08)
 
 ### Bug Fixes
