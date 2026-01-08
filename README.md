@@ -38,6 +38,7 @@ All backends use identical scipy fitting, so **fit quality is identical** regard
 - **Multi-Column Fitting**: Fit multiple columns efficiently in a single operation
 - **Lazy Metrics**: Skip expensive KS/AD computation; compute on-demand
 - **Smart Pre-filtering**: Skip incompatible distributions based on data shape
+- **Heavy-Tail Detection**: Warns when data exhibits heavy-tailed characteristics
 - **Gaussian Copula**: Correlated multi-column sampling at scale
 - **Distributed Sampling**: Generate millions of samples using cluster parallelism
 - **Model Serialization**: Save and load fitted distributions to JSON or pickle
@@ -175,6 +176,48 @@ results = fitter.fit(
 # Samples automatically respect bounds
 best = results.best(n=1)[0]
 samples = best.sample(1000)  # All within [0, 1000]
+```
+
+## Heavy-Tail Detection
+
+The library automatically detects heavy-tailed data characteristics and warns you:
+
+```python
+import warnings
+import numpy as np
+import pandas as pd
+from spark_bestfit import DistributionFitter, LocalBackend
+
+# Heavy-tailed data (Cauchy distribution)
+data = np.random.standard_cauchy(1000)
+df = pd.DataFrame({"value": data})
+
+fitter = DistributionFitter(backend=LocalBackend())
+
+# This will emit a warning:
+# UserWarning: Column 'value' exhibits heavy-tail characteristics (high kurtosis).
+# Consider: (1) heavy-tail distributions like pareto, cauchy, t;
+# (2) data transformation (log, sqrt); (3) checking for outliers.
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    results = fitter.fit(df, column="value")
+    if w:
+        print(w[0].message)
+```
+
+You can also use the detection function directly:
+
+```python
+from spark_bestfit.fitting import detect_heavy_tail, HEAVY_TAIL_DISTRIBUTIONS
+
+result = detect_heavy_tail(data)
+print(result)
+# {'is_heavy_tailed': True, 'kurtosis': 299.7,
+#  'extreme_ratio': 17.2, 'indicators': ['high kurtosis (299.7 > 6.0)']}
+
+# Known heavy-tail distributions
+print(HEAVY_TAIL_DISTRIBUTIONS)
+# frozenset({'cauchy', 'pareto', 't', 'levy', 'burr', ...})
 ```
 
 ## Discrete Distributions
