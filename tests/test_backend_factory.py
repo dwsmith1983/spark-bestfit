@@ -4,10 +4,18 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
-import ray
 
 from spark_bestfit.backends.factory import BackendFactory
 from spark_bestfit.backends.local import LocalBackend
+
+# Ray is optional
+try:
+    import ray
+
+    RAY_AVAILABLE = True
+except ImportError:
+    ray = None  # type: ignore[assignment]
+    RAY_AVAILABLE = False
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +26,7 @@ def shutdown_ray_after_test():
     This fixture ensures Ray is shutdown after each test that might initialize it.
     """
     yield
-    if ray.is_initialized():
+    if RAY_AVAILABLE and ray.is_initialized():
         ray.shutdown()
 
 
