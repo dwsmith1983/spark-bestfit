@@ -58,8 +58,8 @@ def main():
     config = (
         FitterConfigBuilder()
         .with_bins(100)  # More bins for larger dataset
-        .with_sampling(fraction=0.1, seed=42)  # Sample 10% for fitting
-        .with_lazy_metrics(True)  # Defer expensive KS/AD computation
+        .with_sampling(fraction=0.1)  # Sample 10% for fitting
+        .with_lazy_metrics(False)  # Compute all metrics including KS/AD
         .build()
     )
 
@@ -74,7 +74,7 @@ def main():
         config=config,
     )
 
-    # Show results (lazy metrics are computed on access)
+    # Show results
     print("\nTop 5 distributions:")
     print("-" * 60)
     for i, result in enumerate(results.best(n=5), 1):
@@ -86,9 +86,9 @@ def main():
     print(f"\nBest fit (by AIC): {best.distribution}")
     print(f"  Parameters: {best.parameters}")
 
-    # Access lazy metrics (triggers computation)
+    # Show goodness-of-fit metrics
     print(f"\nKS statistic: {best.ks_statistic:.4f}")
-    print(f"AD statistic: {best.ad_statistic:.4f}")
+    print(f"AD statistic: {best.ad_statistic:.4f}" if best.ad_statistic else "AD statistic: N/A")
 
     # Demonstrate saving/loading results
     print("\nSaving results to JSON...")
