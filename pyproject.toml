@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "spark-bestfit"
 version = "2.2.0"
-description = "Modern Spark distribution fitting library with efficient parallel processing"
+description = "Modern distribution fitting library with Spark, Ray, and local parallel backends"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = {text = "MIT"}
