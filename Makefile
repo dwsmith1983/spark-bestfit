@@ -80,12 +80,20 @@ validate-notebooks: ## Run all example notebooks to validate they execute withou
 # Note: Uses LocalBackend tests only (mutmut 3 trampoline incompatible with PySpark workers)
 # Configuration in pyproject.toml [tool.mutmut]
 
-mutate: ## Run mutation testing (uses pyproject.toml config)
+mutate: ## Run mutation testing (uses pyproject.toml config) - SLOW: ~37 hours
 	@echo "Running mutation tests (this may take a while)..."
 	@echo "Using LocalBackend tests only (Spark tests excluded)"
 	@echo "See pyproject.toml [tool.mutmut] for configuration"
-	rm .mutmut-cache
+	rm -f .mutmut-cache
 	PYTHONPATH=src mutmut run
+
+mutate-fast: ## Run mutation testing per-module (6x faster) - ~6 hours
+	@echo "Running per-module mutation tests (~6 hours total)..."
+	@echo "Each module runs only tests that import it"
+	python scripts/mutmut_parallel.py --all
+
+mutate-fast-dry: ## Show what mutate-fast would run
+	python scripts/mutmut_parallel.py --all --dry-run
 
 mutate-browse: ## Interactive browser for mutation results
 	PYTHONPATH=src mutmut browse
