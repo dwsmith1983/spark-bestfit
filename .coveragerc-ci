@@ -1,0 +1,13 @@
+# Coverage configuration for CI (excludes Spark/Ray backends)
+# These backends require their respective runtimes which aren't available in CI unit tests
+
+[run]
+omit =
+    src/spark_bestfit/backends/spark.py
+    src/spark_bestfit/backends/ray.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
