@@ -1160,3 +1160,150 @@ class TestFitResultsClassHierarchy:
         assert origin is typing.Union
         assert EagerFitResults in args
         assert LazyFitResults in args
+
+
+class TestFitResultsWithPandas:
+    """Tests for FitResults with pandas DataFrames (no Spark required).
+
+    These tests cover the pandas code paths in BaseFitResults methods
+    like summary(), count(), filter(), quality_report(), etc.
+    """
+
+    @pytest.fixture
+    def pandas_results_df(self):
+        """Create sample results as pandas DataFrame."""
+        import pandas as pd
+
+        data = {
+            "distribution": ["norm", "gamma", "expon", "lognorm", "beta"],
+            "parameters": [[50.0, 10.0], [2.0, 0.0, 2.0], [0.0, 5.0], [0.5, 0.0, 10.0], [2.0, 3.0, 0.0, 1.0]],
+            "sse": [0.005, 0.003, 0.015, 0.008, 0.012],
+            "aic": [1500.0, 1400.0, 1600.0, 1450.0, 1550.0],
+            "bic": [1520.0, 1430.0, 1620.0, 1470.0, 1570.0],
+            "ks_statistic": [0.025, 0.020, 0.050, 0.030, 0.045],
+            "pvalue": [0.90, 0.95, 0.60, 0.85, 0.70],
+            "ad_statistic": [0.35, 0.40, 0.80, 0.50, 0.65],
+            "ad_pvalue": [0.15, 0.10, 0.02, 0.08, 0.05],
+            "column_name": ["value", "value", "value", "value", "value"],
+            "data_min": [10.0, 10.0, 10.0, 10.0, 10.0],
+            "data_max": [100.0, 100.0, 100.0, 100.0, 100.0],
+            "data_mean": [50.0, 50.0, 50.0, 50.0, 50.0],
+            "data_stddev": [15.0, 15.0, 15.0, 15.0, 15.0],
+            "data_count": [1000.0, 1000.0, 1000.0, 1000.0, 1000.0],
+            "lower_bound": [None, None, None, None, None],
+            "upper_bound": [None, None, None, None, None],
+            "data_kurtosis": [0.1, 0.1, 0.1, 0.1, 0.1],
+            "data_skewness": [0.0, 0.0, 0.0, 0.0, 0.0],
+        }
+        return pd.DataFrame(data)
+
+    def test_pandas_is_not_spark_df(self, pandas_results_df):
+        """Test that pandas DataFrame is detected correctly."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        assert results.is_spark_df is False
+
+    def test_pandas_count(self, pandas_results_df):
+        """Test count() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        assert results.count() == 5
+        assert len(results) == 5
+
+    def test_pandas_best(self, pandas_results_df):
+        """Test best() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+
+        # Best by KS statistic
+        best = results.best(n=1, metric="ks_statistic")
+        assert len(best) == 1
+        assert best[0].distribution == "gamma"  # lowest KS
+
+        # Best by AIC
+        best_aic = results.best(n=2, metric="aic")
+        assert len(best_aic) == 2
+        assert best_aic[0].distribution == "gamma"  # lowest AIC
+
+    def test_pandas_summary(self, pandas_results_df):
+        """Test summary() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        summary = results.summary()
+
+        assert "min_sse" in summary.columns
+        assert "mean_sse" in summary.columns
+        assert "max_sse" in summary.columns
+        assert "total_distributions" in summary.columns
+
+        assert summary["total_distributions"].iloc[0] == 5
+        assert summary["min_sse"].iloc[0] == 0.003
+        assert summary["max_sse"].iloc[0] == 0.015
+
+    def test_pandas_filter(self, pandas_results_df):
+        """Test filter() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+
+        # Filter by SSE
+        filtered = results.filter(sse_threshold=0.01)
+        assert filtered.count() == 3  # norm, gamma, lognorm
+
+        # Filter by p-value
+        filtered_pval = results.filter(pvalue_threshold=0.80)
+        assert filtered_pval.count() == 3  # norm, gamma, lognorm
+
+    def test_pandas_quality_report(self, pandas_results_df):
+        """Test quality_report() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        report = results.quality_report(n=3)
+
+        assert "top_fits" in report
+        assert "summary" in report
+        assert "warnings" in report
+        assert "n_acceptable" in report
+
+        assert len(report["top_fits"]) == 3
+        assert report["summary"]["total_distributions"] == 5
+
+    def test_pandas_column_names(self, pandas_results_df):
+        """Test column_names property with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        assert results.column_names == ["value"]
+
+    def test_pandas_for_column(self, pandas_results_df):
+        """Test for_column() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        filtered = results.for_column("value")
+        assert filtered.count() == 5
+
+    def test_pandas_repr(self, pandas_results_df):
+        """Test __repr__ with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        repr_str = repr(results)
+
+        assert "EagerFitResults" in repr_str
+        assert "5 distributions fitted" in repr_str
+
+    def test_pandas_best_per_column(self, pandas_results_df):
+        """Test best_per_column() with pandas DataFrame."""
+        from spark_bestfit.results import EagerFitResults
+
+        results = EagerFitResults(pandas_results_df)
+        best_per = results.best_per_column(n=1)
+
+        assert "value" in best_per
+        assert len(best_per["value"]) == 1
