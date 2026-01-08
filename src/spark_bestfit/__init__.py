@@ -24,7 +24,9 @@ Example:
 """
 
 from spark_bestfit._version import __version__
+from spark_bestfit.backends.factory import BackendFactory
 from spark_bestfit.backends.local import LocalBackend
+from spark_bestfit.config import FitterConfig, FitterConfigBuilder
 
 # Conditional Spark import (only if pyspark is installed)
 try:
@@ -48,6 +50,7 @@ from spark_bestfit.core import (
     DEFAULT_EXCLUDED_DISTRIBUTIONS,
     DiscreteDistributionFitter,
     DistributionFitter,
+    TruncatedFrozenDist,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
@@ -72,7 +75,12 @@ __all__ = [
     "DistributionFitter",
     "DiscreteDistributionFitter",
     "GaussianCopula",
+    "TruncatedFrozenDist",
+    # Configuration (v2.2)
+    "FitterConfig",
+    "FitterConfigBuilder",
     # Backends (v2.0)
+    "BackendFactory",
     "ExecutionBackend",
     "LocalBackend",
     # SparkBackend and RayBackend added conditionally below

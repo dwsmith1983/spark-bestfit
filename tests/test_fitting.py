@@ -7,7 +7,6 @@ import scipy.stats as st
 from spark_bestfit.fitting import (
     AD_PVALUE_DISTRIBUTIONS,
     FITTING_SAMPLE_SIZE,
-    _TruncatedDist,
     bootstrap_confidence_intervals,
     compute_ad_pvalue,
     compute_ad_statistic,
@@ -21,6 +20,7 @@ from spark_bestfit.fitting import (
     fit_single_distribution,
     get_continuous_param_names,
 )
+from spark_bestfit.truncated import TruncatedFrozenDist
 
 class TestFitSingleDistribution:
     """Tests for fitting single distributions."""
@@ -970,12 +970,12 @@ class TestBootstrapConfidenceIntervals:
 
 
 class TestTruncatedDist:
-    """Tests for _TruncatedDist internal class used in bounded fitting."""
+    """Tests for TruncatedFrozenDist internal class used in bounded fitting."""
 
     def test_pdf_within_bounds(self):
         """Test PDF returns non-zero values within bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([35, 40, 50, 60, 65])
         pdf_values = truncated.pdf(x)
@@ -987,7 +987,7 @@ class TestTruncatedDist:
     def test_pdf_outside_bounds(self):
         """Test PDF returns zero outside bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([20, 25, 75, 80])
         pdf_values = truncated.pdf(x)
@@ -998,7 +998,7 @@ class TestTruncatedDist:
     def test_pdf_at_boundaries(self):
         """Test PDF at exact boundary values."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([30, 70])
         pdf_values = truncated.pdf(x)
@@ -1009,7 +1009,7 @@ class TestTruncatedDist:
     def test_pdf_integrates_to_one(self):
         """Test PDF integrates to approximately 1 within bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         # Use numerical integration
         x = np.linspace(30, 70, 1000)
@@ -1023,7 +1023,7 @@ class TestTruncatedDist:
     def test_pdf_higher_than_untruncated(self):
         """Test truncated PDF is higher than untruncated within bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([50])  # At the mean
         pdf_truncated = truncated.pdf(x)
@@ -1036,7 +1036,8 @@ class TestTruncatedDist:
         """Test PDF when normalization constant is effectively zero."""
         frozen = st.norm(loc=50, scale=10)
         # Set bounds far from distribution support
-        truncated = _TruncatedDist(frozen, lb=200, ub=300)
+        # Use raise_on_empty=False to test silent zeros behavior
+        truncated = TruncatedFrozenDist(frozen, lb=200, ub=300, raise_on_empty=False)
 
         x = np.array([250])
         pdf_values = truncated.pdf(x)
@@ -1047,7 +1048,7 @@ class TestTruncatedDist:
     def test_logpdf_within_bounds(self):
         """Test logpdf returns finite values within bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([35, 50, 65])
         logpdf_values = truncated.logpdf(x)
@@ -1058,7 +1059,7 @@ class TestTruncatedDist:
     def test_logpdf_outside_bounds(self):
         """Test logpdf returns -inf outside bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([20, 80])
         logpdf_values = truncated.logpdf(x)
@@ -1069,7 +1070,7 @@ class TestTruncatedDist:
     def test_cdf_within_bounds(self):
         """Test CDF values within bounds are between 0 and 1."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([35, 50, 65])
         cdf_values = truncated.cdf(x)
@@ -1082,7 +1083,7 @@ class TestTruncatedDist:
     def test_cdf_at_boundaries(self):
         """Test CDF at boundaries."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         assert truncated.cdf(np.array([30]))[0] == 0
         assert truncated.cdf(np.array([70]))[0] == 1
@@ -1090,7 +1091,7 @@ class TestTruncatedDist:
     def test_cdf_outside_bounds(self):
         """Test CDF outside bounds."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         # Below lower bound
         assert truncated.cdf(np.array([20]))[0] == 0
@@ -1100,7 +1101,7 @@ class TestTruncatedDist:
     def test_pdf_logpdf_consistency(self):
         """Test that pdf and logpdf are consistent."""
         frozen = st.norm(loc=50, scale=10)
-        truncated = _TruncatedDist(frozen, lb=30, ub=70)
+        truncated = TruncatedFrozenDist(frozen, lb=30, ub=70)
 
         x = np.array([35, 50, 65])
         pdf_values = truncated.pdf(x)
@@ -1112,7 +1113,7 @@ class TestTruncatedDist:
     def test_with_gamma_distribution(self):
         """Test truncation works with non-normal distributions."""
         frozen = st.gamma(a=2, loc=0, scale=5)
-        truncated = _TruncatedDist(frozen, lb=2, ub=20)
+        truncated = TruncatedFrozenDist(frozen, lb=2, ub=20)
 
         x = np.array([5, 10, 15])
         pdf_values = truncated.pdf(x)

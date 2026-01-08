@@ -116,6 +116,46 @@ Pass parameters directly to ``fit()`` to customize behavior:
 
 See :doc:`/features/prefiltering` and :doc:`/features/lazy-metrics` for performance optimization.
 
+FitterConfig Builder (v2.2+)
+----------------------------
+
+For complex configurations, use the fluent builder pattern instead of many parameters:
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter, FitterConfigBuilder
+
+   # Build a reusable configuration
+   config = (FitterConfigBuilder()
+       .with_bins(100)
+       .with_support_at_zero()
+       .with_sampling(fraction=0.3)
+       .with_max_distributions(50)
+       .with_partitions(16)
+       .with_prefilter()
+       .with_lazy_metrics()
+       .build())
+
+   fitter = DistributionFitter(spark, random_seed=123)
+   results = fitter.fit(df, column="value", config=config)
+
+**Benefits of FitterConfig:**
+
+- **Cleaner code**: Grouped, readable configuration
+- **Reusable**: Same config works across multiple fits
+- **IDE-friendly**: Better autocomplete and discoverability
+- **Immutable**: Frozen dataclass prevents accidental mutation
+
+.. code-block:: python
+
+   # Reuse config across multiple columns
+   for col in ["price", "quantity", "revenue"]:
+       results = fitter.fit(df, column=col, config=config)
+       best = results.best(n=1, metric="aic")[0]
+       print(f"{col}: {best.distribution}")
+
+See :doc:`/features/config` for the complete configuration guide.
+
 Multi-Column Fitting
 --------------------
 
@@ -332,6 +372,7 @@ By default, slow distributions are excluded. To customize:
 Next Steps
 ----------
 
+- :doc:`/features/config` - FitterConfig builder for complex configurations
 - :doc:`/backends` - Backend configuration (Spark, Ray, Local)
 - :doc:`/features/bounded` - Bounded distribution fitting
 - :doc:`/features/sampling` - Distributed sampling

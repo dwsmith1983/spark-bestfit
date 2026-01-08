@@ -1,18 +1,20 @@
 Distributed Sampling
 ====================
 
-After fitting a distribution, you can generate samples using Spark's distributed
+After fitting a distribution, you can generate samples using distributed
 computing capabilities. This is particularly useful when you need to generate
 millions of samples efficiently.
 
 Basic Usage
 -----------
 
-Generate distributed samples from a fitted distribution:
+Generate distributed samples from a fitted distribution using any backend:
 
 .. code-block:: python
 
     from spark_bestfit import DistributionFitter
+    from spark_bestfit.backends import BackendFactory
+    from spark_bestfit.sampling import sample_distributed
 
     # Fit distribution
     fitter = DistributionFitter(spark)
@@ -20,10 +22,16 @@ Generate distributed samples from a fitted distribution:
     best = results.best(n=1)[0]
 
     # Generate 1 million distributed samples
-    samples_df = best.sample_spark(n=1_000_000, spark=spark)
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = sample_distributed(
+        distribution=best.distribution,
+        parameters=best.parameters,
+        n=1_000_000,
+        backend=backend,
+    )
     samples_df.show(5)
 
-The result is a Spark DataFrame that can be used for further processing:
+The result is a DataFrame that can be used for further processing:
 
 .. code-block:: text
 
@@ -37,6 +45,28 @@ The result is a Spark DataFrame that can be used for further processing:
     | -1.23234234234234 |
     +-------------------+
 
+Backend Options
+---------------
+
+Use any backend for distributed sampling:
+
+.. code-block:: python
+
+    from spark_bestfit.backends import BackendFactory
+    from spark_bestfit.sampling import sample_distributed
+
+    # Spark
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = sample_distributed(best.distribution, best.parameters, n=1_000_000, backend=backend)
+
+    # Ray
+    backend = BackendFactory.create("ray")
+    samples_df = sample_distributed(best.distribution, best.parameters, n=1_000_000, backend=backend)
+
+    # Local (for testing)
+    backend = BackendFactory.create("local", max_workers=4)
+    samples_df = sample_distributed(best.distribution, best.parameters, n=1_000_000, backend=backend)
+
 Reproducibility
 ---------------
 
@@ -45,8 +75,14 @@ Use the ``random_seed`` parameter for reproducible results:
 .. code-block:: python
 
     # Reproducible sampling
-    samples1 = best.sample_spark(n=10000, spark=spark, random_seed=42)
-    samples2 = best.sample_spark(n=10000, spark=spark, random_seed=42)
+    samples1 = sample_distributed(
+        best.distribution, best.parameters, n=10000,
+        backend=backend, random_seed=42
+    )
+    samples2 = sample_distributed(
+        best.distribution, best.parameters, n=10000,
+        backend=backend, random_seed=42
+    )
     # samples1 and samples2 will contain the same values
 
 Each partition receives a unique seed derived from the base seed plus the partition ID,
@@ -60,14 +96,16 @@ You can control the number of partitions for parallel sampling:
 .. code-block:: python
 
     # Use 16 partitions for sampling
-    samples_df = best.sample_spark(
+    samples_df = sample_distributed(
+        distribution=best.distribution,
+        parameters=best.parameters,
         n=1_000_000,
-        spark=spark,
+        backend=backend,
         num_partitions=16,
         random_seed=42,
     )
 
-If not specified, the default Spark parallelism is used.
+If not specified, the default parallelism for the backend is used.
 
 Custom Column Names
 -------------------
@@ -76,9 +114,11 @@ Specify a custom column name for the output:
 
 .. code-block:: python
 
-    samples_df = best.sample_spark(
+    samples_df = sample_distributed(
+        distribution=best.distribution,
+        parameters=best.parameters,
         n=10000,
-        spark=spark,
+        backend=backend,
         column_name="generated_values"
     )
     # DataFrame has column "generated_values" instead of "sample"
@@ -97,9 +137,9 @@ spark-bestfit offers two sampling methods:
    * - ``sample(size=N)``
      - Small to medium samples (< 10M)
      - NumPy array
-   * - ``sample_spark(n=N, spark=spark)``
+   * - ``sample_distributed(n=N, backend=...)``
      - Large samples (> 10M)
-     - Spark DataFrame
+     - DataFrame (Spark/pandas)
 
 Performance Characteristics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,11 +176,36 @@ Benchmark results on local mode (your mileage may vary on a cluster):
 - **Spark overhead**: ~300ms baseline cost for job setup
 - **Cluster advantage**: On a multi-node cluster, the crossover point is lower
   due to true parallelism across workers
-- **Memory distribution**: Even when local is faster, ``sample_spark()`` distributes
+- **Memory distribution**: Even when local is faster, distributed sampling distributes
   memory across the cluster, enabling sample sizes that wouldn't fit on a single node
+
+Deprecated: sample_spark()
+--------------------------
+
+.. deprecated:: 2.0.0
+   The ``sample_spark()`` method is deprecated and will be removed in v3.0.0.
+   Use ``sample_distributed()`` with an explicit backend instead.
+
+Migration example:
+
+.. code-block:: python
+
+    # Old (deprecated)
+    samples_df = best.sample_spark(n=1_000_000, spark=spark)
+
+    # New (recommended)
+    from spark_bestfit.backends import BackendFactory
+    from spark_bestfit.sampling import sample_distributed
+
+    backend = BackendFactory.create("spark", spark_session=spark)
+    samples_df = sample_distributed(
+        distribution=best.distribution,
+        parameters=best.parameters,
+        n=1_000_000,
+        backend=backend,
+    )
 
 API Reference
 -------------
 
-See :meth:`spark_bestfit.results.DistributionFitResult.sample_spark` for full
-API documentation.
+See :func:`spark_bestfit.sampling.sample_distributed` for full API documentation.

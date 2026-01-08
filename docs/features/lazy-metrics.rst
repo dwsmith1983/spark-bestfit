@@ -39,14 +39,19 @@ Using Lazy Metrics
 
 Enable lazy metrics to skip initial KS/AD computation during fitting:
 
+**Using FitterConfig (v2.2+, recommended):**
+
 .. code-block:: python
 
-   from spark_bestfit import DistributionFitter
+   from spark_bestfit import DistributionFitter, FitterConfigBuilder
 
    fitter = DistributionFitter(spark)
 
+   # Build config with lazy metrics
+   config = FitterConfigBuilder().with_lazy_metrics().build()
+
    # Fast fitting: skip KS/AD computation initially
-   results = fitter.fit(df, "value", lazy_metrics=True)
+   results = fitter.fit(df, "value", config=config)
 
    # Check if results are lazy
    print(results.is_lazy)  # True
@@ -58,6 +63,13 @@ Enable lazy metrics to skip initial KS/AD computation during fitting:
    # Get best by KS - triggers ON-DEMAND computation!
    best_ks = results.best(n=1, metric="ks_statistic")[0]
    print(best_ks.ks_statistic)  # 0.0234 (computed value!)
+
+**Using parameter directly:**
+
+.. code-block:: python
+
+   # Alternatively, pass lazy_metrics parameter directly
+   results = fitter.fit(df, "value", lazy_metrics=True)
 
 **Key insight**: When you call ``best(metric="ks_statistic")`` with lazy results,
 spark-bestfit automatically:

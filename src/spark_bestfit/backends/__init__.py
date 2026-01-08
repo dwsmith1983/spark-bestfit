@@ -26,9 +26,10 @@ For Ray clusters:
     >>> fitter = DistributionFitter(backend=backend)
 """
 
+from spark_bestfit.backends.factory import BackendFactory
 from spark_bestfit.backends.local import LocalBackend
 
-__all__ = ["LocalBackend"]
+__all__ = ["BackendFactory", "LocalBackend"]
 
 # Conditional Spark import (only if pyspark is installed)
 try:

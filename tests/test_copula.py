@@ -454,32 +454,15 @@ class TestGaussianCopulaIntegration:
 # ============================================================================
 
 try:
-    from pyspark.sql import SparkSession
+    import pyspark  # noqa: F401
+
     PYSPARK_AVAILABLE = True
 except ImportError:
     PYSPARK_AVAILABLE = False
 
 
-@pytest.fixture(scope="module")
-def spark_copula_session():
-    """Create SparkSession for copula tests."""
-    if not PYSPARK_AVAILABLE:
-        pytest.skip("PySpark not installed")
-
-    spark = (
-        SparkSession.builder.appName("spark-copula-tests")
-        .master("local[2]")
-        .config("spark.ui.enabled", "false")
-        .getOrCreate()
-    )
-
-    yield spark
-
-    spark.stop()
-
-
 @pytest.fixture
-def spark_correlated_data(spark_copula_session):
+def spark_correlated_data(spark_session):
     """Generate correlated multi-column data as Spark DataFrame."""
     np.random.seed(42)
     n = 5000
@@ -494,13 +477,13 @@ def spark_correlated_data(spark_copula_session):
     col_c = 100 + 20 * mvn_samples[:, 2]
 
     data = [(float(a), float(b), float(c)) for a, b, c in zip(col_a, col_b, col_c)]
-    return spark_copula_session.createDataFrame(data, ["col_a", "col_b", "col_c"])
+    return spark_session.createDataFrame(data, ["col_a", "col_b", "col_c"])
 
 
 @pytest.fixture
-def spark_multi_column_results(spark_copula_session, spark_correlated_data):
+def spark_multi_column_results(spark_session, spark_correlated_data):
     """Fit distributions to multi-column Spark data."""
-    fitter = DistributionFitter(spark_copula_session, random_seed=42)
+    fitter = DistributionFitter(spark_session, random_seed=42)
     results = fitter.fit(
         spark_correlated_data,
         columns=["col_a", "col_b", "col_c"],
@@ -517,23 +500,29 @@ def spark_simple_copula(spark_multi_column_results, spark_correlated_data):
 
 @pytest.mark.spark
 @pytest.mark.skipif(not PYSPARK_AVAILABLE, reason="PySpark not installed")
-class TestGaussianCopulaSampleSpark:
-    """Tests for distributed sampling via sample_spark()."""
+class TestGaussianCopulaSampleDistributed:
+    """Tests for distributed sampling via sample_distributed()."""
 
-    def test_sample_spark_basic(self, spark_simple_copula, spark_copula_session):
-        """Test basic Spark sampling."""
-        samples_df = spark_simple_copula.sample_spark(n=1000, spark=spark_copula_session)
+    def test_sample_distributed_basic(self, spark_simple_copula, spark_session):
+        """Test basic distributed sampling with Spark backend."""
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        samples_df = spark_simple_copula.sample_distributed(n=1000, backend=backend)
 
         assert samples_df.count() == 1000
         assert set(samples_df.columns) == {"col_a", "col_b", "col_c"}
 
-    def test_sample_spark_reproducibility(self, spark_simple_copula, spark_copula_session):
-        """Test Spark sampling reproducibility."""
-        df1 = spark_simple_copula.sample_spark(
-            n=100, spark=spark_copula_session, num_partitions=2, random_seed=42
+    def test_sample_distributed_reproducibility(self, spark_simple_copula, spark_session):
+        """Test distributed sampling reproducibility."""
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        df1 = spark_simple_copula.sample_distributed(
+            n=100, backend=backend, num_partitions=2, random_seed=42
         )
-        df2 = spark_simple_copula.sample_spark(
-            n=100, spark=spark_copula_session, num_partitions=2, random_seed=42
+        df2 = spark_simple_copula.sample_distributed(
+            n=100, backend=backend, num_partitions=2, random_seed=42
         )
 
         # Convert to pandas and sort for comparison
@@ -543,10 +532,13 @@ class TestGaussianCopulaSampleSpark:
         for col in spark_simple_copula.column_names:
             np.testing.assert_array_almost_equal(pdf1[col].values, pdf2[col].values)
 
-    def test_sample_spark_different_seeds(self, spark_simple_copula, spark_copula_session):
+    def test_sample_distributed_different_seeds(self, spark_simple_copula, spark_session):
         """Test that different seeds produce different results."""
-        df1 = spark_simple_copula.sample_spark(n=100, spark=spark_copula_session, random_seed=42)
-        df2 = spark_simple_copula.sample_spark(n=100, spark=spark_copula_session, random_seed=123)
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        df1 = spark_simple_copula.sample_distributed(n=100, backend=backend, random_seed=42)
+        df2 = spark_simple_copula.sample_distributed(n=100, backend=backend, random_seed=123)
 
         pdf1 = df1.toPandas()
         pdf2 = df2.toPandas()
@@ -558,10 +550,13 @@ class TestGaussianCopulaSampleSpark:
             pdf2["col_a"].sort_values().values,
         )
 
-    def test_sample_spark_preserves_correlation(self, spark_simple_copula, spark_copula_session):
-        """Test that Spark sampling preserves correlation."""
-        samples_df = spark_simple_copula.sample_spark(
-            n=5000, spark=spark_copula_session, random_seed=42
+    def test_sample_distributed_preserves_correlation(self, spark_simple_copula, spark_session):
+        """Test that distributed sampling preserves correlation."""
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        samples_df = spark_simple_copula.sample_distributed(
+            n=5000, backend=backend, random_seed=42
         )
         pdf = samples_df.toPandas()
 
@@ -573,17 +568,23 @@ class TestGaussianCopulaSampleSpark:
             sampled_corr, spark_simple_copula.correlation_matrix, decimal=1
         )
 
-    def test_sample_spark_custom_partitions(self, spark_simple_copula, spark_copula_session):
+    def test_sample_distributed_custom_partitions(self, spark_simple_copula, spark_session):
         """Test sampling with custom partition count."""
-        samples_df = spark_simple_copula.sample_spark(
-            n=1000, spark=spark_copula_session, num_partitions=4, random_seed=42
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        samples_df = spark_simple_copula.sample_distributed(
+            n=1000, backend=backend, num_partitions=4, random_seed=42
         )
         assert samples_df.count() == 1000
 
-    def test_sample_spark_return_uniform(self, spark_simple_copula, spark_copula_session):
-        """Test return_uniform=True in sample_spark()."""
-        samples_df = spark_simple_copula.sample_spark(
-            n=1000, spark=spark_copula_session, random_seed=42, return_uniform=True
+    def test_sample_distributed_return_uniform(self, spark_simple_copula, spark_session):
+        """Test return_uniform=True in sample_distributed()."""
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        samples_df = spark_simple_copula.sample_distributed(
+            n=1000, backend=backend, random_seed=42, return_uniform=True
         )
 
         pdf = samples_df.toPandas()
@@ -595,13 +596,18 @@ class TestGaussianCopulaSampleSpark:
             # Should be roughly uniformly distributed
             assert 0.3 < np.mean(arr) < 0.7  # Mean should be ~0.5
 
-    def test_sample_spark_with_one_sample(self, spark_simple_copula, spark_copula_session):
-        """Test Spark sampling with exactly 1 sample."""
-        df = spark_simple_copula.sample_spark(n=1, spark=spark_copula_session, random_seed=42)
+    def test_sample_distributed_with_one_sample(self, spark_simple_copula, spark_session):
+        """Test distributed sampling with exactly 1 sample."""
+        from spark_bestfit.backends import BackendFactory
+
+        backend = BackendFactory.create("spark", spark_session=spark_session)
+        df = spark_simple_copula.sample_distributed(n=1, backend=backend, random_seed=42)
         assert df.count() == 1
 
-    def test_save_load_sample_spark_workflow(self, spark_simple_copula, spark_copula_session):
+    def test_save_load_sample_distributed_workflow(self, spark_simple_copula, spark_session):
         """Test serialization then distributed sampling."""
+        from spark_bestfit.backends import BackendFactory
+
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = Path(f.name)
 
@@ -612,8 +618,9 @@ class TestGaussianCopulaSampleSpark:
             # Load
             loaded = GaussianCopula.load(path)
 
-            # Sample via Spark
-            samples_df = loaded.sample_spark(n=1000, spark=spark_copula_session, random_seed=42)
+            # Sample via backend
+            backend = BackendFactory.create("spark", spark_session=spark_session)
+            samples_df = loaded.sample_distributed(n=1000, backend=backend, random_seed=42)
 
             assert samples_df.count() == 1000
             assert set(samples_df.columns) == set(spark_simple_copula.column_names)

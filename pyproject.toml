@@ -67,7 +67,7 @@ dev = [
     "pytest-spark>=0.6.0",
     "pytest-benchmark>=5.0.0",
     "hypothesis>=6.100.0",
-    "mutmut>=3.2.0",
+    "mutmut>=2.4.0,<3.0.0",  # v3 trampoline mode causes segfaults with scipy
     "ruff>=0.8.0",
     "black>=24.10.0",
     "isort>=5.13.0",
@@ -276,7 +276,8 @@ pytest_add_cli_args_test_selection = [
     "tests/test_serialization.py",
     "tests/test_results.py",
     "tests/test_numerical_stability.py",
-    "tests/test_property_based.py",
+    "tests/test_config.py",
+    # Note: test_property_based.py excluded - hypothesis incompatible with mutmut trampoline
     # Using LocalBackend
     "tests/test_core.py",
     "tests/test_histogram.py",

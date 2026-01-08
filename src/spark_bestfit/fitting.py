@@ -10,6 +10,8 @@ import pandas as pd
 import scipy.stats as st
 from scipy.stats import rv_continuous
 
+from spark_bestfit.truncated import TruncatedFrozenDist
+
 # PySpark is optional - only import if available
 try:
     from pyspark import Broadcast
@@ -18,13 +20,13 @@ try:
 
     _PYSPARK_AVAILABLE = True
 except ImportError:
-    Broadcast = None  # type: ignore[assignment,misc]
-    pandas_udf = None  # type: ignore[assignment,misc]
-    ArrayType = None  # type: ignore[assignment,misc]
-    FloatType = None  # type: ignore[assignment,misc]
-    StringType = None  # type: ignore[assignment,misc]
-    StructField = None  # type: ignore[assignment,misc]
-    StructType = None  # type: ignore[assignment,misc]
+    Broadcast = None  # type: ignore[assignment]
+    pandas_udf = None  # type: ignore[assignment]
+    ArrayType = None  # type: ignore[assignment]
+    FloatType = None  # type: ignore[assignment]
+    StringType = None  # type: ignore[assignment]
+    StructField = None  # type: ignore[assignment]
+    StructType = None  # type: ignore[assignment]
     _PYSPARK_AVAILABLE = False
 
 # Constant for fitting sample size
@@ -300,49 +302,6 @@ def fit_single_distribution(
         return _failed_fit_result(dist_name, column_name, data_stats, lower_bound, upper_bound)
 
 
-class _TruncatedDist:
-    """Simple truncated distribution wrapper for fitting metrics.
-
-    Uses CDF inversion for proper truncated PDF and logpdf computation.
-    """
-
-    def __init__(self, frozen_dist, lb: float, ub: float):
-        self._dist = frozen_dist
-        self._lb = lb
-        self._ub = ub
-        # Normalization constant
-        self._cdf_lb = frozen_dist.cdf(lb) if np.isfinite(lb) else 0.0
-        self._cdf_ub = frozen_dist.cdf(ub) if np.isfinite(ub) else 1.0
-        self._norm = self._cdf_ub - self._cdf_lb
-
-    def pdf(self, x):
-        x = np.asarray(x)
-        result = np.zeros_like(x, dtype=float)
-        mask = (x >= self._lb) & (x <= self._ub)
-        if np.any(mask) and self._norm > 0:
-            result[mask] = self._dist.pdf(x[mask]) / self._norm
-        return result
-
-    def logpdf(self, x):
-        x = np.asarray(x)
-        result = np.full_like(x, -np.inf, dtype=float)
-        mask = (x >= self._lb) & (x <= self._ub)
-        if np.any(mask) and self._norm > 0:
-            result[mask] = self._dist.logpdf(x[mask]) - np.log(self._norm)
-        return result
-
-    def cdf(self, x):
-        x = np.asarray(x)
-        result = np.zeros_like(x, dtype=float)
-        below = x < self._lb
-        above = x > self._ub
-        between = ~below & ~above
-        result[above] = 1.0
-        if np.any(between) and self._norm > 0:
-            result[between] = (self._dist.cdf(x[between]) - self._cdf_lb) / self._norm
-        return result
-
-
 def _create_truncated_dist(frozen_dist, lb: float, ub: float):
     """Create a truncated distribution wrapper.
 
@@ -353,8 +312,12 @@ def _create_truncated_dist(frozen_dist, lb: float, ub: float):
 
     Returns:
         Truncated distribution wrapper with pdf, logpdf, cdf methods
+
+    Note:
+        Uses raise_on_empty=False so fitting continues silently when
+        truncation bounds contain no probability mass.
     """
-    return _TruncatedDist(frozen_dist, lb, ub)
+    return TruncatedFrozenDist(frozen_dist, lb, ub, raise_on_empty=False)
 
 
 def _failed_fit_result(
