@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-ray benchmark-all benchmark-charts validate-notebooks mutate mutate-browse mutate-results mutate-html mutate-clean
+.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-ray benchmark-all benchmark-charts validate-notebooks mutate mutate-fast mutate-module mutate-dry mutate-summary mutate-survivors mutate-clean
 
 .DEFAULT_GOAL := help
 
@@ -78,29 +78,32 @@ validate-notebooks: ## Run all example notebooks to validate they execute withou
 # Mutation Testing (requires: pip install mutmut)
 # See: https://mutmut.readthedocs.io/
 # Note: Uses LocalBackend tests only (mutmut 3 trampoline incompatible with PySpark workers)
-# Configuration in pyproject.toml [tool.mutmut]
+# Recommended: use mutate-fast for per-module testing (~6x faster)
 
-mutate: ## Run mutation testing (uses pyproject.toml config) - SLOW: ~37 hours
-	@echo "Running mutation tests (this may take a while)..."
-	@echo "Using LocalBackend tests only (Spark tests excluded)"
-	@echo "See pyproject.toml [tool.mutmut] for configuration"
+mutate: ## Run mutation testing - SLOW (~37 hours), prefer mutate-fast
+	@echo "WARNING: This runs all tests per mutation (~37 hours)"
+	@echo "Consider using 'make mutate-fast' instead (~6 hours)"
+	@echo ""
 	rm -f .mutmut-cache
 	PYTHONPATH=src mutmut run
 
-mutate-fast: ## Run mutation testing per-module (6x faster) - ~6 hours
-	@echo "Running per-module mutation tests (~6 hours total)..."
-	@echo "Each module runs only tests that import it"
+mutate-fast: ## Run per-module mutation testing (~6 hours)
+	@echo "Running per-module mutation tests..."
+	@echo "Results saved to .mutmut-results/"
 	python scripts/mutmut_parallel.py --all
 
-mutate-fast-dry: ## Show what mutate-fast would run
+mutate-module: ## Run mutation testing for one module (e.g., make mutate-module MODULE=config)
+	python scripts/mutmut_parallel.py --modules $(MODULE)
+
+mutate-dry: ## Preview what mutate-fast would run
 	python scripts/mutmut_parallel.py --all --dry-run
 
-mutate-browse: ## Interactive browser for mutation results
-	PYTHONPATH=src mutmut browse
+mutate-summary: ## Show mutation testing results summary
+	python scripts/mutmut_parallel.py --summary
 
-mutate-results: ## Show mutation testing results summary (excludes segfaults - those are killed)
-	@PYTHONPATH=src mutmut results | grep -v "segfault" || true
+mutate-survivors: ## Show survived mutants for a module (e.g., make mutate-survivors MODULE=fitting)
+	python scripts/mutmut_parallel.py --show-survivors $(MODULE)
 
-mutate-clean: ## Clean mutation testing cache and mutants
-	rm -rf .mutmut-cache html/ mutants/
-	@echo "Mutation cache cleaned"
+mutate-clean: ## Clean mutation testing cache and results
+	rm -rf .mutmut-cache .mutmut-results/ html/ mutants/
+	@echo "Mutation cache and results cleaned"

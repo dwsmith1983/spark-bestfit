@@ -53,6 +53,7 @@ cover/
 # Mutation testing (mutmut)
 .mutmut-cache
 .mutmut-cache-*
+.mutmut-results/
 mutants/
 html/
 
