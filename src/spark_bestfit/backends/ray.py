@@ -196,6 +196,7 @@ class RayBackend:
         lazy_metrics: bool = False,
         is_discrete: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        custom_distributions: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Ray tasks.
 
@@ -218,6 +219,10 @@ class RayBackend:
             is_discrete: If True, use discrete distribution fitting
             progress_callback: Optional callback for progress updates.
                 Called with (completed, total, percent) after each distribution.
+            custom_distributions: Dict mapping custom distribution names to
+                rv_continuous objects. (v2.4.0) Note: Currently not supported
+                for RayBackend - use SparkBackend or LocalBackend for custom
+                distributions.
 
         Returns:
             List of fit result dicts (only successful fits, SSE < inf)

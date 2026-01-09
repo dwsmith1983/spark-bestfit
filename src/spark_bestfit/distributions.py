@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import scipy.stats as st
+from scipy.stats import rv_continuous
 
 
 class DistributionRegistry:
@@ -84,11 +85,13 @@ class DistributionRegistry:
                              (replaces default exclusions if provided)
         """
         self._excluded = custom_exclusions if custom_exclusions is not None else self.DEFAULT_EXCLUSIONS.copy()
+        self._custom_distributions: Dict[str, rv_continuous] = {}
 
     def get_distributions(
         self,
         support_at_zero: bool = False,
         additional_exclusions: Optional[List[str]] = None,
+        include_custom: bool = True,
     ) -> List[str]:
         """Get filtered list of distributions based on criteria.
 
@@ -96,6 +99,7 @@ class DistributionRegistry:
             support_at_zero: If True, only include distributions with support at zero
                            (non-negative distributions)
             additional_exclusions: Additional distribution names to exclude
+            include_custom: If True, include registered custom distributions (default True)
 
         Returns:
             List of distribution names meeting the criteria
@@ -112,6 +116,10 @@ class DistributionRegistry:
             >>> filtered = registry.get_distributions(
             ...     additional_exclusions=["norm", "expon"]
             ... )
+
+            >>> # Register and include custom distributions
+            >>> registry.register_distribution("my_custom", MyCustomDistribution())
+            >>> dists = registry.get_distributions()  # Includes "my_custom"
         """
         # Start with excluded set
         excluded = self._excluded.copy()
@@ -123,24 +131,33 @@ class DistributionRegistry:
         # Filter out excluded distributions
         distributions = [d for d in self.ALL_DISTRIBUTIONS if d not in excluded]
 
+        # Add custom distributions (exclude if in exclusion list)
+        if include_custom:
+            for name in self._custom_distributions:
+                if name not in excluded:
+                    distributions.append(name)
+
         # Filter by support if requested
         if support_at_zero:
             distributions = [d for d in distributions if self._has_support_at_zero(d)]
 
         return distributions
 
-    @staticmethod
-    def _has_support_at_zero(dist_name: str) -> bool:
+    def _has_support_at_zero(self, dist_name: str) -> bool:
         """Check if a distribution has support at zero (non-negative).
 
         Args:
-            dist_name: Name of the scipy distribution
+            dist_name: Name of the scipy distribution or custom distribution
 
         Returns:
             True if distribution support starts at 0 or greater
         """
         try:
-            dist = getattr(st, dist_name)
+            # Check custom distributions first
+            if dist_name in self._custom_distributions:
+                dist = self._custom_distributions[dist_name]
+            else:
+                dist = getattr(st, dist_name)
             return dist.a >= 0
         except (AttributeError, TypeError):
             # If we can't determine, exclude it to be safe
@@ -173,6 +190,140 @@ class DistributionRegistry:
     def reset_exclusions(self) -> None:
         """Reset exclusions to default set."""
         self._excluded = self.DEFAULT_EXCLUSIONS.copy()
+
+    # =========================================================================
+    # Custom Distribution Support (v2.4.0)
+    # =========================================================================
+
+    def register_distribution(
+        self,
+        name: str,
+        distribution: rv_continuous,
+        overwrite: bool = False,
+    ) -> None:
+        """Register a custom distribution for fitting.
+
+        Custom distributions must implement the scipy rv_continuous interface,
+        specifically the fit(), pdf(), and cdf() methods. The distribution
+        will be included in fitting alongside scipy.stats distributions.
+
+        Args:
+            name: Unique name for the distribution (used in results)
+            distribution: scipy rv_continuous instance or subclass.
+                Must implement fit(), pdf(), cdf() methods.
+            overwrite: If True, overwrite existing distribution with same name.
+                Default False raises ValueError if name exists.
+
+        Raises:
+            ValueError: If name already exists (and overwrite=False) or
+                conflicts with a scipy.stats distribution name
+            TypeError: If distribution doesn't implement required interface
+
+        Example:
+            >>> from scipy.stats import rv_continuous
+            >>>
+            >>> class PowerDistribution(rv_continuous):
+            ...     def _pdf(self, x, alpha):
+            ...         return alpha * x ** (alpha - 1)
+            ...     def _cdf(self, x, alpha):
+            ...         return x ** alpha
+            >>>
+            >>> registry = DistributionRegistry()
+            >>> registry.register_distribution("power", PowerDistribution(a=0, b=1))
+            >>> distributions = registry.get_distributions()
+            >>> "power" in distributions
+            True
+        """
+        # Validate name doesn't conflict with scipy.stats
+        if name in self.ALL_DISTRIBUTIONS:
+            raise ValueError(
+                f"Cannot register '{name}': conflicts with scipy.stats distribution. " f"Use a different name."
+            )
+
+        # Check for existing registration
+        if not overwrite and name in self._custom_distributions:
+            raise ValueError(f"Distribution '{name}' already registered. " f"Use overwrite=True to replace it.")
+
+        # Validate distribution interface
+        required_methods = ["fit", "pdf", "cdf"]
+        missing = [m for m in required_methods if not hasattr(distribution, m)]
+        if missing:
+            raise TypeError(f"Distribution must implement {required_methods}. " f"Missing: {missing}")
+
+        # Validate it's an rv_continuous-like object
+        if not isinstance(distribution, rv_continuous):
+            raise TypeError(
+                f"Distribution must be a scipy rv_continuous subclass. " f"Got: {type(distribution).__name__}"
+            )
+
+        self._custom_distributions[name] = distribution
+
+    def unregister_distribution(self, name: str) -> None:
+        """Remove a custom distribution from the registry.
+
+        Args:
+            name: Name of the custom distribution to remove
+
+        Raises:
+            KeyError: If distribution not found in registry
+        """
+        if name not in self._custom_distributions:
+            raise KeyError(f"Custom distribution '{name}' not found in registry")
+        del self._custom_distributions[name]
+
+    def get_distribution_object(self, name: str) -> rv_continuous:
+        """Get a distribution object by name.
+
+        Looks up both scipy.stats built-in distributions and registered
+        custom distributions.
+
+        Args:
+            name: Distribution name (scipy.stats name or custom registered name)
+
+        Returns:
+            scipy rv_continuous distribution object
+
+        Raises:
+            ValueError: If distribution not found
+
+        Example:
+            >>> registry = DistributionRegistry()
+            >>> norm_dist = registry.get_distribution_object("norm")
+            >>> # Also works for custom distributions
+            >>> registry.register_distribution("custom", MyDist())
+            >>> my_dist = registry.get_distribution_object("custom")
+        """
+        # Check custom distributions first (allows overriding built-ins conceptually)
+        if name in self._custom_distributions:
+            return self._custom_distributions[name]
+
+        # Check scipy.stats
+        if hasattr(st, name) and isinstance(getattr(st, name), rv_continuous):
+            return getattr(st, name)
+
+        raise ValueError(
+            f"Distribution '{name}' not found. " f"Not a scipy.stats distribution or registered custom distribution."
+        )
+
+    def get_custom_distributions(self) -> Dict[str, rv_continuous]:
+        """Get a copy of all registered custom distributions.
+
+        Returns:
+            Dict mapping distribution names to rv_continuous objects
+
+        Note:
+            Returns a shallow copy - modifying the dict won't affect the registry,
+            but modifying distribution objects will.
+        """
+        return self._custom_distributions.copy()
+
+    def has_custom_distributions(self) -> bool:
+        """Check if any custom distributions are registered.
+
+        Returns:
+            True if at least one custom distribution is registered
+        """
+        return len(self._custom_distributions) > 0
 
 
 class DiscreteDistributionRegistry:
