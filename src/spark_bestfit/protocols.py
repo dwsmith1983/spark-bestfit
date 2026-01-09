@@ -76,6 +76,7 @@ class ExecutionBackend(Protocol):
         lazy_metrics: bool = False,
         is_discrete: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        custom_distributions: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel.
 
@@ -102,6 +103,8 @@ class ExecutionBackend(Protocol):
                 Called with (completed, total, percent) after each distribution
                 completes fitting. Callback is invoked from worker thread for
                 LocalBackend/RayBackend, or via StatusTracker for SparkBackend.
+            custom_distributions: Optional dict mapping custom distribution names
+                to rv_continuous objects. Passed to workers for fitting. (v2.4.0)
 
         Returns:
             List of fit result dicts. Each dict contains:

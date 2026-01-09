@@ -177,6 +177,7 @@ def create_fitting_udf(
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
+    custom_distributions_broadcast: Optional[Broadcast[Dict[str, rv_continuous]]] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -194,6 +195,9 @@ def create_fitting_udf(
         lazy_metrics: If True, skip expensive KS/AD computation during fitting.
             These metrics will be computed on-demand when accessed via
             FitResults.best() or DistributionFitResult properties. (v1.5.0)
+        custom_distributions_broadcast: Broadcast variable containing dict of
+            custom distributions. If provided, distribution names are looked up
+            here first before falling back to scipy.stats. (v2.4.0)
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -224,6 +228,7 @@ def create_fitting_udf(
         # Get broadcasted data (no serialization overhead!)
         y_hist, bin_edges = histogram_broadcast.value
         data_sample = data_sample_broadcast.value
+        custom_distributions = custom_distributions_broadcast.value if custom_distributions_broadcast else None
 
         # Fit each distribution in the batch
         results = []
@@ -239,6 +244,7 @@ def create_fitting_udf(
                     lower_bound=lower_bound,
                     upper_bound=upper_bound,
                     lazy_metrics=lazy_metrics,
+                    custom_distributions=custom_distributions,
                 )
             except Exception:
                 # Safety net: catch any unexpected exceptions to prevent job failure
@@ -265,6 +271,7 @@ def fit_single_distribution(
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
+    custom_distributions: Optional[Dict[str, rv_continuous]] = None,
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -278,7 +285,7 @@ def fit_single_distribution(
     distributions like Weibull, Pareto, Chi-squared).
 
     Args:
-        dist_name: Name of scipy.stats distribution
+        dist_name: Name of scipy.stats distribution or custom distribution
         data_sample: Sample of raw data for parameter fitting
         bin_edges: Histogram bin edge values (len = n_bins + 1)
         y_hist: Histogram density values
@@ -288,6 +295,9 @@ def fit_single_distribution(
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0)
         lazy_metrics: If True, skip expensive KS/AD computation. These metrics
             will be None in the result and computed on-demand later. (v1.5.0)
+        custom_distributions: Dict mapping custom distribution names to
+            rv_continuous objects. If provided, dist_name is looked up here
+            first, falling back to scipy.stats if not found. (v2.4.0)
 
     Returns:
         Dictionary with fit result fields including data_min, data_max, etc.
@@ -296,8 +306,11 @@ def fit_single_distribution(
         with warnings.catch_warnings(record=True) as caught_warnings:
             warnings.simplefilter("always")
 
-            # Get distribution object
-            dist = getattr(st, dist_name)
+            # Get distribution object - check custom distributions first
+            if custom_distributions and dist_name in custom_distributions:
+                dist = custom_distributions[dist_name]
+            else:
+                dist = getattr(st, dist_name)
 
             # Fit distribution to data sample (always fit unbounded first)
             params = dist.fit(data_sample)
@@ -925,6 +938,7 @@ def compute_ks_ad_metrics(
     data_sample: np.ndarray,
     lower_bound: Optional[float] = None,
     upper_bound: Optional[float] = None,
+    custom_distributions: Optional[Dict[str, rv_continuous]] = None,
 ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
     """Compute KS and AD metrics for a fitted distribution.
 
@@ -932,19 +946,24 @@ def compute_ks_ad_metrics(
     It recreates the frozen distribution and computes all KS/AD metrics.
 
     Args:
-        dist_name: Name of scipy.stats distribution
+        dist_name: Name of scipy.stats distribution or custom distribution
         params: Fitted distribution parameters
         data_sample: Data sample for metric computation
         lower_bound: Optional lower bound for truncated distributions
         upper_bound: Optional upper bound for truncated distributions
+        custom_distributions: Dict mapping custom distribution names to
+            rv_continuous objects. Used for lazy metrics on custom dists. (v2.4.0)
 
     Returns:
         Tuple of (ks_statistic, pvalue, ad_statistic, ad_pvalue)
         Returns (None, None, None, None) if computation fails
     """
     try:
-        # Get distribution object and create frozen distribution
-        dist = getattr(st, dist_name)
+        # Get distribution object - check custom distributions first
+        if custom_distributions and dist_name in custom_distributions:
+            dist = custom_distributions[dist_name]
+        else:
+            dist = getattr(st, dist_name)
         frozen_dist = dist(*params)
 
         # Apply truncation if bounds are set

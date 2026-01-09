@@ -86,6 +86,7 @@ class LocalBackend:
         lazy_metrics: bool = False,
         is_discrete: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        custom_distributions: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using threads.
 
@@ -109,6 +110,8 @@ class LocalBackend:
             is_discrete: If True, use discrete distribution fitting
             progress_callback: Optional callback for progress updates.
                 Called with (completed, total, percent) after each distribution.
+            custom_distributions: Dict mapping custom distribution names to
+                rv_continuous objects. (v2.4.0)
 
         Returns:
             List of fit result dicts (only successful fits, SSE < inf)
@@ -163,6 +166,7 @@ class LocalBackend:
                     lower_bound=lower_bound,
                     upper_bound=upper_bound,
                     lazy_metrics=lazy_metrics,
+                    custom_distributions=custom_distributions,
                 )
 
         # Execute in parallel using ThreadPoolExecutor

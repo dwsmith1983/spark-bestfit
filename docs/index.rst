@@ -31,7 +31,6 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
 **Known limitations:**
 
 - No real-time/streaming support (batch processing only)
-- User-defined distributions planned for v2.2.0
 - Parameters and metrics use 32-bit floats (~7 significant digits) for Spark serialization
   efficiency. Very small values (e.g., p-values < 1e-7) may lose precision.
 
@@ -48,6 +47,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    :caption: Features
 
    features/config
+   features/custom-distributions
    features/bounded
    features/sampling
    features/serialization

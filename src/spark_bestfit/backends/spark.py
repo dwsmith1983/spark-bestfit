@@ -87,6 +87,7 @@ class SparkBackend:
         lazy_metrics: bool = False,
         is_discrete: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        custom_distributions: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Pandas UDFs.
 
@@ -113,6 +114,9 @@ class SparkBackend:
             progress_callback: Optional callback for progress updates.
                 Called with (completed_tasks, total_tasks, percent) at the
                 Spark task level via StatusTracker polling.
+            custom_distributions: Dict mapping custom distribution names to
+                rv_continuous objects. These are broadcasted to executors
+                for fitting custom distributions. (v2.4.0)
 
         Returns:
             List of fit result dicts
@@ -132,6 +136,7 @@ class SparkBackend:
         # Broadcast data to executors
         histogram_bc = self.broadcast(histogram)
         data_sample_bc = self.broadcast(data_sample)
+        custom_dist_bc = self.broadcast(custom_distributions) if custom_distributions else None
 
         try:
             # Create DataFrame of distributions
@@ -168,6 +173,7 @@ class SparkBackend:
                     lower_bound=lower_bound,
                     upper_bound=upper_bound,
                     lazy_metrics=lazy_metrics,
+                    custom_distributions_broadcast=custom_dist_bc,
                 )
 
             # Apply UDF and expand struct
@@ -187,6 +193,8 @@ class SparkBackend:
             # Always clean up broadcast variables
             self.destroy_broadcast(histogram_bc)
             self.destroy_broadcast(data_sample_bc)
+            if custom_dist_bc is not None:
+                self.destroy_broadcast(custom_dist_bc)
 
     def get_parallelism(self) -> int:
         """Get the default parallelism from Spark configuration.

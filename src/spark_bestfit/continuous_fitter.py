@@ -30,6 +30,8 @@ from spark_bestfit.histogram import HistogramComputer
 from spark_bestfit.results import DistributionFitResult, FitResults, FitResultsType, LazyMetricsContext
 
 if TYPE_CHECKING:
+    from scipy.stats import rv_continuous
+
     from spark_bestfit.protocols import ExecutionBackend
 
 logger = logging.getLogger(__name__)
@@ -101,6 +103,73 @@ class DistributionFitter(BaseFitter):
             backend=backend,
         )
         self._histogram_computer = HistogramComputer(backend=self._backend)
+
+    def register_distribution(
+        self,
+        name: str,
+        distribution: "rv_continuous",
+        overwrite: bool = False,
+    ) -> "DistributionFitter":
+        """Register a custom distribution for fitting.
+
+        Custom distributions must implement the scipy rv_continuous interface,
+        specifically the fit(), pdf(), and cdf() methods. The distribution
+        will be included in fitting alongside scipy.stats distributions.
+
+        Args:
+            name: Unique name for the distribution (used in results)
+            distribution: scipy rv_continuous instance or subclass.
+                Must implement fit(), pdf(), cdf() methods.
+            overwrite: If True, overwrite existing distribution with same name.
+                Default False raises ValueError if name exists.
+
+        Returns:
+            Self (for method chaining)
+
+        Raises:
+            ValueError: If name already exists (and overwrite=False) or
+                conflicts with a scipy.stats distribution name
+            TypeError: If distribution doesn't implement required interface
+
+        Example:
+            >>> from scipy.stats import rv_continuous
+            >>>
+            >>> class PowerDistribution(rv_continuous):
+            ...     def _pdf(self, x, alpha):
+            ...         return alpha * x ** (alpha - 1)
+            ...     def _cdf(self, x, alpha):
+            ...         return x ** alpha
+            >>>
+            >>> fitter = DistributionFitter(spark)
+            >>> fitter.register_distribution("power", PowerDistribution(a=0, b=1))
+            >>> results = fitter.fit(df, "column")
+            >>> # Results will include "power" if it fits well
+        """
+        self._registry.register_distribution(name, distribution, overwrite=overwrite)
+        return self
+
+    def unregister_distribution(self, name: str) -> "DistributionFitter":
+        """Remove a custom distribution from the registry.
+
+        Args:
+            name: Name of the custom distribution to remove
+
+        Returns:
+            Self (for method chaining)
+
+        Raises:
+            KeyError: If distribution not found in registry
+        """
+        self._registry.unregister_distribution(name)
+        return self
+
+    def get_custom_distributions(self) -> dict:
+        """Get all registered custom distributions.
+
+        Returns:
+            Dict mapping distribution names to rv_continuous objects
+        """
+        return self._registry.get_custom_distributions()
 
     def fit(
         self,
@@ -449,6 +518,8 @@ class DistributionFitter(BaseFitter):
 
         # Execute parallel fitting via backend (v2.0 abstraction)
         # Backend handles: broadcast, partitioning, UDF application, collection
+        # Pass custom distributions if any are registered (v2.4.0)
+        custom_dists = self._registry.get_custom_distributions() if self._registry.has_custom_distributions() else None
         results = self._backend.parallel_fit(
             distributions=distributions,
             histogram=(y_hist, bin_edges),
@@ -462,6 +533,7 @@ class DistributionFitter(BaseFitter):
             lazy_metrics=lazy_metrics,
             is_discrete=False,
             progress_callback=progress_callback,
+            custom_distributions=custom_dists,
         )
 
         # Convert results to DataFrame
