@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v2.4.0 (2026-01-09)
+
+### Features
+
+- Add custom distribution support (#15)
+  ([#102](https://github.com/dwsmith1983/spark-bestfit/pull/102),
+  [`9cee327`](https://github.com/dwsmith1983/spark-bestfit/commit/9cee327a5c1827aa81a639c36364df202eb1bfaa))
+
+
 ## v2.3.0 (2026-01-08)
 
 ### Bug Fixes
