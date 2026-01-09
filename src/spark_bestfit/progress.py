@@ -143,7 +143,15 @@ class ProgressTracker:
         logger.debug(f"Stopped progress tracking for job group: {self.job_group}")
 
     def _poll_loop(self) -> None:
-        """Background thread that polls StatusTracker for progress."""
+        """Background thread that polls StatusTracker for progress.
+
+        Runs in a daemon thread, polling at `poll_interval` seconds until
+        `stop()` is called. Catches exceptions to prevent thread crashes
+        when jobs complete or SparkContext is stopped.
+
+        Returns:
+            None: Runs until stop event is set.
+        """
         sc = self.spark.sparkContext
         status_tracker = sc.statusTracker()
 
@@ -157,7 +165,18 @@ class ProgressTracker:
             self._stop_event.wait(timeout=self.poll_interval)
 
     def _update_progress(self, status_tracker) -> None:
-        """Poll StatusTracker and invoke callback if progress changed."""
+        """Poll StatusTracker and invoke callback if progress changed.
+
+        Queries the StatusTracker for all jobs in this tracker's job group,
+        sums up completed/total tasks across all stages, and invokes the
+        callback if progress has changed since the last poll.
+
+        Args:
+            status_tracker: Spark's StatusTracker from SparkContext.
+
+        Returns:
+            None: Updates internal state and invokes callback as side effect.
+        """
         # Get jobs for our job group
         job_ids = status_tracker.getJobIdsForGroup(self.job_group)
 
