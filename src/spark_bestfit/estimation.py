@@ -17,6 +17,7 @@ from scipy.optimize import minimize
 from scipy.stats import rv_continuous
 
 from spark_bestfit.metrics import (
+    NUMERICAL_EPSILON,
     compute_ad_pvalue,
     compute_ad_statistic_frozen,
     compute_information_criteria_frozen,
@@ -243,8 +244,7 @@ def fit_mse(
             cdf_vals = dist.cdf(sorted_data, *shape, loc=loc, scale=scale)
 
             # Clamp to (epsilon, 1-epsilon) to avoid log(0)
-            epsilon = 1e-10
-            cdf_vals = np.clip(cdf_vals, epsilon, 1 - epsilon)
+            cdf_vals = np.clip(cdf_vals, NUMERICAL_EPSILON, 1 - NUMERICAL_EPSILON)
 
             # Add boundary values: F(x_(0)) = 0, F(x_(n+1)) = 1
             u = np.concatenate([[0.0], cdf_vals, [1.0]])
@@ -253,7 +253,7 @@ def fit_mse(
             spacings = np.diff(u)
 
             # Ensure no zero or negative spacings
-            spacings = np.maximum(spacings, epsilon)
+            spacings = np.maximum(spacings, NUMERICAL_EPSILON)
 
             # MSE objective: minimize negative mean log spacing
             # (equivalent to maximizing geometric mean of spacings)
@@ -291,7 +291,7 @@ def fit_mse(
         # Try with L-BFGS-B as fallback (handles bounds better)
         n_params = len(initial_params)
         # Set bounds: shape params unbounded, loc unbounded, scale > 0
-        bounds = [(None, None)] * (n_params - 1) + [(1e-10, None)]
+        bounds = [(None, None)] * (n_params - 1) + [(NUMERICAL_EPSILON, None)]
         result = minimize(
             mse_objective,
             initial_params,
