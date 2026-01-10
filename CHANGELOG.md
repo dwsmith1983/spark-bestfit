@@ -570,10 +570,6 @@
 
 ### Features
 
-- Add P-P plots for goodness-of-fit assessment
-  ([#23](https://github.com/dwsmith1983/spark-bestfit/pull/23),
-  [`6df35a6`](https://github.com/dwsmith1983/spark-bestfit/commit/6df35a65d20c52d9179efccb509852fdad1cc4ff))
-
 - Add P-P plots for goodness-of-fit assessment (#9)
   ([#23](https://github.com/dwsmith1983/spark-bestfit/pull/23),
   [`6df35a6`](https://github.com/dwsmith1983/spark-bestfit/commit/6df35a65d20c52d9179efccb509852fdad1cc4ff))
