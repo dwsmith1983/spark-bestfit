@@ -91,7 +91,7 @@ def spark_backend_fixture():
     )
     backend = SparkBackend(spark)
     yield backend
-    spark.stop()
+    # Don't stop session - let conftest.py session-scoped fixture handle cleanup
 
 
 @pytest.fixture(scope="module")
