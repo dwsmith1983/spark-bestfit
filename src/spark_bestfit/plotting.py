@@ -1,5 +1,6 @@
 """Visualization utilities for fitted distributions."""
 
+import warnings
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
@@ -29,6 +30,77 @@ def _check_matplotlib() -> None:
             "  pip install spark-bestfit[plotting]\n\n"
             "Alternatively, use result.pdf(), result.cdf(), result.sample() "
             "to get data for your own plots with any visualization library."
+        )
+
+
+def _get_scipy_distribution(dist_name: str):
+    """Safely get scipy distribution by name.
+
+    Args:
+        dist_name: Name of the scipy.stats distribution
+
+    Returns:
+        The scipy distribution class
+
+    Raises:
+        ValueError: If distribution name is not found in scipy.stats
+    """
+    try:
+        return getattr(st, dist_name)
+    except AttributeError:
+        raise ValueError(
+            f"Unknown distribution '{dist_name}'. "
+            f"Must be a valid scipy.stats distribution name."
+        )
+
+
+def _format_distribution_params(
+    result: "DistributionFitResult",
+    precision: int = 4,
+) -> Tuple[str, str]:
+    """Format distribution name and parameters for display.
+
+    Args:
+        result: Fitted distribution result
+        precision: Number of decimal places for parameter values
+
+    Returns:
+        Tuple of (distribution_title, param_string)
+        e.g., ("norm(loc=50.0000, scale=10.0000)", "loc=50.0000, scale=10.0000")
+    """
+    param_names = result.get_param_names()
+    param_str = ", ".join(
+        [f"{k}={v:.{precision}f}" for k, v in zip(param_names, result.parameters)]
+    )
+    dist_title = f"{result.distribution}({param_str})"
+    return dist_title, param_str
+
+
+def _validate_histogram_inputs(
+    y_hist: np.ndarray,
+    x_hist: np.ndarray,
+    func_name: str = "plot",
+) -> None:
+    """Validate histogram input arrays.
+
+    Args:
+        y_hist: Histogram density values
+        x_hist: Histogram bin centers
+        func_name: Name of calling function for error messages
+
+    Raises:
+        ValueError: If inputs are invalid
+    """
+    if y_hist is None or x_hist is None:
+        raise ValueError(f"{func_name} requires both y_hist and x_hist arrays")
+
+    if len(y_hist) == 0 or len(x_hist) == 0:
+        raise ValueError(f"{func_name} requires non-empty histogram arrays")
+
+    if len(y_hist) != len(x_hist):
+        raise ValueError(
+            f"{func_name} requires y_hist and x_hist to have same length, "
+            f"got {len(y_hist)} and {len(x_hist)}"
         )
 
 
@@ -87,9 +159,10 @@ def plot_distribution(
         >>> fitter.plot(best, df, 'value', title='Best Fit')
     """
     _check_matplotlib()
+    _validate_histogram_inputs(y_hist, x_hist, "plot_distribution")
 
     # Get scipy distribution and parameters
-    dist = getattr(st, result.distribution)
+    dist = _get_scipy_distribution(result.distribution)
     params = result.parameters
 
     # Extract shape, loc, scale using utility function
@@ -131,10 +204,7 @@ def plot_distribution(
         )
 
     # Format parameter string
-    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
-    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, params)])
-
-    dist_title = f"{result.distribution}({param_str})"
+    dist_title, _ = _format_distribution_params(result)
     sse_str = f"SSE: {result.sse:.6f}"
 
     if result.aic is not None and result.bic is not None:
@@ -161,7 +231,7 @@ def plot_distribution(
     # Save if path provided
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -214,6 +284,7 @@ def plot_comparison(
         >>> fitter.plot_comparison(top_3, df, 'value')
     """
     _check_matplotlib()
+    _validate_histogram_inputs(y_hist, x_hist, "plot_comparison")
 
     if not results:
         raise ValueError("Must provide at least one result to plot")
@@ -241,7 +312,7 @@ def plot_comparison(
 
     # Plot each distribution
     for i, result in enumerate(results):
-        dist = getattr(st, result.distribution)
+        dist = _get_scipy_distribution(result.distribution)
         params = result.parameters
 
         # Extract parameters and compute range using utility functions
@@ -273,7 +344,7 @@ def plot_comparison(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -388,10 +459,7 @@ def plot_qq(
     ax.set_aspect("equal", adjustable="box")
 
     # Format title with distribution info
-    dist = getattr(st, result.distribution)
-    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
-    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
-    dist_title = f"{result.distribution}({param_str})"
+    dist_title, _ = _format_distribution_params(result)
 
     # Add K-S statistic if available
     if result.ks_statistic is not None:
@@ -415,7 +483,7 @@ def plot_qq(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -520,13 +588,9 @@ def plot_pp(
     ax.set_aspect("equal", adjustable="box")
 
     # 8. Title and labels
-    dist = getattr(st, result.distribution)
-    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
-    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
-    dist_title = f"{result.distribution}({param_str})"
+    dist_title, _ = _format_distribution_params(result)
 
     # Add K-S or SSE metric
-    # Add K-S statistic if available
     if result.ks_statistic is not None:
         metrics_str = f"KS={result.ks_statistic:.6f}"
         if result.pvalue is not None:
@@ -548,7 +612,7 @@ def plot_pp(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -681,7 +745,7 @@ def plot_discrete_distribution(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -772,6 +836,7 @@ def plot_residual_histogram(
         >>> plot_residual_histogram(best, y_hist, x_hist)
     """
     _check_matplotlib()
+    _validate_histogram_inputs(y_hist, x_hist, "plot_residual_histogram")
 
     # Compute theoretical density at bin centers
     theoretical_density = result.pdf(x_hist)
@@ -806,10 +871,7 @@ def plot_residual_histogram(
         )
 
     # Format title with distribution info and residual statistics
-    dist = getattr(st, result.distribution)
-    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
-    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
-    dist_title = f"{result.distribution}({param_str})"
+    dist_title, _ = _format_distribution_params(result)
 
     # Compute residual statistics
     mean_resid = np.mean(residuals)
@@ -830,7 +892,7 @@ def plot_residual_histogram(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -895,6 +957,10 @@ def plot_cdf_comparison(
     """
     _check_matplotlib()
 
+    # Validate data array
+    if data is None or len(data) == 0:
+        raise ValueError("plot_cdf_comparison requires non-empty data array")
+
     # Sort data for empirical CDF
     sorted_data = np.sort(data)
     n = len(sorted_data)
@@ -933,10 +999,7 @@ def plot_cdf_comparison(
     )
 
     # Format title with distribution info
-    dist = getattr(st, result.distribution)
-    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
-    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
-    dist_title = f"{result.distribution}({param_str})"
+    dist_title, _ = _format_distribution_params(result)
 
     # Add K-S statistic if available
     if result.ks_statistic is not None:
@@ -963,7 +1026,7 @@ def plot_cdf_comparison(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
 
@@ -1022,6 +1085,10 @@ def plot_diagnostics(
     """
     _check_matplotlib()
 
+    # Validate data array
+    if data is None or len(data) == 0:
+        raise ValueError("plot_diagnostics requires non-empty data array")
+
     # Compute histogram if not provided
     if y_hist is None or x_hist is None:
         y_hist_computed, x_edges = np.histogram(data, bins=bins, density=True)
@@ -1033,10 +1100,7 @@ def plot_diagnostics(
     fig, axes = plt.subplots(2, 2, figsize=figsize)
 
     # Format distribution info for subplot titles
-    dist = getattr(st, result.distribution)
-    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
-    param_str = ", ".join([f"{k}={v:.2f}" for k, v in zip(param_names, result.parameters)])
-    dist_info = f"{result.distribution}({param_str})"
+    dist_info, _ = _format_distribution_params(result, precision=2)
 
     # Q-Q Plot (top-left)
     ax_qq = axes[0, 0]
@@ -1161,6 +1225,6 @@ def plot_diagnostics(
 
     if save_path:
         plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, axes
