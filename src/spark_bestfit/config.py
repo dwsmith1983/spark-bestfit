@@ -13,7 +13,23 @@ Example:
 """
 
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Callable, Dict, Optional, Tuple, Union
+
+
+class SamplingMode(Enum):
+    """Sampling strategy mode for large datasets.
+
+    Attributes:
+        AUTO: Automatically select strategy based on data skewness (default).
+            Uses uniform for symmetric data, stratified for skewed data.
+        UNIFORM: Force uniform random sampling (backwards compatible).
+        STRATIFIED: Force stratified sampling across percentile bins.
+    """
+
+    AUTO = "auto"
+    UNIFORM = "uniform"
+    STRATIFIED = "stratified"
 
 
 @dataclass(frozen=True)
@@ -33,6 +49,10 @@ class FitterConfig:
         sample_fraction: Fraction to sample (None = auto-determine).
         max_sample_size: Maximum rows when auto-determining sample size.
         sample_threshold: Row count above which sampling is applied.
+        adaptive_sampling: Use adaptive sampling based on data skewness (v2.9.0).
+        sampling_mode: Sampling strategy (AUTO, UNIFORM, or STRATIFIED).
+        skew_threshold_mild: Skewness threshold for mild stratification (default 0.5).
+        skew_threshold_high: Skewness threshold for aggressive stratification (default 2.0).
         bounded: Enable truncated distribution fitting.
         lower_bound: Lower bound for truncated fitting (scalar or per-column dict).
         upper_bound: Upper bound for truncated fitting (scalar or per-column dict).
@@ -60,6 +80,12 @@ class FitterConfig:
     sample_fraction: Optional[float] = None
     max_sample_size: int = 1_000_000
     sample_threshold: int = 10_000_000
+
+    # === Adaptive Sampling (v2.9.0) ===
+    adaptive_sampling: bool = True
+    sampling_mode: SamplingMode = SamplingMode.AUTO
+    skew_threshold_mild: float = 0.5
+    skew_threshold_high: float = 2.0
 
     # === Bounds ===
     bounded: bool = False
@@ -121,6 +147,12 @@ class FitterConfigBuilder:
         self._sample_fraction: Optional[float] = None
         self._max_sample_size: int = 1_000_000
         self._sample_threshold: int = 10_000_000
+
+        # Adaptive sampling
+        self._adaptive_sampling: bool = True
+        self._sampling_mode: SamplingMode = SamplingMode.AUTO
+        self._skew_threshold_mild: float = 0.5
+        self._skew_threshold_high: float = 2.0
 
         # Bounds
         self._bounded: bool = False
@@ -195,6 +227,40 @@ class FitterConfigBuilder:
         self._sample_fraction = fraction
         self._max_sample_size = max_size
         self._sample_threshold = threshold
+        return self
+
+    def with_adaptive_sampling(
+        self,
+        enabled: bool = True,
+        mode: SamplingMode = SamplingMode.AUTO,
+        skew_threshold_mild: float = 0.5,
+        skew_threshold_high: float = 2.0,
+    ) -> "FitterConfigBuilder":
+        """Configure adaptive sampling based on data skewness (v2.9.0).
+
+        When enabled, sampling strategy is selected based on data skewness:
+        - |skew| < mild_threshold: Uniform sampling (efficient for symmetric data)
+        - mild_threshold <= |skew| < high_threshold: Stratified (5 bins)
+        - |skew| >= high_threshold: Stratified (10 bins) with tail oversampling
+
+        Args:
+            enabled: Whether adaptive sampling is enabled.
+            mode: Sampling strategy (AUTO, UNIFORM, or STRATIFIED).
+            skew_threshold_mild: Skewness threshold for mild stratification.
+            skew_threshold_high: Skewness threshold for aggressive stratification.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> config = (FitterConfigBuilder()
+            ...     .with_adaptive_sampling(enabled=True, mode=SamplingMode.AUTO)
+            ...     .build())
+        """
+        self._adaptive_sampling = enabled
+        self._sampling_mode = mode
+        self._skew_threshold_mild = skew_threshold_mild
+        self._skew_threshold_high = skew_threshold_high
         return self
 
     def with_lazy_metrics(self, lazy: bool = True) -> "FitterConfigBuilder":
@@ -309,6 +375,10 @@ class FitterConfigBuilder:
             sample_fraction=self._sample_fraction,
             max_sample_size=self._max_sample_size,
             sample_threshold=self._sample_threshold,
+            adaptive_sampling=self._adaptive_sampling,
+            sampling_mode=self._sampling_mode,
+            skew_threshold_mild=self._skew_threshold_mild,
+            skew_threshold_high=self._skew_threshold_high,
             bounded=self._bounded,
             lower_bound=self._lower_bound,
             upper_bound=self._upper_bound,
