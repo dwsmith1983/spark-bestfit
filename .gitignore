@@ -159,3 +159,6 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# GT workflow
+.beads/
