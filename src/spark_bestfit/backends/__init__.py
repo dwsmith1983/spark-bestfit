@@ -35,7 +35,7 @@ __all__ = ["BackendFactory", "LocalBackend"]
 try:
     from spark_bestfit.backends.spark import SparkBackend  # noqa: F401
 
-    __all__.append("SparkBackend")
+    __all__ += ["SparkBackend"]
 except ImportError:
     pass  # PySpark not installed, SparkBackend not available
 
@@ -43,6 +43,6 @@ except ImportError:
 try:
     from spark_bestfit.backends.ray import RayBackend  # noqa: F401
 
-    __all__.append("RayBackend")
+    __all__ += ["RayBackend"]
 except ImportError:
     pass  # Ray not installed, RayBackend not available
