@@ -1111,7 +1111,9 @@ def plot_diagnostics(
         zorder=2,
     )
     ax_resid.axvline(x=0, color="red", linestyle="--", linewidth=1.5, label="Zero", zorder=3)
-    ax_resid.set_title(f"Residual Histogram\nMean={mean_resid:.4f}, Std={std_resid:.4f}", fontsize=subplot_title_fontsize)
+    ax_resid.set_title(
+        f"Residual Histogram\nMean={mean_resid:.4f}, Std={std_resid:.4f}", fontsize=subplot_title_fontsize
+    )
     ax_resid.set_xlabel("Residual (Observed - Expected)", fontsize=label_fontsize)
     ax_resid.set_ylabel("Frequency", fontsize=label_fontsize)
     ax_resid.legend(fontsize=8, loc="upper right")

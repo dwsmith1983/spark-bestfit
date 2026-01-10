@@ -56,6 +56,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    features/lazy-metrics
    features/prefiltering
    features/heavy-tail
+   features/mse-estimation
 
 .. toctree::
    :maxdepth: 2
