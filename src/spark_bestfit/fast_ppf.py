@@ -28,7 +28,6 @@ Example:
     >>> values = fast_ppf("pareto", (2.0, 0, 1), q)
 """
 
-from functools import lru_cache
 from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
@@ -232,33 +231,6 @@ def fast_ppf(
     return dist.ppf(q, *params)
 
 
-@lru_cache(maxsize=256)
-def _cached_truncation_bounds(
-    distribution: str,
-    params: Tuple,
-    lb: Optional[float],
-    ub: Optional[float],
-) -> Tuple[float, float]:
-    """Compute and cache CDF values at truncation bounds.
-
-    This cache significantly speeds up repeated calls with the same
-    distribution/parameters/bounds, which is common in copula sampling.
-
-    Args:
-        distribution: Name of the scipy.stats distribution
-        params: Distribution parameters (must be hashable tuple)
-        lb: Lower truncation bound
-        ub: Upper truncation bound
-
-    Returns:
-        Tuple of (cdf_lb, cdf_ub)
-    """
-    dist = getattr(st, distribution)
-    cdf_lb = dist.cdf(lb, *params) if lb is not None and np.isfinite(lb) else 0.0
-    cdf_ub = dist.cdf(ub, *params) if ub is not None and np.isfinite(ub) else 1.0
-    return cdf_lb, cdf_ub
-
-
 def _map_truncated_quantiles(
     distribution: str,
     params: Tuple,
@@ -272,10 +244,11 @@ def _map_truncated_quantiles(
     [CDF(lb), CDF(ub)] before applying PPF.
 
     q_mapped = CDF(lb) + q * (CDF(ub) - CDF(lb))
-
-    Uses LRU caching for CDF boundary computations to speed up repeated calls.
     """
-    cdf_lb, cdf_ub = _cached_truncation_bounds(distribution, params, lb, ub)
+    dist = getattr(st, distribution)
+
+    cdf_lb = dist.cdf(lb, *params) if lb is not None and np.isfinite(lb) else 0.0
+    cdf_ub = dist.cdf(ub, *params) if ub is not None and np.isfinite(ub) else 1.0
 
     norm = cdf_ub - cdf_lb
     if norm <= 0:
@@ -283,15 +256,6 @@ def _map_truncated_quantiles(
         return np.full_like(q, cdf_lb)
 
     return cdf_lb + q * norm
-
-
-def clear_ppf_cache() -> None:
-    """Clear the LRU cache for truncation bound computations.
-
-    Call this if you need to free memory or after changing distribution
-    definitions. Usually not needed unless using many unique parameter sets.
-    """
-    _cached_truncation_bounds.cache_clear()
 
 
 def fast_ppf_batch(
@@ -336,7 +300,6 @@ def fast_ppf_batch(
 
 
 __all__ = [
-    "clear_ppf_cache",
     "fast_ppf",
     "fast_ppf_batch",
     "has_fast_ppf",
