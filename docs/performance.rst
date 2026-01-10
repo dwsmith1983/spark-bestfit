@@ -298,6 +298,117 @@ To run benchmarks locally and generate updated charts:
 
 Benchmark results are saved to ``.benchmarks/`` and charts to ``docs/_static/``.
 
+Copula Sampling Performance (v2.8.0)
+------------------------------------
+
+The ``GaussianCopula.sample()`` method generates correlated multi-column samples
+efficiently. v2.8.0 introduces two key optimizations:
+
+1. **Cached Cholesky decomposition**: The Cholesky decomposition of the correlation
+   matrix is computed once during copula initialization, not on every ``sample()`` call.
+
+2. **scipy.special.ndtr**: Uses the optimized UFUNC for standard normal CDF
+   instead of ``scipy.stats.norm.cdf``.
+
+These optimizations provide ~1.3-1.5x speedup for the sampling pipeline.
+
+.. image:: _static/copula_v280_optimizations.png
+   :alt: v2.8.0 Copula optimizations: Cholesky caching and ndtr
+   :width: 100%
+
+Copula Sampling Benchmarks
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. image:: _static/copula_sampling_performance.png
+   :alt: Copula sampling with fast_ppf vs scipy fallback
+   :width: 100%
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 25 25 30
+
+   * - Sample Size
+     - With fast_ppf
+     - scipy fallback
+     - Speedup
+   * - 1K
+     - 0.19 ms
+     - 0.30 ms
+     - 1.6×
+   * - 10K
+     - 1.9 ms
+     - 2.8 ms
+     - 1.4×
+   * - 100K
+     - 19.8 ms
+     - 26.7 ms
+     - 1.4×
+   * - 1M
+     - 199 ms
+     - 269 ms
+     - 1.4×
+
+v2.8.0 Internal Optimizations
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Cholesky Caching** (multivariate normal generation):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 25 25 30
+
+   * - Sample Size
+     - Old (recompute)
+     - New (cached)
+     - Speedup
+   * - 1K
+     - 0.028 ms
+     - 0.010 ms
+     - 2.8×
+   * - 10K
+     - 0.15 ms
+     - 0.11 ms
+     - 1.4×
+   * - 100K
+     - 1.2 ms
+     - 0.97 ms
+     - 1.3×
+   * - 1M
+     - 12.1 ms
+     - 9.3 ms
+     - 1.3×
+
+**ndtr vs norm.cdf** (CDF transformation):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 25 25 30
+
+   * - Sample Size
+     - norm.cdf
+     - ndtr
+     - Speedup
+   * - 100K
+     - 2.4 ms
+     - 1.7 ms
+     - 1.4×
+   * - 1M
+     - 24.4 ms
+     - 16.9 ms
+     - 1.4×
+
+Best Practices for Copula Sampling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. **Use fast_ppf-supported distributions** (norm, gamma, beta, lognorm, weibull_min,
+   uniform, expon) for best performance. These use analytical PPF formulas.
+
+2. **Use return_uniform=True** for the fastest sampling when you only need
+   correlated uniform samples (skips marginal transformation).
+
+3. **For >1M samples**, use ``sample_distributed()`` with a backend to
+   parallelize across workers.
+
 Related Documentation
 ---------------------
 
