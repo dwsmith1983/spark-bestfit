@@ -1,6 +1,8 @@
 Diagnostics Plots
 =================
 
+.. versionadded:: 2.6.0
+
 After fitting a distribution, you can assess the quality of the fit using
 diagnostic plots. spark-bestfit provides a comprehensive ``diagnostics()``
 method that creates a 2x2 panel of diagnostic visualizations.
