@@ -30,6 +30,7 @@ import numpy as np
 import scipy.stats as st
 
 from spark_bestfit._version import __version__
+from spark_bestfit.fast_ppf import fast_ppf, has_fast_ppf
 from spark_bestfit.results import DistributionFitResult, MetricName
 from spark_bestfit.serialization import SCHEMA_VERSION, SerializationError, detect_format
 
@@ -220,11 +221,26 @@ class GaussianCopula:
             return {col: uniform_samples[:, i] for i, col in enumerate(self.column_names)}
 
         # Transform uniform -> target marginal via inverse CDF (PPF)
-        # Uses frozen (cached) distributions for better performance
+        # Uses fast_ppf for common distributions, falls back to scipy for others
         result: Dict[str, np.ndarray] = {}
         for i, col in enumerate(self.column_names):
-            frozen_dist = self._get_frozen_dist(col)
-            result[col] = frozen_dist.ppf(uniform_samples[:, i])
+            marginal = self.marginals[col]
+            dist_name = marginal.distribution
+            params = tuple(marginal.parameters)
+
+            # Get truncation bounds if any
+            lb = marginal.lower_bound
+            ub = marginal.upper_bound
+
+            # Use fast_ppf for supported distributions
+            if has_fast_ppf(dist_name) and lb is None and ub is None:
+                result[col] = fast_ppf(dist_name, params, uniform_samples[:, i])
+            elif has_fast_ppf(dist_name):
+                result[col] = fast_ppf(dist_name, params, uniform_samples[:, i], lb=lb, ub=ub)
+            else:
+                # Fall back to frozen distribution (handles truncation internally)
+                frozen_dist = self._get_frozen_dist(col)
+                result[col] = frozen_dist.ppf(uniform_samples[:, i])
 
         return result
 
@@ -264,6 +280,8 @@ class GaussianCopula:
             col: {
                 "distribution": m.distribution,
                 "parameters": m.parameters,
+                "lower_bound": m.lower_bound,
+                "upper_bound": m.upper_bound,
             }
             for col, m in self.marginals.items()
         }
@@ -279,13 +297,43 @@ class GaussianCopula:
             This function is passed to the backend's generate_samples method.
             It's designed to be serializable and run on workers.
             """
-            # Pre-create frozen distributions (only if doing marginal transforms)
+            # Try to import fast_ppf - may not be available on Spark workers
+            # in development mode, so fall back to scipy if import fails
+            _fast_ppf_available = False
+            _fast_ppf_func = None
+            _has_fast_ppf_func = None
+            try:
+                from spark_bestfit.fast_ppf import fast_ppf as _fpf
+                from spark_bestfit.fast_ppf import has_fast_ppf as _hfpf
+
+                _fast_ppf_available = True
+                _fast_ppf_func = _fpf
+                _has_fast_ppf_func = _hfpf
+            except ImportError:
+                pass
+
+            # Pre-create frozen distributions for unsupported or fallback path
             frozen_dists: Dict[str, st.rv_continuous] = {}
             if not return_uniform:
                 for col in column_names:
                     m_info = marginal_data[col]
-                    dist = getattr(st, m_info["distribution"])
-                    frozen_dists[col] = dist(*m_info["parameters"])
+                    dist_name = m_info["distribution"]
+                    lb = m_info["lower_bound"]
+                    ub = m_info["upper_bound"]
+                    # Create frozen dist if fast_ppf not available or has truncation
+                    has_fast = _fast_ppf_available and _has_fast_ppf_func(dist_name)
+                    needs_frozen = not has_fast
+                    if needs_frozen or lb is not None or ub is not None:
+                        dist = getattr(st, dist_name)
+                        frozen_dist = dist(*m_info["parameters"])
+                        # Handle truncation
+                        if lb is not None or ub is not None:
+                            from spark_bestfit.truncated import TruncatedFrozenDist
+
+                            lb_val = lb if lb is not None else -np.inf
+                            ub_val = ub if ub is not None else np.inf
+                            frozen_dist = TruncatedFrozenDist(frozen_dist, lb_val, ub_val)
+                        frozen_dists[col] = frozen_dist
 
             # Create RNG with partition-specific seed
             rng = np.random.default_rng(seed)
@@ -304,10 +352,27 @@ class GaussianCopula:
             if return_uniform:
                 return {col: uniform_samples[:, i] for i, col in enumerate(column_names)}
 
-            # Transform through frozen distributions for each column
+            # Transform through PPF for each column
             result_data: Dict[str, np.ndarray] = {}
             for i, col in enumerate(column_names):
-                result_data[col] = frozen_dists[col].ppf(uniform_samples[:, i])
+                m_info = marginal_data[col]
+                dist_name = m_info["distribution"]
+                params = tuple(m_info["parameters"])
+                lb = m_info["lower_bound"]
+                ub = m_info["upper_bound"]
+
+                # Check if fast_ppf is available for this distribution
+                has_fast = _fast_ppf_available and _has_fast_ppf_func(dist_name)
+
+                # Use fast_ppf for supported distributions without truncation
+                if has_fast and lb is None and ub is None:
+                    result_data[col] = _fast_ppf_func(dist_name, params, uniform_samples[:, i])
+                elif has_fast:
+                    # fast_ppf handles truncation
+                    result_data[col] = _fast_ppf_func(dist_name, params, uniform_samples[:, i], lb=lb, ub=ub)
+                else:
+                    # Fall back to frozen distribution
+                    result_data[col] = frozen_dists[col].ppf(uniform_samples[:, i])
 
             return result_data
 
