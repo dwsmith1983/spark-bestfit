@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v2.5.0 (2026-01-10)
+
+### Features
+
+- Add maximum spacing estimation for heavy-tailed distributions
+  ([`e0fb25b`](https://github.com/dwsmith1983/spark-bestfit/commit/e0fb25bb4db63f85e4dfce964404fe204b1856c6))
+
+
 ## v2.4.0 (2026-01-09)
 
 ### Features

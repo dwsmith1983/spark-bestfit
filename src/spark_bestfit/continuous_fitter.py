@@ -241,12 +241,13 @@ class DistributionFitter(BaseFitter):
                 - 'aggressive': Also filters by kurtosis (may skip valid distributions)
                 Pre-filtering uses scipy's distribution support bounds (dist.a, dist.b)
                 and sample moments. Filtered distributions are logged for transparency.
-            estimation_method: Parameter estimation method (v2.5.0).
-                "mle" (default) uses Maximum Likelihood Estimation via scipy.stats.fit().
-                "mse" uses Maximum Spacing Estimation, more robust for heavy-tailed
-                distributions (Pareto, Cauchy, etc.) where MLE may fail.
-                "auto" automatically selects MSE for heavy-tailed data based on
-                kurtosis and extreme value analysis, MLE otherwise.
+            estimation_method: Parameter estimation method (v2.5.0):
+                - "mle": Maximum Likelihood Estimation (default). Uses scipy.stats.fit().
+                    Fast and accurate for most distributions.
+                - "mse": Maximum Spacing Estimation. More robust for heavy-tailed
+                    distributions (Pareto, Cauchy, etc.) where MLE may fail.
+                - "auto": Automatically select MSE for heavy-tailed data based on
+                    kurtosis and extreme value analysis, MLE otherwise.
 
         Returns:
             FitResults object with fitted distributions
