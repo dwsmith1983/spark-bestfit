@@ -287,7 +287,7 @@ def fit_mse(
         options={"maxiter": 2000, "xatol": 1e-8, "fatol": 1e-8},
     )
 
-    if not result.success and result.fun == np.inf:
+    if not result.success or result.fun == np.inf:
         # Try with L-BFGS-B as fallback (handles bounds better)
         n_params = len(initial_params)
         # Set bounds: shape params unbounded, loc unbounded, scale > 0
@@ -300,7 +300,7 @@ def fit_mse(
             options={"maxiter": 2000},
         )
 
-    if not result.success and result.fun == np.inf:
+    if not result.success or result.fun == np.inf:
         raise ValueError(f"MSE optimization failed: {result.message}")
 
     return tuple(result.x)
