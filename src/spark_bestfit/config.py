@@ -39,6 +39,7 @@ class FitterConfig:
         num_partitions: Number of parallel partitions (None = auto-determine).
         lazy_metrics: Defer KS/AD computation until accessed.
         progress_callback: Optional callback for progress updates.
+        estimation_method: Parameter estimation method ("mle", "mse", or "auto").
 
     Example:
         >>> config = FitterConfig(bins=100, bounded=True, lower_bound=0)
@@ -68,6 +69,9 @@ class FitterConfig:
     # === Performance ===
     num_partitions: Optional[int] = None
     lazy_metrics: bool = False
+
+    # === Estimation Method (v2.5.0) ===
+    estimation_method: str = "mle"  # "mle", "mse", or "auto"
 
     # === Callbacks ===
     progress_callback: Optional[Callable[[int, int, float], None]] = None
@@ -126,6 +130,9 @@ class FitterConfigBuilder:
         # Performance
         self._num_partitions: Optional[int] = None
         self._lazy_metrics: bool = False
+
+        # Estimation method
+        self._estimation_method: str = "mle"
 
     def with_bins(
         self,
@@ -261,6 +268,31 @@ class FitterConfigBuilder:
         self._num_partitions = n
         return self
 
+    def with_estimation_method(self, method: str = "mle") -> "FitterConfigBuilder":
+        """Configure parameter estimation method (v2.5.0).
+
+        Args:
+            method: Estimation method to use:
+                - "mle": Maximum Likelihood Estimation (default). Uses scipy.stats.fit().
+                    Fast and accurate for most distributions.
+                - "mse": Maximum Spacing Estimation. More robust for heavy-tailed
+                    distributions (Pareto, Cauchy, etc.) where MLE may fail.
+                - "auto": Automatically select MSE for heavy-tailed data based on
+                    kurtosis and extreme value analysis, MLE otherwise.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> config = (FitterConfigBuilder()
+            ...     .with_estimation_method("mse")  # For heavy-tailed data
+            ...     .build())
+        """
+        if method not in ("mle", "mse", "auto"):
+            raise ValueError(f"estimation_method must be 'mle', 'mse', or 'auto', got '{method}'")
+        self._estimation_method = method
+        return self
+
     def build(self) -> FitterConfig:
         """Build the immutable FitterConfig.
 
@@ -282,4 +314,5 @@ class FitterConfigBuilder:
             upper_bound=self._upper_bound,
             num_partitions=self._num_partitions,
             lazy_metrics=self._lazy_metrics,
+            estimation_method=self._estimation_method,
         )

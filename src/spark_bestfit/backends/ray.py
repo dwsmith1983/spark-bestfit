@@ -45,6 +45,7 @@ def _fit_continuous_distribution(
     lower_bound: Optional[float],
     upper_bound: Optional[float],
     lazy_metrics: bool,
+    estimation_method: str = "mle",
 ) -> Dict[str, Any]:
     """Fit a single continuous distribution (runs as Ray task).
 
@@ -63,6 +64,7 @@ def _fit_continuous_distribution(
         lower_bound=lower_bound,
         upper_bound=upper_bound,
         lazy_metrics=lazy_metrics,
+        estimation_method=estimation_method,
     )
 
 
@@ -197,6 +199,7 @@ class RayBackend:
         is_discrete: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         custom_distributions: Optional[Dict[str, Any]] = None,
+        estimation_method: str = "mle",
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Ray tasks.
 
@@ -223,6 +226,9 @@ class RayBackend:
                 rv_continuous objects. (v2.4.0) Note: Currently not supported
                 for RayBackend - use SparkBackend or LocalBackend for custom
                 distributions.
+            estimation_method: Parameter estimation method (v2.5.0):
+                - "mle": Maximum Likelihood Estimation (default)
+                - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
 
         Returns:
             List of fit result dicts (only successful fits, SSE < inf)
@@ -265,6 +271,7 @@ class RayBackend:
                     lower_bound=lower_bound,
                     upper_bound=upper_bound,
                     lazy_metrics=lazy_metrics,
+                    estimation_method=estimation_method,
                 )
                 for d in distributions
             ]

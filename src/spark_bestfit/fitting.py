@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import scipy.stats as st
+from scipy.optimize import minimize
 from scipy.stats import rv_continuous
 
 from spark_bestfit.truncated import TruncatedFrozenDist
@@ -169,6 +170,141 @@ def detect_heavy_tail(data: np.ndarray, kurtosis_threshold: float = 6.0) -> Dict
     }
 
 
+# Type alias for estimation method
+EstimationMethod = str  # Literal["mle", "mse", "auto"]
+
+
+def fit_mse(
+    dist: rv_continuous,
+    data: np.ndarray,
+    initial_params: Optional[Tuple[float, ...]] = None,
+) -> Tuple[float, ...]:
+    """Fit distribution using Maximum Spacing Estimation (MSE).
+
+    MSE estimates parameters by maximizing the geometric mean of spacings
+    between consecutive order statistics of the CDF-transformed data.
+    It is particularly robust for heavy-tailed distributions where MLE
+    can fail or converge poorly.
+
+    The MSE objective maximizes:
+        S(θ) = (1/(n+1)) Σᵢ log(Dᵢ)
+
+    where Dᵢ = F(x₍ᵢ₎; θ) - F(x₍ᵢ₋₁₎; θ) are the spacings, with
+    x₍₀₎ = -∞ (so F(x₍₀₎) = 0) and x₍ₙ₊₁₎ = +∞ (so F(x₍ₙ₊₁₎) = 1).
+
+    Args:
+        dist: scipy.stats distribution object (unfrozen)
+        data: Data array to fit
+        initial_params: Initial parameter guess. If None, uses MLE estimate
+            as starting point (warm start).
+
+    Returns:
+        Tuple of fitted parameters (same format as scipy.stats.fit)
+
+    Raises:
+        ValueError: If optimization fails to converge
+
+    References:
+        Ranneby, B. (1984). "The Maximum Spacing Method. An Estimation Method
+        Related to the Maximum Likelihood Method." Scandinavian Journal of
+        Statistics, 11(2), 93-112.
+
+    Example:
+        >>> from scipy import stats
+        >>> data = stats.pareto.rvs(b=2.5, size=1000, random_state=42)
+        >>> params = fit_mse(stats.pareto, data)
+        >>> # params ≈ (2.5, loc, scale)
+    """
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
+
+    if n < 2:
+        raise ValueError("Need at least 2 data points for MSE fitting")
+
+    def mse_objective(params: np.ndarray) -> float:
+        """Negative log of geometric mean of spacings (to minimize)."""
+        try:
+            # Unpack parameters: shape params are all but last two (loc, scale)
+            if len(params) > 2:
+                shape = tuple(params[:-2])
+                loc = params[-2]
+                scale = params[-1]
+            else:
+                shape = ()
+                loc = params[0]
+                scale = params[1]
+
+            # Ensure scale is positive
+            if scale <= 0:
+                return np.inf
+
+            # Compute CDF values at sorted data points
+            cdf_vals = dist.cdf(sorted_data, *shape, loc=loc, scale=scale)
+
+            # Clamp to (epsilon, 1-epsilon) to avoid log(0)
+            epsilon = 1e-10
+            cdf_vals = np.clip(cdf_vals, epsilon, 1 - epsilon)
+
+            # Add boundary values: F(x₍₀₎) = 0, F(x₍ₙ₊₁₎) = 1
+            u = np.concatenate([[0.0], cdf_vals, [1.0]])
+
+            # Compute spacings Dᵢ = u₍ᵢ₎ - u₍ᵢ₋₁₎
+            spacings = np.diff(u)
+
+            # Ensure no zero or negative spacings
+            spacings = np.maximum(spacings, epsilon)
+
+            # MSE objective: minimize negative mean log spacing
+            # (equivalent to maximizing geometric mean of spacings)
+            return -np.mean(np.log(spacings))
+
+        except (ValueError, RuntimeError, FloatingPointError):
+            return np.inf
+
+    # Get initial parameter estimate using MLE if not provided
+    if initial_params is None:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                initial_params = dist.fit(data)
+        except Exception:
+            # If MLE fails, try method of moments or default guess
+            # Use data statistics for a rough initial guess
+            mean, std = np.mean(data), np.std(data)
+            if dist.shapes:
+                # For distributions with shape parameters, start with 1.0
+                n_shapes = len(dist.shapes.split(","))
+                initial_params = tuple([1.0] * n_shapes + [mean, std])
+            else:
+                initial_params = (mean, std)
+
+    # Optimize using Nelder-Mead (robust for non-smooth objectives)
+    result = minimize(
+        mse_objective,
+        initial_params,
+        method="Nelder-Mead",
+        options={"maxiter": 2000, "xatol": 1e-8, "fatol": 1e-8},
+    )
+
+    if not result.success and result.fun == np.inf:
+        # Try with L-BFGS-B as fallback (handles bounds better)
+        n_params = len(initial_params)
+        # Set bounds: shape params unbounded, loc unbounded, scale > 0
+        bounds = [(None, None)] * (n_params - 1) + [(1e-10, None)]
+        result = minimize(
+            mse_objective,
+            initial_params,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxiter": 2000},
+        )
+
+    if not result.success and result.fun == np.inf:
+        raise ValueError(f"MSE optimization failed: {result.message}")
+
+    return tuple(result.x)
+
+
 def create_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
@@ -178,6 +314,7 @@ def create_fitting_udf(
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
     custom_distributions_broadcast: Optional[Broadcast[Dict[str, rv_continuous]]] = None,
+    estimation_method: str = "mle",
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -198,6 +335,9 @@ def create_fitting_udf(
         custom_distributions_broadcast: Broadcast variable containing dict of
             custom distributions. If provided, distribution names are looked up
             here first before falling back to scipy.stats. (v2.4.0)
+        estimation_method: Parameter estimation method (v2.5.0):
+            - "mle": Maximum Likelihood Estimation (default)
+            - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -245,6 +385,7 @@ def create_fitting_udf(
                     upper_bound=upper_bound,
                     lazy_metrics=lazy_metrics,
                     custom_distributions=custom_distributions,
+                    estimation_method=estimation_method,
                 )
             except Exception:
                 # Safety net: catch any unexpected exceptions to prevent job failure
@@ -272,6 +413,7 @@ def fit_single_distribution(
     upper_bound: Optional[float] = None,
     lazy_metrics: bool = False,
     custom_distributions: Optional[Dict[str, rv_continuous]] = None,
+    estimation_method: str = "mle",
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -298,6 +440,9 @@ def fit_single_distribution(
         custom_distributions: Dict mapping custom distribution names to
             rv_continuous objects. If provided, dist_name is looked up here
             first, falling back to scipy.stats if not found. (v2.4.0)
+        estimation_method: Parameter estimation method (v2.5.0):
+            - "mle": Maximum Likelihood Estimation (default, uses scipy.stats.fit)
+            - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
 
     Returns:
         Dictionary with fit result fields including data_min, data_max, etc.
@@ -312,8 +457,16 @@ def fit_single_distribution(
             else:
                 dist = getattr(st, dist_name)
 
-            # Fit distribution to data sample (always fit unbounded first)
-            params = dist.fit(data_sample)
+            # Fit distribution to data sample using specified estimation method
+            if estimation_method == "mse":
+                try:
+                    params = fit_mse(dist, data_sample)
+                except (ValueError, RuntimeError):
+                    # Fall back to MLE if MSE fails
+                    params = dist.fit(data_sample)
+            else:
+                # Default: MLE via scipy.stats.fit
+                params = dist.fit(data_sample)
 
             # Check for NaN in parameters (convergence failure)
             if any(not np.isfinite(p) for p in params):
