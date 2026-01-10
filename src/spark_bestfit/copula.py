@@ -278,7 +278,8 @@ class GaussianCopula:
             >>> samples_df.show(5)  # For Spark
         """
         # Prepare data for serialization to workers
-        corr_matrix = self.correlation_matrix
+        # Use pre-computed Cholesky for faster sampling on workers
+        cholesky_matrix = self._cholesky
         marginal_data: Dict[str, Dict[str, Any]] = {
             col: {
                 "distribution": m.distribution,
@@ -341,15 +342,16 @@ class GaussianCopula:
             # Create RNG with partition-specific seed
             rng = np.random.default_rng(seed)
 
-            # Generate multivariate normal samples
-            mvn_samples = rng.multivariate_normal(
-                mean=np.zeros(len(column_names)),
-                cov=corr_matrix,
-                size=n_samples,
-            )
+            # Generate multivariate normal samples using pre-computed Cholesky
+            # This is faster than rng.multivariate_normal() which recomputes Cholesky
+            z = rng.standard_normal(size=(n_samples, len(column_names)))
+            mvn_samples = z @ cholesky_matrix.T
 
-            # Transform normal -> uniform (vectorized for all columns at once)
-            uniform_samples = st.norm.cdf(mvn_samples)
+            # Transform normal -> uniform via standard normal CDF
+            # Using scipy.special.ndtr directly is ~1.5x faster than st.norm.cdf
+            from scipy.special import ndtr as _ndtr
+
+            uniform_samples = _ndtr(mvn_samples)
 
             # Fast path: return uniform samples without marginal transform
             if return_uniform:
