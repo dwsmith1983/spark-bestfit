@@ -10,9 +10,10 @@ Usage:
     python scripts/generate_copula_chart.py
 """
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
 
 
 def apply_modern_style():
@@ -56,7 +57,6 @@ def generate_copula_optimization_chart(output_path: Path):
 
     # Data from benchmarks (in ms)
     sample_sizes = ["1K", "10K", "100K", "1M"]
-    sample_sizes_num = [1_000, 10_000, 100_000, 1_000_000]
 
     # Chart 1: Cholesky caching speedup
     ax1 = axes[0]
@@ -66,8 +66,8 @@ def generate_copula_optimization_chart(output_path: Path):
     x = np.arange(len(sample_sizes))
     width = 0.35
 
-    bars1 = ax1.bar(x - width / 2, old_cholesky, width, label="Old (recompute)", color="#94a3b8")
-    bars2 = ax1.bar(x + width / 2, new_cholesky, width, label="New (cached)", color="#22c55e")
+    ax1.bar(x - width / 2, old_cholesky, width, label="Old (recompute)", color="#94a3b8")
+    ax1.bar(x + width / 2, new_cholesky, width, label="New (cached)", color="#22c55e")
 
     ax1.set_xlabel("Sample Size")
     ax1.set_ylabel("Time (ms)")
@@ -97,8 +97,8 @@ def generate_copula_optimization_chart(output_path: Path):
 
     x2 = np.arange(len(sizes_cdf))
 
-    bars3 = ax2.bar(x2 - width / 2, old_cdf, width, label="norm.cdf", color="#94a3b8")
-    bars4 = ax2.bar(x2 + width / 2, new_cdf, width, label="ndtr", color="#8b5cf6")
+    ax2.bar(x2 - width / 2, old_cdf, width, label="norm.cdf", color="#94a3b8")
+    ax2.bar(x2 + width / 2, new_cdf, width, label="ndtr", color="#8b5cf6")
 
     ax2.set_xlabel("Sample Size")
     ax2.set_ylabel("Time (ms)")
