@@ -26,7 +26,7 @@ Example:
 from spark_bestfit._version import __version__
 from spark_bestfit.backends.factory import BackendFactory
 from spark_bestfit.backends.local import LocalBackend
-from spark_bestfit.config import FitterConfig, FitterConfigBuilder
+from spark_bestfit.config import FitterConfig, FitterConfigBuilder, SamplingMode
 
 # Conditional Spark import (only if pyspark is installed)
 try:
@@ -113,6 +113,7 @@ __all__ = [
     # Configuration (v2.2)
     "FitterConfig",
     "FitterConfigBuilder",
+    "SamplingMode",
     # Backends (v2.0)
     "BackendFactory",
     "ExecutionBackend",

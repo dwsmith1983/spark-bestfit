@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
 
 
-@dataclass
+@dataclass(slots=True)
 class MultivariateNormalResult:
     """Result of multivariate normal distribution fitting.
 
@@ -82,14 +82,10 @@ class MultivariateNormalResult:
 
         n = len(self.column_names)
         if self.mean.shape != (n,):
-            raise ValueError(
-                f"mean shape {self.mean.shape} doesn't match {n} columns"
-            )
+            raise ValueError(f"mean shape {self.mean.shape} doesn't match {n} columns")
 
         if self.cov.shape != (n, n):
-            raise ValueError(
-                f"cov shape {self.cov.shape} doesn't match {n} columns"
-            )
+            raise ValueError(f"cov shape {self.cov.shape} doesn't match {n} columns")
 
         # Ensure covariance matrix is positive semi-definite
         # Add small regularization if needed for numerical stability
@@ -448,9 +444,7 @@ class MultivariateNormalFitter:
                 UserWarning,
                 stacklevel=2,
             )
-            logger.warning(
-                f"Near-singular covariance matrix detected: condition number = {cond_num:.2e}"
-            )
+            logger.warning(f"Near-singular covariance matrix detected: condition number = {cond_num:.2e}")
 
         return MultivariateNormalResult(
             column_names=list(columns),
@@ -474,10 +468,7 @@ class MultivariateNormalFitter:
 
         missing = set(columns) - set(df_columns)
         if missing:
-            raise ValueError(
-                f"Columns not found in DataFrame: {missing}. "
-                f"Available columns: {df_columns}"
-            )
+            raise ValueError(f"Columns not found in DataFrame: {missing}. " f"Available columns: {df_columns}")
 
     def _collect_columns(self, df: Any, columns: List[str]) -> np.ndarray:
         """Collect specified columns as numpy array."""
