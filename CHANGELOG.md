@@ -2,6 +2,40 @@
 
 <!-- version list -->
 
+## v2.8.1 (2026-01-10)
+
+### Bug Fixes
+
+- Split results.py into storage and collection modules
+  ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+- V2.8.1 quality improvements ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+- **docs**: Add FAQ, Glossary, and update version references
+  ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+- **perf**: Add __slots__, analytical truncated moments, LRU caching
+  ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+- **perf**: Add LRU caching to fast_ppf and analytical truncated moments
+  ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+- **tests**: Add golden path and concurrency tests
+  ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+### Refactoring
+
+- Define NUMERICAL_EPSILON constant (GitHub #108)
+  ([#134](https://github.com/dwsmith1983/spark-bestfit/pull/134),
+  [`1810052`](https://github.com/dwsmith1983/spark-bestfit/commit/1810052b062ac3486e4e8c3f133d3ba9ba198061))
+
+
 ## v2.8.0 (2026-01-10)
 
 ### Bug Fixes
