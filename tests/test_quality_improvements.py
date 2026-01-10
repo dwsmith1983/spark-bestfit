@@ -525,3 +525,120 @@ class TestConcurrencyStress:
 
         # All should have fitted 3 distributions
         assert all(r == 3 for r in results), f"Unexpected result counts: {results}"
+
+
+class TestTruncatedAnalyticalMoments:
+    """Tests for analytical truncated moment calculations.
+
+    These tests verify the closed-form formulas for truncated distribution
+    mean and standard deviation for norm, expon, and uniform distributions.
+    """
+
+    def test_truncated_normal_mean_two_sided(self):
+        """Test analytical mean for two-sided truncated normal."""
+        from spark_bestfit.truncated import TruncatedFrozenDist
+
+        # N(0, 1) truncated to [-1, 1]
+        base_dist = st.norm(loc=0, scale=1)
+        truncated = TruncatedFrozenDist(base_dist, lb=-1, ub=1)
+
+        # Symmetrically truncated normal should have mean = 0
+        mean = truncated.mean()
+        assert abs(mean) < 0.01, f"Expected ~0, got {mean}"
+
+    def test_truncated_normal_std_two_sided(self):
+        """Test analytical std for two-sided truncated normal."""
+        from spark_bestfit.truncated import TruncatedFrozenDist
+
+        base_dist = st.norm(loc=0, scale=1)
+        truncated = TruncatedFrozenDist(base_dist, lb=-1, ub=1)
+
+        # Truncated normal has reduced variance
+        std = truncated.std()
+        assert 0 < std < 1, f"Expected 0 < std < 1, got {std}"
+
+    def test_truncated_expon_mean_one_sided(self):
+        """Test analytical mean for one-sided truncated exponential."""
+        from spark_bestfit.truncated import TruncatedFrozenDist
+
+        # Exponential with scale=2, truncated at lb=0 (effectively untruncated)
+        base_dist = st.expon(loc=0, scale=2)
+        truncated = TruncatedFrozenDist(base_dist, lb=0, ub=np.inf)
+
+        mean = truncated.mean()
+        # Should be close to original mean = scale = 2
+        assert abs(mean - 2) < 0.1, f"Expected ~2, got {mean}"
+
+    def test_truncated_expon_two_sided(self):
+        """Test analytical mean/std for two-sided truncated exponential."""
+        from spark_bestfit.truncated import TruncatedFrozenDist
+
+        base_dist = st.expon(loc=0, scale=1)
+        truncated = TruncatedFrozenDist(base_dist, lb=0, ub=2)
+
+        mean = truncated.mean()
+        std = truncated.std()
+
+        # Two-sided truncation reduces mean and variance
+        assert 0 < mean < 1, f"Expected 0 < mean < 1, got {mean}"
+        assert 0 < std < 1, f"Expected 0 < std < 1, got {std}"
+
+    def test_truncated_uniform_mean(self):
+        """Test analytical mean for truncated uniform."""
+        from spark_bestfit.truncated import TruncatedFrozenDist
+
+        # Uniform on [0, 10] truncated to [2, 8]
+        base_dist = st.uniform(loc=0, scale=10)
+        truncated = TruncatedFrozenDist(base_dist, lb=2, ub=8)
+
+        mean = truncated.mean()
+        # Truncated uniform mean = (lb + ub) / 2 = (2 + 8) / 2 = 5
+        assert abs(mean - 5) < 0.01, f"Expected ~5, got {mean}"
+
+    def test_truncated_uniform_std(self):
+        """Test analytical std for truncated uniform."""
+        from spark_bestfit.truncated import TruncatedFrozenDist
+
+        # Uniform on [0, 10] truncated to [2, 8]
+        base_dist = st.uniform(loc=0, scale=10)
+        truncated = TruncatedFrozenDist(base_dist, lb=2, ub=8)
+
+        std = truncated.std()
+        # Truncated uniform std = (ub - lb) / sqrt(12) = 6 / sqrt(12) ≈ 1.73
+        expected_std = 6 / np.sqrt(12)
+        assert abs(std - expected_std) < 0.01, f"Expected ~{expected_std:.2f}, got {std}"
+
+
+class TestFastPPFCaching:
+    """Tests for LRU caching in fast_ppf module."""
+
+    def test_cache_hit_performance(self):
+        """Test that repeated calls use cache."""
+        from spark_bestfit.fast_ppf import _cached_truncation_bounds, clear_ppf_cache
+
+        # Clear cache first
+        clear_ppf_cache()
+
+        # First call - cache miss
+        bounds1 = _cached_truncation_bounds("norm", (0.0, 1.0), -1.0, 1.0)
+
+        # Second call - should be cache hit (same result)
+        bounds2 = _cached_truncation_bounds("norm", (0.0, 1.0), -1.0, 1.0)
+
+        assert bounds1 == bounds2
+
+    def test_cache_clear(self):
+        """Test cache clear functionality."""
+        from spark_bestfit.fast_ppf import _cached_truncation_bounds, clear_ppf_cache
+
+        # Populate cache
+        _cached_truncation_bounds("norm", (0.0, 1.0), -1.0, 1.0)
+
+        # Get cache info
+        info_before = _cached_truncation_bounds.cache_info()
+        assert info_before.currsize > 0 or info_before.hits > 0 or info_before.misses > 0
+
+        # Clear and verify
+        clear_ppf_cache()
+        info_after = _cached_truncation_bounds.cache_info()
+        assert info_after.currsize == 0
