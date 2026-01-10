@@ -2,6 +2,41 @@
 
 <!-- version list -->
 
+## v2.8.0 (2026-01-10)
+
+### Bug Fixes
+
+- Remove unused variables in generate_copula_chart.py
+  ([#125](https://github.com/dwsmith1983/spark-bestfit/pull/125),
+  [`df2fcf6`](https://github.com/dwsmith1983/spark-bestfit/commit/df2fcf6315d0cd9b9d19607de002f3352495260f))
+
+- **estimation**: Use OR for MSE fallback condition
+  ([#125](https://github.com/dwsmith1983/spark-bestfit/pull/125),
+  [`df2fcf6`](https://github.com/dwsmith1983/spark-bestfit/commit/df2fcf6315d0cd9b9d19607de002f3352495260f))
+
+### Features
+
+- V2.8.0 - Performance, stability, and code quality improvements
+  ([#125](https://github.com/dwsmith1983/spark-bestfit/pull/125),
+  [`df2fcf6`](https://github.com/dwsmith1983/spark-bestfit/commit/df2fcf6315d0cd9b9d19607de002f3352495260f))
+
+### Performance Improvements
+
+- Apply Cholesky+ndtr optimization to sample_distributed()
+  ([#125](https://github.com/dwsmith1983/spark-bestfit/pull/125),
+  [`df2fcf6`](https://github.com/dwsmith1983/spark-bestfit/commit/df2fcf6315d0cd9b9d19607de002f3352495260f))
+
+- **copula**: Optimize sample() with cached Cholesky and ndtr
+  ([#125](https://github.com/dwsmith1983/spark-bestfit/pull/125),
+  [`df2fcf6`](https://github.com/dwsmith1983/spark-bestfit/commit/df2fcf6315d0cd9b9d19607de002f3352495260f))
+
+### Refactoring
+
+- **plotting**: Extract shared Q-Q/P-P helpers for DRY compliance
+  ([#125](https://github.com/dwsmith1983/spark-bestfit/pull/125),
+  [`df2fcf6`](https://github.com/dwsmith1983/spark-bestfit/commit/df2fcf6315d0cd9b9d19607de002f3352495260f))
+
+
 ## v2.7.1 (2026-01-10)
 
 ### Bug Fixes
