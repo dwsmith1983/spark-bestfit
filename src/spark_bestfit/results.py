@@ -34,7 +34,7 @@ MetricName = Literal["sse", "aic", "bic", "ks_statistic", "ad_statistic"]
 FITTING_SAMPLE_SIZE = 10000
 
 
-@dataclass
+@dataclass(slots=True)
 class LazyMetricsContext:
     """Context for deferred KS/AD metric computation.
 
@@ -66,7 +66,7 @@ class LazyMetricsContext:
     is_discrete: bool = False
 
 
-@dataclass
+@dataclass(slots=True)
 class DistributionFitResult:
     """Result from fitting a single distribution.
 
