@@ -78,6 +78,7 @@ class ExecutionBackend(Protocol):
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         custom_distributions: Optional[Dict[str, Any]] = None,
         estimation_method: str = "mle",
+        censoring_indicator: Optional[np.ndarray] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel.
 
@@ -109,6 +110,9 @@ class ExecutionBackend(Protocol):
             estimation_method: Parameter estimation method (v2.5.0):
                 - "mle": Maximum Likelihood Estimation (default)
                 - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
+            censoring_indicator: Boolean array where True=observed event,
+                False=censored. When provided, uses censored MLE for
+                parameter estimation. (v2.9.0)
 
         Returns:
             List of fit result dicts. Each dict contains:
