@@ -654,8 +654,12 @@ def plot_discrete_distribution(
     """
     _check_matplotlib()
 
-    # Get scipy distribution and parameters
-    dist = getattr(st, result.distribution)
+    # Validate data array
+    if data is None or len(data) == 0:
+        raise ValueError("plot_discrete_distribution requires non-empty data array")
+
+    # Get scipy distribution using safe helper
+    dist = _get_scipy_distribution(result.distribution)
     params = list(result.parameters)
 
     # Handle integer parameters for certain distributions
@@ -705,11 +709,8 @@ def plot_discrete_distribution(
     plt.setp(markerline, markersize=6, zorder=3)
     plt.setp(stemlines, linewidth=pmf_linewidth, zorder=3)
 
-    # Format parameter string
-    param_names = _get_discrete_param_names(result.distribution)
-    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
-
-    dist_title = f"{result.distribution}({param_str})"
+    # Format parameter string using helper
+    dist_title, _ = _format_distribution_params(result)
 
     # Build metrics string
     metrics_parts = []
@@ -742,29 +743,6 @@ def plot_discrete_distribution(
         warnings.warn(f"Plot saved to: {save_path}", stacklevel=2)
 
     return fig, ax
-
-
-def _get_discrete_param_names(dist_name: str) -> List[str]:
-    """Get parameter names for discrete distributions."""
-    param_map = {
-        "poisson": ["mu"],
-        "binom": ["n", "p"],
-        "nbinom": ["n", "p"],
-        "geom": ["p"],
-        "hypergeom": ["M", "n", "N"],
-        "betabinom": ["n", "a", "b"],
-        "betanbinom": ["n", "a", "b"],
-        "zipf": ["a"],
-        "zipfian": ["a", "n"],
-        "boltzmann": ["lambda", "N"],
-        "dlaplace": ["a"],
-        "logser": ["p"],
-        "planck": ["lambda"],
-        "skellam": ["mu1", "mu2"],
-        "yulesimon": ["alpha"],
-        "nhypergeom": ["M", "n", "r"],
-    }
-    return param_map.get(dist_name, ["param" + str(i) for i in range(10)])
 
 
 def plot_residual_histogram(
