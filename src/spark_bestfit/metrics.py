@@ -15,6 +15,10 @@ from scipy.stats import rv_continuous
 
 from spark_bestfit.truncated import create_truncated_dist
 
+# Small value to prevent log(0) and division by zero in numerical computations.
+# Used for clipping CDF values and ensuring positive scale parameters.
+NUMERICAL_EPSILON: float = 1e-10
+
 # Distributions that support Anderson-Darling p-value computation via scipy
 # Maps our distribution names to scipy.anderson's dist parameter
 AD_PVALUE_DISTRIBUTIONS: Dict[str, str] = {
@@ -202,7 +206,7 @@ def compute_ad_statistic(dist: rv_continuous, params: Tuple[float, ...], data: n
         cdf_values = dist.cdf(sorted_data, *params)
 
         # Clamp CDF values to avoid log(0) or log(negative)
-        cdf_values = np.clip(cdf_values, 1e-10, 1 - 1e-10)
+        cdf_values = np.clip(cdf_values, NUMERICAL_EPSILON, 1 - NUMERICAL_EPSILON)
 
         # Compute A-D statistic using the formula
         # A^2 = -n - (1/n) sum_i (2i-1)[ln F(X_i) + ln(1-F(X_{n+1-i}))]
@@ -244,7 +248,7 @@ def compute_ad_statistic_frozen(frozen_dist: Any, data: np.ndarray) -> float:
         cdf_values = frozen_dist.cdf(sorted_data)
 
         # Clamp CDF values to avoid log(0) or log(negative)
-        cdf_values = np.clip(cdf_values, 1e-10, 1 - 1e-10)
+        cdf_values = np.clip(cdf_values, NUMERICAL_EPSILON, 1 - NUMERICAL_EPSILON)
 
         # Compute A-D statistic using the formula
         # A^2 = -n - (1/n) sum_i (2i-1)[ln F(X_i) + ln(1-F(X_{n+1-i}))]
