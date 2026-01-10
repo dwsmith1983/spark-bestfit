@@ -48,10 +48,7 @@ def _get_scipy_distribution(dist_name: str):
     try:
         return getattr(st, dist_name)
     except AttributeError:
-        raise ValueError(
-            f"Unknown distribution '{dist_name}'. "
-            f"Must be a valid scipy.stats distribution name."
-        )
+        raise ValueError(f"Unknown distribution '{dist_name}'. " f"Must be a valid scipy.stats distribution name.")
 
 
 def _format_distribution_params(
@@ -69,9 +66,7 @@ def _format_distribution_params(
         e.g., ("norm(loc=50.0000, scale=10.0000)", "loc=50.0000, scale=10.0000")
     """
     param_names = result.get_param_names()
-    param_str = ", ".join(
-        [f"{k}={v:.{precision}f}" for k, v in zip(param_names, result.parameters)]
-    )
+    param_str = ", ".join([f"{k}={v:.{precision}f}" for k, v in zip(param_names, result.parameters)])
     dist_title = f"{result.distribution}({param_str})"
     return dist_title, param_str
 
@@ -99,8 +94,7 @@ def _validate_histogram_inputs(
 
     if len(y_hist) != len(x_hist):
         raise ValueError(
-            f"{func_name} requires y_hist and x_hist to have same length, "
-            f"got {len(y_hist)} and {len(x_hist)}"
+            f"{func_name} requires y_hist and x_hist to have same length, " f"got {len(y_hist)} and {len(x_hist)}"
         )
 
 

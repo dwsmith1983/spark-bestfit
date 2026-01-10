@@ -69,7 +69,7 @@ from spark_bestfit.utils import get_spark_session
 
 # Conditional matplotlib imports for plotting (only if matplotlib is installed)
 try:
-    from spark_bestfit.plotting import (
+    from spark_bestfit.plotting import (  # noqa: F401
         plot_cdf_comparison,
         plot_comparison,
         plot_diagnostics,
