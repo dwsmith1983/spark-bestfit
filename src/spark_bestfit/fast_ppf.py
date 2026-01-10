@@ -3,9 +3,23 @@
 This module provides optimized PPF computations for common distributions,
 bypassing scipy.stats overhead by calling scipy.special functions directly.
 
-The standard scipy.stats.rv_continuous.ppf() uses iterative root-finding,
-which adds ~28x overhead compared to direct formulas. This module implements
-closed-form PPFs for distributions where they exist.
+The scipy.stats.rv_continuous.ppf() machinery adds overhead for parameter
+validation, bounds checking, and generic handling. This module provides
+direct implementations that skip this overhead where possible.
+
+Performance improvements vary by distribution (benchmarked with 100K elements):
+
+    - uniform:     ~16x faster (trivial linear transformation)
+    - weibull_min: ~2.7x faster (closed-form using log1p)
+    - expon:       ~2.3x faster (closed-form using log1p)
+    - norm:        ~1.5x faster (direct ndtri call)
+    - lognorm:     ~1.3x faster (exp of ndtri)
+    - gamma:       ~1.0x (same scipy.special function as scipy.stats)
+    - beta:        ~1.0x (same scipy.special function as scipy.stats)
+
+Note: Gamma and beta use scipy.special.gammaincinv/betaincinv which are
+the same numerical routines used by scipy.stats, so no speedup is expected.
+The main benefit for these distributions is API consistency.
 
 Supported distributions with fast PPF:
     - norm: Normal/Gaussian

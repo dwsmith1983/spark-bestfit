@@ -308,10 +308,61 @@ class TestFastPPFEdgeCases:
 
 
 class TestFastPPFPerformance:
-    """Basic performance sanity checks."""
+    """Performance sanity checks for fast_ppf.
 
-    def test_faster_than_scipy_norm(self):
-        """Verify fast_ppf is at least not slower than scipy for normal."""
+    These are basic timing checks to catch performance regressions.
+    For detailed benchmarks, run: pytest tests/benchmarks/test_benchmark_fast_ppf.py
+
+    Expected speedups (100K elements):
+        - uniform:     ~16x faster (linear transformation)
+        - weibull_min: ~2.7x faster (closed-form)
+        - expon:       ~2.3x faster (closed-form)
+        - norm:        ~1.5x faster (direct ndtri)
+        - lognorm:     ~1.3x faster (exp of ndtri)
+        - gamma:       ~1.0x (same scipy.special function)
+        - beta:        ~1.0x (same scipy.special function)
+    """
+
+    def test_uniform_significantly_faster(self):
+        """Verify uniform PPF is significantly faster than scipy.
+
+        Uniform has a trivial closed-form PPF and should be ~16x faster.
+        We test for at least 5x to account for system variance.
+        """
+        import time
+
+        params = (0.0, 1.0)
+        q = np.random.uniform(0.01, 0.99, 100000)
+
+        # Warm up
+        fast_ppf("uniform", params, q)
+        st.uniform.ppf(q, *params)
+
+        # Time fast_ppf
+        start = time.perf_counter()
+        for _ in range(10):
+            fast_ppf("uniform", params, q)
+        fast_time = time.perf_counter() - start
+
+        # Time scipy
+        start = time.perf_counter()
+        for _ in range(10):
+            st.uniform.ppf(q, *params)
+        scipy_time = time.perf_counter() - start
+
+        speedup = scipy_time / fast_time
+        # Expect at least 5x speedup (conservative to avoid flaky tests)
+        assert speedup >= 5.0, (
+            f"Expected uniform to be at least 5x faster, got {speedup:.1f}x "
+            f"(fast: {fast_time:.3f}s, scipy: {scipy_time:.3f}s)"
+        )
+
+    def test_norm_faster_than_scipy(self):
+        """Verify fast_ppf is faster than scipy for normal distribution.
+
+        Normal uses scipy.special.ndtri and should be ~1.5x faster.
+        We test for at least 1.1x to account for system variance.
+        """
         import time
 
         params = (0.0, 1.0)
@@ -333,7 +384,42 @@ class TestFastPPFPerformance:
             st.norm.ppf(q, *params)
         scipy_time = time.perf_counter() - start
 
-        # fast_ppf should be competitive (allow some margin for test variance)
-        assert fast_time <= scipy_time * 2, (
-            f"fast_ppf took {fast_time:.3f}s, scipy took {scipy_time:.3f}s"
+        speedup = scipy_time / fast_time
+        # Expect at least 1.1x speedup (conservative to avoid flaky tests)
+        assert speedup >= 1.1, (
+            f"Expected norm to be at least 1.1x faster, got {speedup:.1f}x "
+            f"(fast: {fast_time:.3f}s, scipy: {scipy_time:.3f}s)"
+        )
+
+    def test_gamma_not_slower_than_scipy(self):
+        """Verify fast_ppf is not slower than scipy for gamma distribution.
+
+        Gamma uses scipy.special.gammaincinv which is the same function
+        scipy.stats uses internally, so no speedup is expected. We verify
+        it's at least not significantly slower.
+        """
+        import time
+
+        params = (2.0, 0.0, 1.0)
+        q = np.random.uniform(0.01, 0.99, 100000)
+
+        # Warm up
+        fast_ppf("gamma", params, q)
+        st.gamma.ppf(q, *params)
+
+        # Time fast_ppf
+        start = time.perf_counter()
+        for _ in range(5):
+            fast_ppf("gamma", params, q)
+        fast_time = time.perf_counter() - start
+
+        # Time scipy
+        start = time.perf_counter()
+        for _ in range(5):
+            st.gamma.ppf(q, *params)
+        scipy_time = time.perf_counter() - start
+
+        # fast_ppf should not be more than 20% slower
+        assert fast_time <= scipy_time * 1.2, (
+            f"fast_ppf for gamma is too slow: {fast_time:.3f}s vs scipy {scipy_time:.3f}s"
         )
