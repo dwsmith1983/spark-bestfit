@@ -98,6 +98,182 @@ def _validate_histogram_inputs(
         )
 
 
+def _blom_positions(n: int) -> np.ndarray:
+    """Calculate Blom's plotting positions for probability plots.
+
+    Blom's formula provides plotting positions that work well across
+    a wide range of distributions for Q-Q and P-P plots.
+
+    Args:
+        n: Number of data points
+
+    Returns:
+        Array of plotting positions of length n
+    """
+    return (np.arange(1, n + 1) - 0.375) / (n + 0.25)
+
+
+def _render_qq_to_ax(
+    ax: "Axes",
+    result: "DistributionFitResult",
+    data: np.ndarray,
+    marker: str = "o",
+    marker_size: int = 30,
+    marker_alpha: float = 0.6,
+    marker_color: str = "steelblue",
+    edge_width: float = 0.5,
+    line_color: str = "red",
+    line_style: str = "--",
+    line_width: float = 1.5,
+    grid_alpha: float = 0.3,
+    show_legend: bool = True,
+    legend_fontsize: int = 10,
+    reference_label: str = "Reference (y=x)",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Render Q-Q plot to an existing axis.
+
+    Args:
+        ax: Matplotlib axis to render to
+        result: Fitted distribution result
+        data: Sample data array (1D numpy array)
+        marker: Marker style for data points
+        marker_size: Size of scatter markers
+        marker_alpha: Marker transparency (0-1)
+        marker_color: Color of markers
+        edge_width: Width of marker edge
+        line_color: Color of reference line
+        line_style: Style of reference line
+        line_width: Width of reference line
+        grid_alpha: Grid transparency (0-1)
+        show_legend: Whether to show legend
+        legend_fontsize: Font size for legend
+        reference_label: Label for reference line in legend
+
+    Returns:
+        Tuple of (theoretical_quantiles, sorted_data) for potential further use
+    """
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
+    positions = _blom_positions(n)
+    theoretical_quantiles = result.ppf(positions)
+
+    ax.scatter(
+        theoretical_quantiles,
+        sorted_data,
+        s=marker_size,
+        alpha=marker_alpha,
+        c=marker_color,
+        marker=marker,
+        edgecolors="white",
+        linewidth=edge_width,
+        label="Data",
+        zorder=2,
+    )
+
+    min_val = min(theoretical_quantiles.min(), sorted_data.min())
+    max_val = max(theoretical_quantiles.max(), sorted_data.max())
+    margin = (max_val - min_val) * 0.05
+    line_range = [min_val - margin, max_val + margin]
+
+    ax.plot(
+        line_range,
+        line_range,
+        color=line_color,
+        linestyle=line_style,
+        linewidth=line_width,
+        label=reference_label,
+        zorder=1,
+    )
+
+    ax.set_xlim(line_range)
+    ax.set_ylim(line_range)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    if show_legend:
+        ax.legend(fontsize=legend_fontsize, loc="upper left", framealpha=0.9)
+
+    return theoretical_quantiles, sorted_data
+
+
+def _render_pp_to_ax(
+    ax: "Axes",
+    result: "DistributionFitResult",
+    data: np.ndarray,
+    marker: str = "o",
+    marker_size: int = 30,
+    marker_alpha: float = 0.6,
+    marker_color: str = "steelblue",
+    edge_width: float = 0.5,
+    line_color: str = "red",
+    line_style: str = "--",
+    line_width: float = 1.5,
+    grid_alpha: float = 0.3,
+    show_legend: bool = True,
+    legend_fontsize: int = 10,
+    reference_label: str = "Reference (y=x)",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Render P-P plot to an existing axis.
+
+    Args:
+        ax: Matplotlib axis to render to
+        result: Fitted distribution result
+        data: Sample data array (1D numpy array)
+        marker: Marker style for data points
+        marker_size: Size of scatter markers
+        marker_alpha: Marker transparency (0-1)
+        marker_color: Color of markers
+        edge_width: Width of marker edge
+        line_color: Color of reference line
+        line_style: Style of reference line
+        line_width: Width of reference line
+        grid_alpha: Grid transparency (0-1)
+        show_legend: Whether to show legend
+        legend_fontsize: Font size for legend
+        reference_label: Label for reference line in legend
+
+    Returns:
+        Tuple of (theoretical_probs, empirical_probs) for potential further use
+    """
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
+    empirical_probs = _blom_positions(n)
+    theoretical_probs = result.cdf(sorted_data)
+
+    ax.scatter(
+        theoretical_probs,
+        empirical_probs,
+        s=marker_size,
+        alpha=marker_alpha,
+        c=marker_color,
+        marker=marker,
+        edgecolors="white",
+        linewidth=edge_width,
+        label="Data",
+        zorder=2,
+    )
+
+    ax.plot(
+        [0, 1],
+        [0, 1],
+        color=line_color,
+        linestyle=line_style,
+        linewidth=line_width,
+        label=reference_label,
+        zorder=1,
+    )
+
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    if show_legend:
+        ax.legend(fontsize=legend_fontsize, loc="upper left", framealpha=0.9)
+
+    return theoretical_probs, empirical_probs
+
+
 if TYPE_CHECKING:
     from spark_bestfit.results import DistributionFitResult
 
@@ -403,54 +579,25 @@ def plot_qq(
     """
     _check_matplotlib()
 
-    # Sort the data
-    sorted_data = np.sort(data)
-    n = len(sorted_data)
-
-    # Calculate plotting positions using Blom's formula
-    # This is a standard approach that works well across distributions
-    positions = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
-
-    # Calculate theoretical quantiles using the fitted distribution
-    theoretical_quantiles = result.ppf(positions)
-
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Plot data points
-    ax.scatter(
-        theoretical_quantiles,
-        sorted_data,
-        s=marker_size,
-        alpha=marker_alpha,
-        c=marker_color,
+    # Render Q-Q plot to axis using shared helper
+    _render_qq_to_ax(
+        ax,
+        result,
+        data,
         marker=marker,
-        edgecolors="white",
-        linewidth=0.5,
-        label="Data",
-        zorder=2,
+        marker_size=marker_size,
+        marker_alpha=marker_alpha,
+        marker_color=marker_color,
+        line_color=line_color,
+        line_style=line_style,
+        line_width=line_width,
+        grid_alpha=grid_alpha,
+        show_legend=True,
+        legend_fontsize=10,
     )
-
-    # Add reference line (y = x)
-    min_val = min(theoretical_quantiles.min(), sorted_data.min())
-    max_val = max(theoretical_quantiles.max(), sorted_data.max())
-    margin = (max_val - min_val) * 0.05
-    line_range = [min_val - margin, max_val + margin]
-
-    ax.plot(
-        line_range,
-        line_range,
-        color=line_color,
-        linestyle=line_style,
-        linewidth=line_width,
-        label="Reference (y=x)",
-        zorder=1,
-    )
-
-    # Set equal aspect ratio and limits
-    ax.set_xlim(line_range)
-    ax.set_ylim(line_range)
-    ax.set_aspect("equal", adjustable="box")
 
     # Format title with distribution info
     dist_title, _ = _format_distribution_params(result)
@@ -468,10 +615,6 @@ def plot_qq(
     ax.set_title(full_title, fontsize=title_fontsize, pad=15)
     ax.set_xlabel(xlabel, fontsize=label_fontsize)
     ax.set_ylabel(ylabel, fontsize=label_fontsize)
-
-    # Configure legend and grid
-    ax.legend(fontsize=10, loc="upper left", framealpha=0.9)
-    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
 
     plt.tight_layout()
 
@@ -543,45 +686,27 @@ def plot_pp(
     """
     _check_matplotlib()
 
-    # 1. Sort the data
-    sorted_data = np.sort(data)
-    n = len(sorted_data)
-
-    # 2. Calculate empirical probabilities (y-axis) using Blom's formula
-    empirical_probs = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
-
-    # 3. Calculate theoretical probabilities (x-axis) using the fitted CDF
-    # This is the main difference from plot_qq!
-    theoretical_probs = result.cdf(sorted_data)
-
-    # 4. Create figure
+    # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # 5. Plot data points
-    ax.scatter(
-        theoretical_probs,
-        empirical_probs,
-        s=marker_size,
-        alpha=marker_alpha,
-        c=marker_color,
+    # Render P-P plot to axis using shared helper
+    _render_pp_to_ax(
+        ax,
+        result,
+        data,
         marker=marker,
-        edgecolors="white",
-        linewidth=0.5,
-        label="Data",
-        zorder=2,
+        marker_size=marker_size,
+        marker_alpha=marker_alpha,
+        marker_color=marker_color,
+        line_color=line_color,
+        line_style=line_style,
+        line_width=line_width,
+        grid_alpha=grid_alpha,
+        show_legend=True,
+        legend_fontsize=10,
     )
 
-    # 6. Add reference line (y = x from 0 to 1)
-    ax.plot(
-        [0, 1], [0, 1], color=line_color, linestyle=line_style, linewidth=line_width, label="Reference (y=x)", zorder=1
-    )
-
-    # 7. Set aspect and limits (probabilities are always 0 to 1)
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
-    ax.set_aspect("equal", adjustable="box")
-
-    # 8. Title and labels
+    # Format title with distribution info
     dist_title, _ = _format_distribution_params(result)
 
     # Add K-S or SSE metric
@@ -590,17 +715,13 @@ def plot_pp(
         if result.pvalue is not None:
             metrics_str += f", p={result.pvalue:.4f}"
     else:
-        # Fallback to SSE if KS is not available
         metrics_str = f"SSE={result.sse:.6f}"
 
-    # Combine title, distribution info, and metrics
     full_title = f"{title}\n{dist_title}\n{metrics_str}" if title else f"{dist_title}\n{metrics_str}"
 
     ax.set_title(full_title, fontsize=title_fontsize, pad=15)
     ax.set_xlabel(xlabel, fontsize=label_fontsize)
     ax.set_ylabel(ylabel, fontsize=label_fontsize)
-    ax.legend(fontsize=10, loc="upper left", framealpha=0.9)
-    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
 
     plt.tight_layout()
 
@@ -1098,59 +1219,43 @@ def plot_diagnostics(
 
     # Q-Q Plot (top-left)
     ax_qq = axes[0, 0]
-    sorted_data = np.sort(data)
-    n = len(sorted_data)
-    positions = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
-    theoretical_quantiles = result.ppf(positions)
-
-    ax_qq.scatter(
-        theoretical_quantiles,
-        sorted_data,
-        s=20,
-        alpha=0.5,
-        c="steelblue",
-        edgecolors="white",
-        linewidth=0.3,
-        zorder=2,
+    _render_qq_to_ax(
+        ax_qq,
+        result,
+        data,
+        marker_size=20,
+        marker_alpha=0.5,
+        edge_width=0.3,
+        grid_alpha=grid_alpha,
+        show_legend=True,
+        legend_fontsize=8,
+        reference_label="y=x",
     )
-    min_val = min(theoretical_quantiles.min(), sorted_data.min())
-    max_val = max(theoretical_quantiles.max(), sorted_data.max())
-    margin = (max_val - min_val) * 0.05
-    line_range = [min_val - margin, max_val + margin]
-    ax_qq.plot(line_range, line_range, "r--", lw=1.5, label="y=x", zorder=1)
-    ax_qq.set_xlim(line_range)
-    ax_qq.set_ylim(line_range)
-    ax_qq.set_aspect("equal", adjustable="box")
     ax_qq.set_title("Q-Q Plot", fontsize=subplot_title_fontsize)
     ax_qq.set_xlabel("Theoretical Quantiles", fontsize=label_fontsize)
     ax_qq.set_ylabel("Sample Quantiles", fontsize=label_fontsize)
-    ax_qq.legend(fontsize=8, loc="upper left")
-    ax_qq.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
 
     # P-P Plot (top-right)
     ax_pp = axes[0, 1]
-    empirical_probs = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
-    theoretical_probs = result.cdf(sorted_data)
-
-    ax_pp.scatter(
-        theoretical_probs,
-        empirical_probs,
-        s=20,
-        alpha=0.5,
-        c="steelblue",
-        edgecolors="white",
-        linewidth=0.3,
-        zorder=2,
+    _render_pp_to_ax(
+        ax_pp,
+        result,
+        data,
+        marker_size=20,
+        marker_alpha=0.5,
+        edge_width=0.3,
+        grid_alpha=grid_alpha,
+        show_legend=True,
+        legend_fontsize=8,
+        reference_label="y=x",
     )
-    ax_pp.plot([0, 1], [0, 1], "r--", lw=1.5, label="y=x", zorder=1)
-    ax_pp.set_xlim([0, 1])
-    ax_pp.set_ylim([0, 1])
-    ax_pp.set_aspect("equal", adjustable="box")
     ax_pp.set_title("P-P Plot", fontsize=subplot_title_fontsize)
     ax_pp.set_xlabel("Theoretical Probabilities", fontsize=label_fontsize)
     ax_pp.set_ylabel("Sample Probabilities", fontsize=label_fontsize)
-    ax_pp.legend(fontsize=8, loc="upper left")
-    ax_pp.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    # Pre-compute sorted data for CDF plot
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
 
     # Residual Histogram (bottom-left)
     ax_resid = axes[1, 0]
