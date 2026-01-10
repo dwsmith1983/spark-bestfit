@@ -55,8 +55,19 @@ from spark_bestfit.core import (
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
 from spark_bestfit.protocols import ExecutionBackend
-from spark_bestfit.results import (
+from spark_bestfit.results import (  # Collection classes; Data classes; Type aliases; Constants
+    DEFAULT_AD_THRESHOLD,
+    DEFAULT_BINS,
+    DEFAULT_BOOTSTRAP_SAMPLES,
+    DEFAULT_DPI,
+    DEFAULT_KS_THRESHOLD,
+    DEFAULT_MAX_SAMPLES,
+    DEFAULT_PVALUE_THRESHOLD,
+    DEFAULT_SAMPLE_SIZE,
+    FITTING_SAMPLE_SIZE,
     BaseFitResults,
+    ContinuousHistogram,
+    DiscreteHistogram,
     DistributionFitResult,
     EagerFitResults,
     FitResults,
@@ -117,6 +128,18 @@ __all__ = [
     "DistributionFitResult",
     # Type aliases
     "MetricName",
+    "ContinuousHistogram",
+    "DiscreteHistogram",
+    # Constants
+    "FITTING_SAMPLE_SIZE",
+    "DEFAULT_PVALUE_THRESHOLD",
+    "DEFAULT_KS_THRESHOLD",
+    "DEFAULT_AD_THRESHOLD",
+    "DEFAULT_BINS",
+    "DEFAULT_BOOTSTRAP_SAMPLES",
+    "DEFAULT_MAX_SAMPLES",
+    "DEFAULT_DPI",
+    "DEFAULT_SAMPLE_SIZE",
     # Serialization
     "SerializationError",
     # Distribution management
