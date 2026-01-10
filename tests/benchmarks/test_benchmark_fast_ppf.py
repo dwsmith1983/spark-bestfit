@@ -372,3 +372,236 @@ class TestFastPPFFallbackPerformance:
 
         result = benchmark(run)
         assert len(result) == 100_000
+
+
+# =============================================================================
+# End-to-end Copula Sampling Benchmarks
+# =============================================================================
+
+
+class TestCopulaSamplingWithFastPPF:
+    """End-to-end benchmarks for copula.sample() with fast_ppf optimization.
+
+    These benchmarks measure the real-world speedup when using fast_ppf in
+    copula sampling. The fast_ppf module claims ~28x speedup over scipy's
+    generic PPF machinery; these tests validate that claim in context.
+
+    The comparison is between:
+    - Distributions with fast_ppf support (norm, gamma) - uses direct formulas
+    - Distributions without fast_ppf support (pareto) - falls back to scipy
+    """
+
+    @pytest.fixture
+    def copula_fast_ppf(self):
+        """Create a 2-column copula using distributions with fast_ppf support."""
+        from spark_bestfit.copula import GaussianCopula
+        from spark_bestfit.results import DistributionFitResult
+
+        # Use norm and gamma - both have fast_ppf implementations
+        marginals = {
+            "col_norm": DistributionFitResult(
+                distribution="norm",
+                parameters=[0.0, 1.0],  # loc, scale
+                sse=0.0,
+            ),
+            "col_gamma": DistributionFitResult(
+                distribution="gamma",
+                parameters=[2.0, 0.0, 1.0],  # a, loc, scale
+                sse=0.0,
+            ),
+        }
+
+        # Simple identity-like correlation (slightly correlated)
+        correlation_matrix = np.array([[1.0, 0.3], [0.3, 1.0]])
+
+        return GaussianCopula(
+            column_names=["col_norm", "col_gamma"],
+            marginals=marginals,
+            correlation_matrix=correlation_matrix,
+        )
+
+    @pytest.fixture
+    def copula_scipy_fallback(self):
+        """Create a 2-column copula using distributions WITHOUT fast_ppf support."""
+        from spark_bestfit.copula import GaussianCopula
+        from spark_bestfit.results import DistributionFitResult
+
+        # Use pareto and chi2 - neither have fast_ppf implementations
+        marginals = {
+            "col_pareto": DistributionFitResult(
+                distribution="pareto",
+                parameters=[2.0, 0.0, 1.0],  # b (shape), loc, scale
+                sse=0.0,
+            ),
+            "col_chi2": DistributionFitResult(
+                distribution="chi2",
+                parameters=[5.0, 0.0, 1.0],  # df, loc, scale
+                sse=0.0,
+            ),
+        }
+
+        # Verify these don't have fast_ppf
+        assert not has_fast_ppf("pareto")
+        assert not has_fast_ppf("chi2")
+
+        correlation_matrix = np.array([[1.0, 0.3], [0.3, 1.0]])
+
+        return GaussianCopula(
+            column_names=["col_pareto", "col_chi2"],
+            marginals=marginals,
+            correlation_matrix=correlation_matrix,
+        )
+
+    # -------------------------------------------------------------------------
+    # Benchmarks with fast_ppf enabled (norm, gamma)
+    # -------------------------------------------------------------------------
+
+    def test_copula_sample_1k_fast_ppf(self, benchmark, copula_fast_ppf):
+        """Copula sample 1K with fast_ppf-supported distributions."""
+
+        def run():
+            return copula_fast_ppf.sample(n=1_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_norm"]) == 1_000
+        assert len(result["col_gamma"]) == 1_000
+
+    def test_copula_sample_10k_fast_ppf(self, benchmark, copula_fast_ppf):
+        """Copula sample 10K with fast_ppf-supported distributions."""
+
+        def run():
+            return copula_fast_ppf.sample(n=10_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_norm"]) == 10_000
+
+    def test_copula_sample_100k_fast_ppf(self, benchmark, copula_fast_ppf):
+        """Copula sample 100K with fast_ppf-supported distributions."""
+
+        def run():
+            return copula_fast_ppf.sample(n=100_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_norm"]) == 100_000
+
+    def test_copula_sample_1m_fast_ppf(self, benchmark, copula_fast_ppf):
+        """Copula sample 1M with fast_ppf-supported distributions."""
+
+        def run():
+            return copula_fast_ppf.sample(n=1_000_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_norm"]) == 1_000_000
+
+    # -------------------------------------------------------------------------
+    # Benchmarks with scipy fallback (pareto, chi2)
+    # -------------------------------------------------------------------------
+
+    def test_copula_sample_1k_scipy_fallback(self, benchmark, copula_scipy_fallback):
+        """Copula sample 1K with scipy fallback distributions."""
+
+        def run():
+            return copula_scipy_fallback.sample(n=1_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_pareto"]) == 1_000
+
+    def test_copula_sample_10k_scipy_fallback(self, benchmark, copula_scipy_fallback):
+        """Copula sample 10K with scipy fallback distributions."""
+
+        def run():
+            return copula_scipy_fallback.sample(n=10_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_pareto"]) == 10_000
+
+    def test_copula_sample_100k_scipy_fallback(self, benchmark, copula_scipy_fallback):
+        """Copula sample 100K with scipy fallback distributions."""
+
+        def run():
+            return copula_scipy_fallback.sample(n=100_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_pareto"]) == 100_000
+
+    def test_copula_sample_1m_scipy_fallback(self, benchmark, copula_scipy_fallback):
+        """Copula sample 1M with scipy fallback distributions."""
+
+        def run():
+            return copula_scipy_fallback.sample(n=1_000_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_pareto"]) == 1_000_000
+
+
+class TestCopulaSamplingForcedFallback:
+    """Benchmark copula sampling with fast_ppf forcibly disabled.
+
+    These benchmarks use the SAME distributions (norm, gamma) but force
+    scipy fallback by patching has_fast_ppf. This isolates the speedup
+    attributable to fast_ppf vs scipy's generic PPF machinery.
+
+    Compare these results with TestCopulaSamplingWithFastPPF to see the
+    true impact of fast_ppf optimization.
+    """
+
+    @pytest.fixture
+    def copula_norm_gamma(self):
+        """Create a 2-column copula using norm and gamma distributions."""
+        from spark_bestfit.copula import GaussianCopula
+        from spark_bestfit.results import DistributionFitResult
+
+        marginals = {
+            "col_norm": DistributionFitResult(
+                distribution="norm",
+                parameters=[0.0, 1.0],
+                sse=0.0,
+            ),
+            "col_gamma": DistributionFitResult(
+                distribution="gamma",
+                parameters=[2.0, 0.0, 1.0],
+                sse=0.0,
+            ),
+        }
+
+        correlation_matrix = np.array([[1.0, 0.3], [0.3, 1.0]])
+
+        return GaussianCopula(
+            column_names=["col_norm", "col_gamma"],
+            marginals=marginals,
+            correlation_matrix=correlation_matrix,
+        )
+
+    def test_copula_sample_100k_forced_scipy(self, benchmark, copula_norm_gamma, monkeypatch):
+        """Copula sample 100K with fast_ppf DISABLED (forced scipy fallback).
+
+        This uses norm and gamma distributions but patches has_fast_ppf to
+        return False, forcing scipy's generic PPF path.
+
+        Compare with test_copula_sample_100k_fast_ppf to see the speedup.
+        """
+        # Patch has_fast_ppf to always return False
+        import spark_bestfit.copula as copula_module
+
+        monkeypatch.setattr(copula_module, "has_fast_ppf", lambda x: False)
+
+        def run():
+            return copula_norm_gamma.sample(n=100_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_norm"]) == 100_000
+
+    def test_copula_sample_1m_forced_scipy(self, benchmark, copula_norm_gamma, monkeypatch):
+        """Copula sample 1M with fast_ppf DISABLED (forced scipy fallback).
+
+        Compare with test_copula_sample_1m_fast_ppf to see the speedup.
+        """
+        import spark_bestfit.copula as copula_module
+
+        monkeypatch.setattr(copula_module, "has_fast_ppf", lambda x: False)
+
+        def run():
+            return copula_norm_gamma.sample(n=1_000_000, random_state=42)
+
+        result = benchmark(run)
+        assert len(result["col_norm"]) == 1_000_000
