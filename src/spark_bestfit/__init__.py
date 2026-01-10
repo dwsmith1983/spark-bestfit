@@ -72,6 +72,9 @@ from spark_bestfit.results import (  # Collection classes; Data classes; Type al
     EagerFitResults,
     FitResults,
     FitResultsType,
+    HistogramBins,
+    HistogramCounts,
+    HistogramResult,
     LazyFitResults,
     MetricName,
 )
@@ -130,6 +133,9 @@ __all__ = [
     "MetricName",
     "ContinuousHistogram",
     "DiscreteHistogram",
+    "HistogramBins",
+    "HistogramCounts",
+    "HistogramResult",
     # Constants
     "FITTING_SAMPLE_SIZE",
     "DEFAULT_PVALUE_THRESHOLD",

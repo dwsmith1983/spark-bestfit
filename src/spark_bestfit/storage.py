@@ -12,6 +12,9 @@ Type Aliases:
     MetricName: Valid metric names for sorting/filtering.
     ContinuousHistogram: Tuple type for continuous distribution histograms.
     DiscreteHistogram: Tuple type for discrete distribution histograms.
+    HistogramBins: Array of bin edges (len = n_bins + 1).
+    HistogramCounts: Array of counts/density per bin.
+    HistogramResult: Tuple type for HistogramComputer results (counts, bins).
 
 Constants:
     FITTING_SAMPLE_SIZE: Default sample size for fitting (10000).
@@ -27,7 +30,7 @@ Constants:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, TypeAlias, Union
 
 import numpy as np
 import scipy.stats as st
@@ -83,6 +86,16 @@ ContinuousHistogram = Tuple[np.ndarray, np.ndarray]
 
 # DiscreteHistogram: (x_values, empirical_pmf) where both arrays have same length
 DiscreteHistogram = Tuple[np.ndarray, np.ndarray]
+
+# HistogramBins: Array of bin edges (len = n_bins + 1)
+HistogramBins: TypeAlias = np.ndarray
+
+# HistogramCounts: Array of counts/density per bin
+HistogramCounts: TypeAlias = np.ndarray
+
+# HistogramResult: Complete histogram from HistogramComputer.compute_histogram()
+# Order is (counts, bins) where counts has n_bins elements and bins has n_bins + 1 edges
+HistogramResult: TypeAlias = Tuple[np.ndarray, np.ndarray]
 
 
 # =============================================================================
