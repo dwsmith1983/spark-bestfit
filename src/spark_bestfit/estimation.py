@@ -22,7 +22,7 @@ from spark_bestfit.metrics import (
     compute_information_criteria_frozen,
     compute_ks_statistic_frozen,
 )
-from spark_bestfit.truncated import TruncatedFrozenDist, create_truncated_dist
+from spark_bestfit.truncated import create_truncated_dist
 
 # PySpark is optional - only import if available
 try:
