@@ -707,3 +707,458 @@ def _get_discrete_param_names(dist_name: str) -> List[str]:
         "nhypergeom": ["M", "n", "r"],
     }
     return param_map.get(dist_name, ["param" + str(i) for i in range(10)])
+
+
+def plot_residual_histogram(
+    result: "DistributionFitResult",
+    y_hist: np.ndarray,
+    x_hist: np.ndarray,
+    title: str = "",
+    xlabel: str = "Residual (Observed - Expected)",
+    ylabel: str = "Frequency",
+    figsize: Tuple[int, int] = (10, 8),
+    dpi: int = 100,
+    bins: int = 30,
+    histogram_alpha: float = 0.7,
+    histogram_color: str = "steelblue",
+    show_zero_line: bool = True,
+    zero_line_color: str = "red",
+    zero_line_style: str = "--",
+    zero_line_width: float = 1.5,
+    title_fontsize: int = 14,
+    label_fontsize: int = 12,
+    grid_alpha: float = 0.3,
+    save_path: Optional[str] = None,
+    save_format: str = "png",
+) -> Tuple[Figure, Axes]:
+    """Plot a histogram of residuals (observed - expected density).
+
+    Residuals are computed as the difference between the empirical density
+    (from histogram) and the theoretical density (from fitted distribution).
+    A good fit should show residuals centered near zero.
+
+    Args:
+        result: Fitted distribution result
+        y_hist: Histogram density values (empirical density)
+        x_hist: Histogram bin centers
+        title: Plot title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+        figsize: Figure size (width, height)
+        dpi: Dots per inch for saved figures
+        bins: Number of bins for the residual histogram
+        histogram_alpha: Histogram transparency (0-1)
+        histogram_color: Color of histogram bars
+        show_zero_line: Whether to show a vertical line at zero
+        zero_line_color: Color of the zero reference line
+        zero_line_style: Style of the zero reference line
+        zero_line_width: Width of the zero reference line
+        title_fontsize: Title font size
+        label_fontsize: Axis label font size
+        grid_alpha: Grid transparency (0-1)
+        save_path: Optional path to save figure
+        save_format: Save format (png, pdf, svg)
+
+    Returns:
+        Tuple of (figure, axis)
+
+    Example:
+        >>> from spark_bestfit import DistributionFitter
+        >>> fitter = DistributionFitter(spark)
+        >>> results = fitter.fit(df, 'value')
+        >>> best = results.best(n=1)[0]
+        >>> y_hist, x_edges = np.histogram(data, bins=50, density=True)
+        >>> x_hist = (x_edges[:-1] + x_edges[1:]) / 2
+        >>> plot_residual_histogram(best, y_hist, x_hist)
+    """
+    _check_matplotlib()
+
+    # Compute theoretical density at bin centers
+    theoretical_density = result.pdf(x_hist)
+
+    # Compute residuals
+    residuals = y_hist - theoretical_density
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Plot histogram of residuals
+    ax.hist(
+        residuals,
+        bins=bins,
+        alpha=histogram_alpha,
+        color=histogram_color,
+        edgecolor="white",
+        linewidth=0.5,
+        label="Residuals",
+        zorder=2,
+    )
+
+    # Add zero reference line
+    if show_zero_line:
+        ax.axvline(
+            x=0,
+            color=zero_line_color,
+            linestyle=zero_line_style,
+            linewidth=zero_line_width,
+            label="Zero",
+            zorder=3,
+        )
+
+    # Format title with distribution info and residual statistics
+    dist = getattr(st, result.distribution)
+    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
+    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
+    dist_title = f"{result.distribution}({param_str})"
+
+    # Compute residual statistics
+    mean_resid = np.mean(residuals)
+    std_resid = np.std(residuals)
+    stats_str = f"Mean={mean_resid:.6f}, Std={std_resid:.6f}"
+
+    full_title = f"{title}\n{dist_title}\n{stats_str}" if title else f"{dist_title}\n{stats_str}"
+
+    ax.set_title(full_title, fontsize=title_fontsize, pad=15)
+    ax.set_xlabel(xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=label_fontsize)
+
+    # Configure legend and grid
+    ax.legend(fontsize=10, loc="upper right", framealpha=0.9)
+    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
+
+    return fig, ax
+
+
+def plot_cdf_comparison(
+    result: "DistributionFitResult",
+    data: np.ndarray,
+    title: str = "",
+    xlabel: str = "Value",
+    ylabel: str = "Cumulative Probability",
+    figsize: Tuple[int, int] = (10, 8),
+    dpi: int = 100,
+    empirical_color: str = "steelblue",
+    empirical_linewidth: float = 2.0,
+    empirical_alpha: float = 0.8,
+    theoretical_color: str = "red",
+    theoretical_linewidth: float = 2.0,
+    theoretical_linestyle: str = "--",
+    title_fontsize: int = 14,
+    label_fontsize: int = 12,
+    legend_fontsize: int = 10,
+    grid_alpha: float = 0.3,
+    save_path: Optional[str] = None,
+    save_format: str = "png",
+) -> Tuple[Figure, Axes]:
+    """Plot empirical CDF overlaid with theoretical CDF from the fitted distribution.
+
+    The empirical CDF is computed from the sample data using the step function.
+    The theoretical CDF is computed from the fitted distribution. A good fit
+    shows close alignment between the two CDFs.
+
+    Args:
+        result: Fitted distribution result
+        data: Sample data array (1D numpy array)
+        title: Plot title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+        figsize: Figure size (width, height)
+        dpi: Dots per inch for saved figures
+        empirical_color: Color of empirical CDF line
+        empirical_linewidth: Line width for empirical CDF
+        empirical_alpha: Transparency of empirical CDF line
+        theoretical_color: Color of theoretical CDF line
+        theoretical_linewidth: Line width for theoretical CDF
+        theoretical_linestyle: Line style for theoretical CDF
+        title_fontsize: Title font size
+        label_fontsize: Axis label font size
+        legend_fontsize: Legend font size
+        grid_alpha: Grid transparency (0-1)
+        save_path: Optional path to save figure
+        save_format: Save format (png, pdf, svg)
+
+    Returns:
+        Tuple of (figure, axis)
+
+    Example:
+        >>> from spark_bestfit import DistributionFitter
+        >>> fitter = DistributionFitter(spark)
+        >>> results = fitter.fit(df, 'value')
+        >>> best = results.best(n=1)[0]
+        >>> plot_cdf_comparison(best, data, title='CDF Comparison')
+    """
+    _check_matplotlib()
+
+    # Sort data for empirical CDF
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
+
+    # Compute empirical CDF (step function)
+    empirical_cdf = np.arange(1, n + 1) / n
+
+    # Compute theoretical CDF over the data range
+    x_range = np.linspace(sorted_data.min(), sorted_data.max(), 1000)
+    theoretical_cdf = result.cdf(x_range)
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Plot empirical CDF as step function
+    ax.step(
+        sorted_data,
+        empirical_cdf,
+        where="post",
+        color=empirical_color,
+        linewidth=empirical_linewidth,
+        alpha=empirical_alpha,
+        label="Empirical CDF",
+        zorder=2,
+    )
+
+    # Plot theoretical CDF as smooth curve
+    ax.plot(
+        x_range,
+        theoretical_cdf,
+        color=theoretical_color,
+        linewidth=theoretical_linewidth,
+        linestyle=theoretical_linestyle,
+        label="Theoretical CDF",
+        zorder=3,
+    )
+
+    # Format title with distribution info
+    dist = getattr(st, result.distribution)
+    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
+    param_str = ", ".join([f"{k}={v:.4f}" for k, v in zip(param_names, result.parameters)])
+    dist_title = f"{result.distribution}({param_str})"
+
+    # Add K-S statistic if available
+    if result.ks_statistic is not None:
+        metrics_str = f"KS={result.ks_statistic:.6f}"
+        if result.pvalue is not None:
+            metrics_str += f", p={result.pvalue:.4f}"
+    else:
+        metrics_str = f"SSE={result.sse:.6f}"
+
+    full_title = f"{title}\n{dist_title}\n{metrics_str}" if title else f"{dist_title}\n{metrics_str}"
+
+    ax.set_title(full_title, fontsize=title_fontsize, pad=15)
+    ax.set_xlabel(xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=label_fontsize)
+
+    # Set y-axis limits
+    ax.set_ylim([0, 1.05])
+
+    # Configure legend and grid
+    ax.legend(fontsize=legend_fontsize, loc="lower right", framealpha=0.9)
+    ax.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
+
+    return fig, ax
+
+
+def plot_diagnostics(
+    result: "DistributionFitResult",
+    data: np.ndarray,
+    y_hist: Optional[np.ndarray] = None,
+    x_hist: Optional[np.ndarray] = None,
+    bins: int = 50,
+    title: str = "",
+    figsize: Tuple[int, int] = (14, 12),
+    dpi: int = 100,
+    title_fontsize: int = 16,
+    subplot_title_fontsize: int = 12,
+    label_fontsize: int = 10,
+    grid_alpha: float = 0.3,
+    save_path: Optional[str] = None,
+    save_format: str = "png",
+) -> Tuple[Figure, np.ndarray]:
+    """Create a 2x2 diagnostic plot panel for assessing distribution fit quality.
+
+    Generates four diagnostic plots:
+    - Q-Q Plot (top-left): Compares sample quantiles vs theoretical quantiles
+    - P-P Plot (top-right): Compares empirical vs theoretical probabilities
+    - Residual Histogram (bottom-left): Distribution of fit residuals
+    - CDF Comparison (bottom-right): Empirical vs theoretical CDF overlay
+
+    Args:
+        result: Fitted distribution result
+        data: Sample data array (1D numpy array)
+        y_hist: Optional pre-computed histogram density values. If None,
+            computed from data using specified bins.
+        x_hist: Optional pre-computed histogram bin centers. If None,
+            computed from data using specified bins.
+        bins: Number of histogram bins (used if y_hist/x_hist not provided)
+        title: Overall figure title
+        figsize: Figure size (width, height)
+        dpi: Dots per inch for saved figures
+        title_fontsize: Main title font size
+        subplot_title_fontsize: Subplot title font size
+        label_fontsize: Axis label font size
+        grid_alpha: Grid transparency (0-1)
+        save_path: Optional path to save figure
+        save_format: Save format (png, pdf, svg)
+
+    Returns:
+        Tuple of (figure, array of axes)
+
+    Example:
+        >>> from spark_bestfit import DistributionFitter
+        >>> fitter = DistributionFitter(spark)
+        >>> results = fitter.fit(df, 'value')
+        >>> best = results.best(n=1)[0]
+        >>> fig, axes = plot_diagnostics(best, data, title='Fit Diagnostics')
+    """
+    _check_matplotlib()
+
+    # Compute histogram if not provided
+    if y_hist is None or x_hist is None:
+        y_hist_computed, x_edges = np.histogram(data, bins=bins, density=True)
+        x_hist_computed = (x_edges[:-1] + x_edges[1:]) / 2
+        y_hist = y_hist_computed
+        x_hist = x_hist_computed
+
+    # Create 2x2 subplot grid
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+
+    # Format distribution info for subplot titles
+    dist = getattr(st, result.distribution)
+    param_names = (dist.shapes + ", loc, scale").split(", ") if dist.shapes else ["loc", "scale"]
+    param_str = ", ".join([f"{k}={v:.2f}" for k, v in zip(param_names, result.parameters)])
+    dist_info = f"{result.distribution}({param_str})"
+
+    # Q-Q Plot (top-left)
+    ax_qq = axes[0, 0]
+    sorted_data = np.sort(data)
+    n = len(sorted_data)
+    positions = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
+    theoretical_quantiles = result.ppf(positions)
+
+    ax_qq.scatter(
+        theoretical_quantiles,
+        sorted_data,
+        s=20,
+        alpha=0.5,
+        c="steelblue",
+        edgecolors="white",
+        linewidth=0.3,
+        zorder=2,
+    )
+    min_val = min(theoretical_quantiles.min(), sorted_data.min())
+    max_val = max(theoretical_quantiles.max(), sorted_data.max())
+    margin = (max_val - min_val) * 0.05
+    line_range = [min_val - margin, max_val + margin]
+    ax_qq.plot(line_range, line_range, "r--", lw=1.5, label="y=x", zorder=1)
+    ax_qq.set_xlim(line_range)
+    ax_qq.set_ylim(line_range)
+    ax_qq.set_aspect("equal", adjustable="box")
+    ax_qq.set_title("Q-Q Plot", fontsize=subplot_title_fontsize)
+    ax_qq.set_xlabel("Theoretical Quantiles", fontsize=label_fontsize)
+    ax_qq.set_ylabel("Sample Quantiles", fontsize=label_fontsize)
+    ax_qq.legend(fontsize=8, loc="upper left")
+    ax_qq.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    # P-P Plot (top-right)
+    ax_pp = axes[0, 1]
+    empirical_probs = (np.arange(1, n + 1) - 0.375) / (n + 0.25)
+    theoretical_probs = result.cdf(sorted_data)
+
+    ax_pp.scatter(
+        theoretical_probs,
+        empirical_probs,
+        s=20,
+        alpha=0.5,
+        c="steelblue",
+        edgecolors="white",
+        linewidth=0.3,
+        zorder=2,
+    )
+    ax_pp.plot([0, 1], [0, 1], "r--", lw=1.5, label="y=x", zorder=1)
+    ax_pp.set_xlim([0, 1])
+    ax_pp.set_ylim([0, 1])
+    ax_pp.set_aspect("equal", adjustable="box")
+    ax_pp.set_title("P-P Plot", fontsize=subplot_title_fontsize)
+    ax_pp.set_xlabel("Theoretical Probabilities", fontsize=label_fontsize)
+    ax_pp.set_ylabel("Sample Probabilities", fontsize=label_fontsize)
+    ax_pp.legend(fontsize=8, loc="upper left")
+    ax_pp.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    # Residual Histogram (bottom-left)
+    ax_resid = axes[1, 0]
+    theoretical_density = result.pdf(x_hist)
+    residuals = y_hist - theoretical_density
+    mean_resid = np.mean(residuals)
+    std_resid = np.std(residuals)
+
+    ax_resid.hist(
+        residuals,
+        bins=30,
+        alpha=0.7,
+        color="steelblue",
+        edgecolor="white",
+        linewidth=0.5,
+        zorder=2,
+    )
+    ax_resid.axvline(x=0, color="red", linestyle="--", linewidth=1.5, label="Zero", zorder=3)
+    ax_resid.set_title(f"Residual Histogram\nMean={mean_resid:.4f}, Std={std_resid:.4f}", fontsize=subplot_title_fontsize)
+    ax_resid.set_xlabel("Residual (Observed - Expected)", fontsize=label_fontsize)
+    ax_resid.set_ylabel("Frequency", fontsize=label_fontsize)
+    ax_resid.legend(fontsize=8, loc="upper right")
+    ax_resid.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    # CDF Comparison (bottom-right)
+    ax_cdf = axes[1, 1]
+    empirical_cdf = np.arange(1, n + 1) / n
+    x_range = np.linspace(sorted_data.min(), sorted_data.max(), 1000)
+    theoretical_cdf = result.cdf(x_range)
+
+    ax_cdf.step(
+        sorted_data,
+        empirical_cdf,
+        where="post",
+        color="steelblue",
+        linewidth=1.5,
+        alpha=0.8,
+        label="Empirical CDF",
+        zorder=2,
+    )
+    ax_cdf.plot(
+        x_range,
+        theoretical_cdf,
+        color="red",
+        linewidth=1.5,
+        linestyle="--",
+        label="Theoretical CDF",
+        zorder=3,
+    )
+    ax_cdf.set_ylim([0, 1.05])
+    ax_cdf.set_title("CDF Comparison", fontsize=subplot_title_fontsize)
+    ax_cdf.set_xlabel("Value", fontsize=label_fontsize)
+    ax_cdf.set_ylabel("Cumulative Probability", fontsize=label_fontsize)
+    ax_cdf.legend(fontsize=8, loc="lower right")
+    ax_cdf.grid(alpha=grid_alpha, linestyle="--", linewidth=0.5, zorder=0)
+
+    # Set overall title
+    if title:
+        fig.suptitle(f"{title}\n{dist_info}", fontsize=title_fontsize, y=1.02)
+    else:
+        fig.suptitle(dist_info, fontsize=title_fontsize, y=1.02)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, format=save_format, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
+
+    return fig, axes

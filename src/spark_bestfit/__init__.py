@@ -67,6 +67,23 @@ from spark_bestfit.results import (
 from spark_bestfit.serialization import SerializationError
 from spark_bestfit.utils import get_spark_session
 
+# Conditional matplotlib imports for plotting (only if matplotlib is installed)
+try:
+    from spark_bestfit.plotting import (
+        plot_cdf_comparison,
+        plot_comparison,
+        plot_diagnostics,
+        plot_discrete_distribution,
+        plot_distribution,
+        plot_pp,
+        plot_qq,
+        plot_residual_histogram,
+    )
+
+    _MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    _MATPLOTLIB_AVAILABLE = False
+
 __author__ = "Dustin Smith"
 __email__ = "dustin.william.smith@gmail.com"
 
@@ -118,3 +135,18 @@ if _SPARK_AVAILABLE:
 # Conditionally add RayBackend to exports if ray is installed
 if _RAY_AVAILABLE:
     __all__.append("RayBackend")
+
+# Conditionally add plotting functions to exports if matplotlib is installed
+if _MATPLOTLIB_AVAILABLE:
+    __all__.extend(
+        [
+            "plot_distribution",
+            "plot_comparison",
+            "plot_qq",
+            "plot_pp",
+            "plot_discrete_distribution",
+            "plot_residual_histogram",
+            "plot_cdf_comparison",
+            "plot_diagnostics",
+        ]
+    )

@@ -8,7 +8,15 @@ matplotlib.use("Agg")  # Non-interactive backend for tests
 import matplotlib.pyplot as plt
 
 from spark_bestfit.results import DistributionFitResult
-from spark_bestfit.plotting import plot_comparison, plot_distribution, plot_qq, plot_pp
+from spark_bestfit.plotting import (
+    plot_cdf_comparison,
+    plot_comparison,
+    plot_diagnostics,
+    plot_distribution,
+    plot_pp,
+    plot_qq,
+    plot_residual_histogram,
+)
 
 # Fixtures are now in conftest.py: normal_result, gamma_result, expon_result,
 # result_with_ks, sample_histogram, sample_data
@@ -675,4 +683,334 @@ class TestPlotEdgeCases:
         fig, ax = plot_comparison(results, y_hist, x_hist)
 
         assert fig is not None
+        plt.close(fig)
+
+
+class TestPlotResidualHistogram:
+    """Tests for plot_residual_histogram function."""
+
+    def test_basic_residual_histogram(self, normal_result, sample_histogram):
+        """Test basic residual histogram creates valid figure."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(normal_result, y_hist, x_hist)
+
+        assert fig is not None
+        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Verify histogram bars exist
+        assert len(ax.patches) > 0, "Should have histogram bars"
+
+        # Verify zero line exists
+        assert len(ax.lines) >= 1, "Should have zero reference line"
+
+        plt.close(fig)
+
+    def test_residual_histogram_with_title(self, normal_result, sample_histogram):
+        """Test residual histogram with custom title."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(normal_result, y_hist, x_hist, title="Custom Title")
+
+        assert "Custom Title" in ax.get_title()
+        plt.close(fig)
+
+    def test_residual_histogram_custom_labels(self, normal_result, sample_histogram):
+        """Test residual histogram with custom axis labels."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(
+            normal_result, y_hist, x_hist, xlabel="Custom X", ylabel="Custom Y"
+        )
+
+        assert ax.get_xlabel() == "Custom X"
+        assert ax.get_ylabel() == "Custom Y"
+        plt.close(fig)
+
+    def test_residual_histogram_shows_stats(self, normal_result, sample_histogram):
+        """Test residual histogram shows mean and std in title."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(normal_result, y_hist, x_hist)
+
+        title = ax.get_title()
+        assert "Mean=" in title
+        assert "Std=" in title
+        plt.close(fig)
+
+    def test_residual_histogram_without_zero_line(self, normal_result, sample_histogram):
+        """Test residual histogram without zero reference line."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(normal_result, y_hist, x_hist, show_zero_line=False)
+
+        # Should still have histogram, but no zero line
+        assert len(ax.patches) > 0
+        plt.close(fig)
+
+    def test_residual_histogram_custom_bins(self, normal_result, sample_histogram):
+        """Test residual histogram with custom number of bins."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(normal_result, y_hist, x_hist, bins=10)
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_residual_histogram_custom_color(self, normal_result, sample_histogram):
+        """Test residual histogram with custom color."""
+        y_hist, x_hist = sample_histogram
+
+        fig, ax = plot_residual_histogram(
+            normal_result, y_hist, x_hist, histogram_color="green", zero_line_color="blue"
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_residual_histogram_save(self, normal_result, sample_histogram, tmp_path):
+        """Test saving residual histogram to file."""
+        y_hist, x_hist = sample_histogram
+        save_path = str(tmp_path / "residual_hist.png")
+
+        fig, ax = plot_residual_histogram(normal_result, y_hist, x_hist, save_path=save_path)
+
+        assert (tmp_path / "residual_hist.png").exists()
+        plt.close(fig)
+
+
+class TestPlotCdfComparison:
+    """Tests for plot_cdf_comparison function."""
+
+    def test_basic_cdf_comparison(self, result_with_ks, sample_data):
+        """Test basic CDF comparison creates valid figure."""
+        fig, ax = plot_cdf_comparison(result_with_ks, sample_data)
+
+        assert fig is not None
+        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Should have two lines (empirical step + theoretical curve)
+        assert len(ax.lines) >= 2, "Should have empirical and theoretical CDF lines"
+
+        # Verify y-axis is bounded for probabilities
+        ylim = ax.get_ylim()
+        assert ylim[0] >= 0
+        assert ylim[1] <= 1.1
+
+        plt.close(fig)
+
+    def test_cdf_comparison_with_title(self, result_with_ks, sample_data):
+        """Test CDF comparison with custom title."""
+        fig, ax = plot_cdf_comparison(result_with_ks, sample_data, title="Custom CDF Plot")
+
+        assert "Custom CDF Plot" in ax.get_title()
+        plt.close(fig)
+
+    def test_cdf_comparison_custom_labels(self, result_with_ks, sample_data):
+        """Test CDF comparison with custom axis labels."""
+        fig, ax = plot_cdf_comparison(
+            result_with_ks, sample_data, xlabel="Custom X", ylabel="Custom Y"
+        )
+
+        assert ax.get_xlabel() == "Custom X"
+        assert ax.get_ylabel() == "Custom Y"
+        plt.close(fig)
+
+    def test_cdf_comparison_shows_ks_statistic(self, result_with_ks, sample_data):
+        """Test CDF comparison shows KS statistic when available."""
+        fig, ax = plot_cdf_comparison(result_with_ks, sample_data)
+
+        title = ax.get_title()
+        assert "KS=" in title
+        assert "p=" in title
+        plt.close(fig)
+
+    def test_cdf_comparison_without_ks_shows_sse(self, normal_result, sample_data):
+        """Test CDF comparison shows SSE when KS not available."""
+        fig, ax = plot_cdf_comparison(normal_result, sample_data)
+
+        title = ax.get_title()
+        assert "SSE=" in title
+        plt.close(fig)
+
+    def test_cdf_comparison_custom_colors(self, result_with_ks, sample_data):
+        """Test CDF comparison with custom colors."""
+        fig, ax = plot_cdf_comparison(
+            result_with_ks,
+            sample_data,
+            empirical_color="green",
+            theoretical_color="blue",
+        )
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_cdf_comparison_legend(self, result_with_ks, sample_data):
+        """Test CDF comparison has proper legend."""
+        fig, ax = plot_cdf_comparison(result_with_ks, sample_data)
+
+        legend = ax.get_legend()
+        assert legend is not None
+        legend_texts = [t.get_text() for t in legend.get_texts()]
+        assert any("Empirical" in text for text in legend_texts)
+        assert any("Theoretical" in text for text in legend_texts)
+        plt.close(fig)
+
+    def test_cdf_comparison_save(self, result_with_ks, sample_data, tmp_path):
+        """Test saving CDF comparison to file."""
+        save_path = str(tmp_path / "cdf_comparison.png")
+
+        fig, ax = plot_cdf_comparison(result_with_ks, sample_data, save_path=save_path)
+
+        assert (tmp_path / "cdf_comparison.png").exists()
+        plt.close(fig)
+
+    def test_cdf_comparison_small_data(self, result_with_ks):
+        """Test CDF comparison with small sample size."""
+        small_data = np.array([45, 50, 55, 48, 52])
+
+        fig, ax = plot_cdf_comparison(result_with_ks, small_data)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+
+class TestPlotDiagnostics:
+    """Tests for plot_diagnostics function (2x2 diagnostic panel)."""
+
+    def test_basic_diagnostics(self, result_with_ks, sample_data, sample_histogram):
+        """Test basic diagnostics panel creates valid figure."""
+        y_hist, x_hist = sample_histogram
+
+        fig, axes = plot_diagnostics(result_with_ks, sample_data, y_hist, x_hist)
+
+        assert fig is not None
+        assert axes is not None
+        assert isinstance(fig, plt.Figure)
+        assert axes.shape == (2, 2), "Should be a 2x2 grid of axes"
+
+        # Verify all 4 subplots exist and have content
+        for i in range(2):
+            for j in range(2):
+                ax = axes[i, j]
+                assert ax is not None
+                assert isinstance(ax, plt.Axes)
+
+        plt.close(fig)
+
+    def test_diagnostics_without_precomputed_histogram(self, result_with_ks, sample_data):
+        """Test diagnostics computes histogram from data when not provided."""
+        fig, axes = plot_diagnostics(result_with_ks, sample_data)
+
+        assert fig is not None
+        assert axes.shape == (2, 2)
+        plt.close(fig)
+
+    def test_diagnostics_with_title(self, result_with_ks, sample_data):
+        """Test diagnostics with custom title."""
+        fig, axes = plot_diagnostics(result_with_ks, sample_data, title="My Diagnostics")
+
+        suptitle = fig._suptitle.get_text()
+        assert "My Diagnostics" in suptitle
+        plt.close(fig)
+
+    def test_diagnostics_custom_bins(self, result_with_ks, sample_data):
+        """Test diagnostics with custom number of bins."""
+        fig, axes = plot_diagnostics(result_with_ks, sample_data, bins=25)
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_diagnostics_custom_figsize(self, result_with_ks, sample_data):
+        """Test diagnostics with custom figure size."""
+        fig, axes = plot_diagnostics(result_with_ks, sample_data, figsize=(16, 14))
+
+        assert fig.get_figwidth() == 16
+        assert fig.get_figheight() == 14
+        plt.close(fig)
+
+    def test_diagnostics_subplot_titles(self, result_with_ks, sample_data):
+        """Test diagnostics subplots have appropriate titles."""
+        fig, axes = plot_diagnostics(result_with_ks, sample_data)
+
+        # Check subplot titles
+        assert "Q-Q" in axes[0, 0].get_title()
+        assert "P-P" in axes[0, 1].get_title()
+        assert "Residual" in axes[1, 0].get_title()
+        assert "CDF" in axes[1, 1].get_title()
+        plt.close(fig)
+
+    def test_diagnostics_save(self, result_with_ks, sample_data, tmp_path):
+        """Test saving diagnostics to file."""
+        save_path = str(tmp_path / "diagnostics.png")
+
+        fig, axes = plot_diagnostics(result_with_ks, sample_data, save_path=save_path)
+
+        assert (tmp_path / "diagnostics.png").exists()
+        plt.close(fig)
+
+    def test_diagnostics_gamma_distribution(self, gamma_result, sample_data):
+        """Test diagnostics with gamma distribution (has shape params)."""
+        fig, axes = plot_diagnostics(gamma_result, sample_data)
+
+        suptitle = fig._suptitle.get_text()
+        assert "gamma" in suptitle.lower()
+        plt.close(fig)
+
+    def test_diagnostics_small_data(self, result_with_ks):
+        """Test diagnostics with small sample size."""
+        small_data = np.array([45, 50, 55, 48, 52, 47, 53])
+
+        fig, axes = plot_diagnostics(result_with_ks, small_data)
+
+        assert fig is not None
+        assert axes.shape == (2, 2)
+        plt.close(fig)
+
+
+class TestDiagnosticsMethod:
+    """Tests for DistributionFitResult.diagnostics() method."""
+
+    def test_diagnostics_method_exists(self, result_with_ks):
+        """Test that diagnostics method exists on DistributionFitResult."""
+        assert hasattr(result_with_ks, "diagnostics")
+        assert callable(result_with_ks.diagnostics)
+
+    def test_diagnostics_method_basic(self, result_with_ks, sample_data):
+        """Test diagnostics method creates valid plot."""
+        fig, axes = result_with_ks.diagnostics(sample_data)
+
+        assert fig is not None
+        assert axes is not None
+        assert axes.shape == (2, 2)
+        plt.close(fig)
+
+    def test_diagnostics_method_with_histogram(self, result_with_ks, sample_data, sample_histogram):
+        """Test diagnostics method with pre-computed histogram."""
+        y_hist, x_hist = sample_histogram
+
+        fig, axes = result_with_ks.diagnostics(sample_data, y_hist=y_hist, x_hist=x_hist)
+
+        assert fig is not None
+        plt.close(fig)
+
+    def test_diagnostics_method_with_title(self, result_with_ks, sample_data):
+        """Test diagnostics method with custom title."""
+        fig, axes = result_with_ks.diagnostics(sample_data, title="Method Test")
+
+        suptitle = fig._suptitle.get_text()
+        assert "Method Test" in suptitle
+        plt.close(fig)
+
+    def test_diagnostics_method_save(self, result_with_ks, sample_data, tmp_path):
+        """Test diagnostics method can save to file."""
+        save_path = str(tmp_path / "diagnostics_method.png")
+
+        fig, axes = result_with_ks.diagnostics(sample_data, save_path=save_path)
+
+        assert (tmp_path / "diagnostics_method.png").exists()
         plt.close(fig)

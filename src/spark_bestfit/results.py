@@ -495,6 +495,74 @@ class DistributionFitResult:
                 random_seed=random_seed,
             )
 
+    def diagnostics(
+        self,
+        data: np.ndarray,
+        y_hist: Optional[np.ndarray] = None,
+        x_hist: Optional[np.ndarray] = None,
+        bins: int = 50,
+        title: str = "",
+        figsize: Tuple[int, int] = (14, 12),
+        dpi: int = 100,
+        title_fontsize: int = 16,
+        subplot_title_fontsize: int = 12,
+        label_fontsize: int = 10,
+        grid_alpha: float = 0.3,
+        save_path: Optional[str] = None,
+        save_format: str = "png",
+    ):
+        """Create a 2x2 diagnostic plot panel for assessing distribution fit quality.
+
+        Generates four diagnostic plots:
+        - Q-Q Plot (top-left): Compares sample quantiles vs theoretical quantiles
+        - P-P Plot (top-right): Compares empirical vs theoretical probabilities
+        - Residual Histogram (bottom-left): Distribution of fit residuals
+        - CDF Comparison (bottom-right): Empirical vs theoretical CDF overlay
+
+        Args:
+            data: Sample data array (1D numpy array)
+            y_hist: Optional pre-computed histogram density values. If None,
+                computed from data using specified bins.
+            x_hist: Optional pre-computed histogram bin centers. If None,
+                computed from data using specified bins.
+            bins: Number of histogram bins (used if y_hist/x_hist not provided)
+            title: Overall figure title
+            figsize: Figure size (width, height)
+            dpi: Dots per inch for saved figures
+            title_fontsize: Main title font size
+            subplot_title_fontsize: Subplot title font size
+            label_fontsize: Axis label font size
+            grid_alpha: Grid transparency (0-1)
+            save_path: Optional path to save figure
+            save_format: Save format (png, pdf, svg)
+
+        Returns:
+            Tuple of (figure, array of axes)
+
+        Example:
+            >>> result = fitter.fit(df, 'value').best(n=1)[0]
+            >>> fig, axes = result.diagnostics(data, title='Fit Diagnostics')
+            >>> plt.show()
+        """
+        from spark_bestfit.plotting import plot_diagnostics
+
+        return plot_diagnostics(
+            result=self,
+            data=data,
+            y_hist=y_hist,
+            x_hist=x_hist,
+            bins=bins,
+            title=title,
+            figsize=figsize,
+            dpi=dpi,
+            title_fontsize=title_fontsize,
+            subplot_title_fontsize=subplot_title_fontsize,
+            label_fontsize=label_fontsize,
+            grid_alpha=grid_alpha,
+            save_path=save_path,
+            save_format=save_format,
+        )
+
     def __repr__(self) -> str:
         """String representation of the result."""
         param_str = ", ".join([f"{p:.4f}" for p in self.parameters])
