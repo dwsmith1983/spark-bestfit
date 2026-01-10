@@ -33,6 +33,9 @@ except ImportError:
 # Constant for fitting sample size
 FITTING_SAMPLE_SIZE: int = 10_000  # Most scipy distributions fit well with 10k samples
 
+NUMERICAL_EPSILON: float = 1e-10
+"""Small value to prevent log(0) and division by zero in numerical computations."""
+
 # Distributions that support Anderson-Darling p-value computation via scipy
 # Maps our distribution names to scipy.anderson's dist parameter
 AD_PVALUE_DISTRIBUTIONS: Dict[str, str] = {
@@ -242,7 +245,7 @@ def fit_mse(
             cdf_vals = dist.cdf(sorted_data, *shape, loc=loc, scale=scale)
 
             # Clamp to (epsilon, 1-epsilon) to avoid log(0)
-            epsilon = 1e-10
+            epsilon = NUMERICAL_EPSILON
             cdf_vals = np.clip(cdf_vals, epsilon, 1 - epsilon)
 
             # Add boundary values: F(x₍₀₎) = 0, F(x₍ₙ₊₁₎) = 1
@@ -290,7 +293,7 @@ def fit_mse(
         # Try with L-BFGS-B as fallback (handles bounds better)
         n_params = len(initial_params)
         # Set bounds: shape params unbounded, loc unbounded, scale > 0
-        bounds = [(None, None)] * (n_params - 1) + [(1e-10, None)]
+        bounds = [(None, None)] * (n_params - 1) + [(NUMERICAL_EPSILON, None)]
         result = minimize(
             mse_objective,
             initial_params,
@@ -732,7 +735,7 @@ def compute_ad_statistic(dist: rv_continuous, params: Tuple[float, ...], data: n
         cdf_values = dist.cdf(sorted_data, *params)
 
         # Clamp CDF values to avoid log(0) or log(negative)
-        cdf_values = np.clip(cdf_values, 1e-10, 1 - 1e-10)
+        cdf_values = np.clip(cdf_values, NUMERICAL_EPSILON, 1 - NUMERICAL_EPSILON)
 
         # Compute A-D statistic using the formula
         # A² = -n - (1/n) Σᵢ₌₁ⁿ (2i-1)[ln F(Xᵢ) + ln(1-F(Xₙ₊₁₋ᵢ))]
@@ -897,7 +900,7 @@ def compute_ad_statistic_frozen(frozen_dist: Any, data: np.ndarray) -> float:
         cdf_values = frozen_dist.cdf(sorted_data)
 
         # Clamp CDF values to avoid log(0) or log(negative)
-        cdf_values = np.clip(cdf_values, 1e-10, 1 - 1e-10)
+        cdf_values = np.clip(cdf_values, NUMERICAL_EPSILON, 1 - NUMERICAL_EPSILON)
 
         # Compute A-D statistic using the formula
         # A² = -n - (1/n) Σᵢ₌₁ⁿ (2i-1)[ln F(Xᵢ) + ln(1-F(Xₙ₊₁₋ᵢ))]
