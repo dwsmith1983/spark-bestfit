@@ -53,6 +53,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    features/serialization
    features/copula
    features/multivariate
+   features/mixture
    features/progress
    features/lazy-metrics
    features/prefiltering

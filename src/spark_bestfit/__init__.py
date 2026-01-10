@@ -53,6 +53,7 @@ from spark_bestfit.core import (
     TruncatedFrozenDist,
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry, DistributionRegistry
+from spark_bestfit.mixture import GaussianMixtureFitter, GaussianMixtureResult
 from spark_bestfit.multivariate import MultivariateNormalFitter, MultivariateNormalResult
 from spark_bestfit.progress import ProgressCallback, ProgressTracker, console_progress
 from spark_bestfit.protocols import ExecutionBackend
@@ -107,6 +108,8 @@ __all__ = [
     "DistributionFitter",
     "DiscreteDistributionFitter",
     "GaussianCopula",
+    "GaussianMixtureFitter",
+    "GaussianMixtureResult",
     "MultivariateNormalFitter",
     "MultivariateNormalResult",
     "TruncatedFrozenDist",
