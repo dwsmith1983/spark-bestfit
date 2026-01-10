@@ -2,6 +2,28 @@
 
 <!-- version list -->
 
+## v2.7.1 (2026-01-10)
+
+### Bug Fixes
+
+- Auto-format after merge ([#115](https://github.com/dwsmith1983/spark-bestfit/pull/115),
+  [`c2535ec`](https://github.com/dwsmith1983/spark-bestfit/commit/c2535ec86472740975832bee418e89a6b152da39))
+
+- V2.7.1 - complete refactoring and quality fixes
+  ([#115](https://github.com/dwsmith1983/spark-bestfit/pull/115),
+  [`c2535ec`](https://github.com/dwsmith1983/spark-bestfit/commit/c2535ec86472740975832bee418e89a6b152da39))
+
+### Refactoring
+
+- Consolidate plotting helper functions in plot_discrete_distribution
+  ([#115](https://github.com/dwsmith1983/spark-bestfit/pull/115),
+  [`c2535ec`](https://github.com/dwsmith1983/spark-bestfit/commit/c2535ec86472740975832bee418e89a6b152da39))
+
+- Split fitting.py into estimation and metrics modules
+  ([#115](https://github.com/dwsmith1983/spark-bestfit/pull/115),
+  [`c2535ec`](https://github.com/dwsmith1983/spark-bestfit/commit/c2535ec86472740975832bee418e89a6b152da39))
+
+
 ## v2.7.0 (2026-01-10)
 
 ### Features
