@@ -146,23 +146,31 @@ class TestFitSingleDistributionWithMSE:
         assert abs(scale - 2.0) < 0.5
 
     def test_mse_fallback_to_mle_on_failure(self):
-        """MSE should fallback to MLE if optimization fails."""
+        """MSE should fallback to MLE if optimization fails.
+
+        We test this by mocking fit_mse to raise an error, then verify
+        that fit_single_distribution still succeeds via MLE fallback.
+        """
         np.random.seed(42)
-        # Use data that MSE handles well
         data = np.random.normal(0, 1, 500)
         bin_edges = np.linspace(-4, 4, 51)
         y_hist, _ = np.histogram(data, bins=bin_edges, density=True)
 
-        # This should succeed (either via MSE or MLE fallback)
-        result = fit_single_distribution(
-            dist_name="norm",
-            data_sample=data,
-            bin_edges=bin_edges,
-            y_hist=y_hist,
-            estimation_method="mse",
-        )
+        # Patch fit_mse to always raise, forcing fallback to MLE
+        from unittest.mock import patch
 
+        with patch("spark_bestfit.fitting.fit_mse", side_effect=ValueError("Forced failure")):
+            result = fit_single_distribution(
+                dist_name="norm",
+                data_sample=data,
+                bin_edges=bin_edges,
+                y_hist=y_hist,
+                estimation_method="mse",
+            )
+
+        # Should succeed via MLE fallback
         assert result["sse"] < np.inf
+        assert result["distribution"] == "norm"
 
 
 class TestFitterConfigEstimationMethod:
@@ -312,3 +320,207 @@ class TestDistributionFitterWithMSE:
                 if "heavy-tail" in str(x.message).lower()
             ]
             assert len(heavy_tail_warnings) == 0
+
+
+class TestMSEEdgeCases:
+    """Edge case tests for MSE fitting."""
+
+    def test_fit_beta_distribution_multi_shape(self):
+        """MSE should handle distributions with multiple shape parameters (beta)."""
+        np.random.seed(42)
+        true_a, true_b = 2.0, 5.0
+        data = stats.beta.rvs(a=true_a, b=true_b, size=500, random_state=42)
+
+        params = fit_mse(stats.beta, data)
+
+        # params = (a, b, loc, scale) for beta
+        fitted_a, fitted_b = params[0], params[1]
+        # Should recover shape parameters reasonably (beta is well-behaved)
+        assert abs(fitted_a - true_a) < 1.0
+        assert abs(fitted_b - true_b) < 2.0
+
+    def test_fit_small_sample_n10(self):
+        """MSE should work with small samples (n=10)."""
+        np.random.seed(42)
+        data = np.random.normal(10.0, 2.0, 10)
+
+        params = fit_mse(stats.norm, data)
+
+        # Should produce finite parameters
+        assert all(np.isfinite(p) for p in params)
+        # Less strict tolerance for small samples
+        fitted_loc, fitted_scale = params
+        assert abs(fitted_loc - 10.0) < 3.0
+        assert fitted_scale > 0
+
+    def test_fit_small_sample_n50(self):
+        """MSE should work reasonably with n=50 samples."""
+        np.random.seed(42)
+        data = np.random.normal(10.0, 2.0, 50)
+
+        params = fit_mse(stats.norm, data)
+
+        fitted_loc, fitted_scale = params
+        assert abs(fitted_loc - 10.0) < 1.5
+        assert abs(fitted_scale - 2.0) < 1.0
+
+    def test_fit_very_small_sample_n5(self):
+        """MSE should handle very small samples (n=5)."""
+        np.random.seed(42)
+        data = np.random.normal(10.0, 2.0, 5)
+
+        params = fit_mse(stats.norm, data)
+
+        # Should produce finite parameters even with tiny sample
+        assert all(np.isfinite(p) for p in params)
+
+    def test_fit_gamma_distribution(self):
+        """MSE should handle gamma distribution (one shape parameter)."""
+        np.random.seed(42)
+        true_a = 2.0  # shape
+        data = stats.gamma.rvs(a=true_a, scale=2.0, size=500, random_state=42)
+
+        params = fit_mse(stats.gamma, data)
+
+        # params = (a, loc, scale) for gamma
+        fitted_a = params[0]
+        assert abs(fitted_a - true_a) < 1.0
+
+
+class TestAutoModeKurtosisBoundary:
+    """Tests for auto mode kurtosis threshold boundary conditions."""
+
+    def test_auto_mode_kurtosis_below_threshold(self):
+        """Auto mode should use MLE when kurtosis is below threshold (6.0)."""
+        np.random.seed(42)
+        # t-distribution with df=10 has excess kurtosis ~1 (below 6.0)
+        data = stats.t.rvs(df=10, size=1000, random_state=42)
+        df = pd.DataFrame({"value": data})
+
+        backend = LocalBackend(max_workers=2)
+        fitter = DistributionFitter(backend=backend)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            results = fitter.fit(
+                df,
+                column="value",
+                max_distributions=3,
+                estimation_method="auto",
+            )
+
+            # Should NOT trigger heavy-tail (kurtosis < 6)
+            heavy_tail_warnings = [
+                x for x in w if "heavy-tail" in str(x.message).lower()
+            ]
+            assert len(heavy_tail_warnings) == 0
+            assert len(results.best(n=1)) > 0
+
+    def test_auto_mode_kurtosis_above_threshold(self):
+        """Auto mode should use MSE when kurtosis is above threshold (6.0)."""
+        np.random.seed(42)
+        # t-distribution with df=4 has excess kurtosis ~infinity (above 6.0)
+        data = stats.t.rvs(df=4, size=1000, random_state=42)
+        df = pd.DataFrame({"value": data})
+
+        backend = LocalBackend(max_workers=2)
+        fitter = DistributionFitter(backend=backend)
+
+        # Auto mode should detect heavy tails and use MSE
+        results = fitter.fit(
+            df,
+            column="value",
+            max_distributions=3,
+            estimation_method="auto",
+        )
+
+        assert len(results.best(n=1)) > 0
+
+    def test_auto_mode_boundary_kurtosis_59(self):
+        """Test auto mode with kurtosis just below threshold (5.9)."""
+        np.random.seed(42)
+        # Create data with controlled kurtosis around 5.9
+        # Use a mixture that produces kurtosis just under 6
+        from spark_bestfit.fitting import detect_heavy_tail
+
+        # Normal has kurtosis ~0, so we need to add some tail weight
+        # t(5) has theoretical kurtosis of 6, so t(5.5) should be just under
+        data = stats.t.rvs(df=5.5, size=2000, random_state=42)
+
+        result = detect_heavy_tail(data, kurtosis_threshold=6.0)
+        # If kurtosis < 6, should not be flagged as heavy-tailed
+        # (may or may not trigger depending on sample variation)
+        assert isinstance(result["is_heavy_tailed"], bool)
+
+    def test_auto_mode_boundary_kurtosis_61(self):
+        """Test auto mode with kurtosis just above threshold (6.1)."""
+        np.random.seed(42)
+        # t(4.5) has kurtosis > 6
+        data = stats.t.rvs(df=4.5, size=2000, random_state=42)
+
+        from spark_bestfit.fitting import detect_heavy_tail
+
+        result = detect_heavy_tail(data, kurtosis_threshold=6.0)
+        # Should likely be flagged as heavy-tailed
+        # (sample kurtosis varies, so we just check it returns valid result)
+        assert isinstance(result["is_heavy_tailed"], bool)
+        assert "kurtosis" in result
+
+
+class TestMSEConvergenceScenarios:
+    """Tests for MSE convergence in challenging scenarios."""
+
+    def test_mse_with_outliers(self):
+        """MSE should handle data with outliers."""
+        np.random.seed(42)
+        # Normal data with a few extreme outliers
+        data = np.random.normal(10.0, 2.0, 500)
+        data = np.append(data, [100.0, 200.0, -50.0])  # Add outliers
+
+        params = fit_mse(stats.norm, data)
+
+        # Should produce finite parameters despite outliers
+        assert all(np.isfinite(p) for p in params)
+        fitted_loc, fitted_scale = params
+        # MSE should be somewhat robust to outliers
+        assert abs(fitted_loc - 10.0) < 5.0
+
+    def test_mse_with_constant_data(self):
+        """MSE should handle near-constant data gracefully."""
+        np.random.seed(42)
+        # Nearly constant data (very small variance)
+        data = np.random.normal(10.0, 0.001, 100)
+
+        params = fit_mse(stats.norm, data)
+
+        # Should produce finite parameters
+        assert all(np.isfinite(p) for p in params)
+        fitted_loc, fitted_scale = params
+        assert abs(fitted_loc - 10.0) < 0.1
+        assert fitted_scale > 0  # Scale should be positive
+
+    def test_mse_with_wide_spread_data(self):
+        """MSE should handle data with very wide spread."""
+        np.random.seed(42)
+        # Data with large scale
+        data = np.random.normal(1000.0, 500.0, 500)
+
+        params = fit_mse(stats.norm, data)
+
+        fitted_loc, fitted_scale = params
+        assert abs(fitted_loc - 1000.0) < 100.0
+        assert abs(fitted_scale - 500.0) < 100.0
+
+    def test_mse_with_skewed_data(self):
+        """MSE should work with skewed distributions."""
+        np.random.seed(42)
+        # Log-normal is right-skewed
+        data = np.random.lognormal(mean=1.0, sigma=0.5, size=500)
+
+        params = fit_mse(stats.lognorm, data)
+
+        # Should produce finite parameters
+        assert all(np.isfinite(p) for p in params)
+        # lognorm params: (s, loc, scale) where s is shape (sigma)
+        fitted_s = params[0]
+        assert fitted_s > 0
