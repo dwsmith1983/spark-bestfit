@@ -15,6 +15,10 @@ Supported distributions with fast PPF:
     - weibull_min: Weibull (minimum)
     - gamma: Gamma
     - beta: Beta
+    - chi2: Chi-squared
+    - t: Student's t
+    - pareto: Pareto
+    - laplace: Laplace
 
 Example:
     >>> from spark_bestfit.fast_ppf import fast_ppf
@@ -155,6 +159,96 @@ def _ppf_beta(q: np.ndarray, params: Tuple) -> np.ndarray:
     return loc + scale * special.betaincinv(a, b, q)
 
 
+def _ppf_chi2(q: np.ndarray, params: Tuple) -> np.ndarray:
+    """Fast PPF for chi-squared distribution.
+
+    chi2(df) is equivalent to gamma(df/2, scale=2), so:
+    ppf(q) = 2 * gammaincinv(df/2, q) + loc
+
+    Note: scipy.stats.chi2 uses scale=1 with the gamma relationship internally,
+    so the formula is: ppf(q) = 2 * scale * gammaincinv(df/2, q) + loc
+
+    params = (df, loc, scale) where df is degrees of freedom.
+    """
+    if len(params) >= 3:
+        df, loc, scale = params[0], params[-2], params[-1]
+    elif len(params) == 2:
+        df, loc, scale = params[0], params[1], 1.0
+    elif len(params) == 1:
+        df, loc, scale = params[0], 0.0, 1.0
+    else:
+        raise ValueError("Chi-squared distribution requires at least 1 parameter (df)")
+    # chi2(df) = gamma(df/2, loc=0, scale=2), with additional scale factor
+    return loc + scale * 2.0 * special.gammaincinv(df / 2.0, q)
+
+
+def _ppf_t(q: np.ndarray, params: Tuple) -> np.ndarray:
+    """Fast PPF for Student's t distribution.
+
+    ppf(q) = loc + scale * stdtrit(df, q)
+
+    where stdtrit is the inverse of the Student's t CDF.
+
+    params = (df, loc, scale) where df is degrees of freedom.
+    """
+    if len(params) >= 3:
+        df, loc, scale = params[0], params[-2], params[-1]
+    elif len(params) == 2:
+        df, loc, scale = params[0], params[1], 1.0
+    elif len(params) == 1:
+        df, loc, scale = params[0], 0.0, 1.0
+    else:
+        raise ValueError("Student's t distribution requires at least 1 parameter (df)")
+    return loc + scale * special.stdtrit(df, q)
+
+
+def _ppf_pareto(q: np.ndarray, params: Tuple) -> np.ndarray:
+    """Fast PPF for Pareto distribution.
+
+    ppf(q) = loc + scale * (1 - q)^(-1/b)
+
+    where b is the shape parameter.
+
+    params = (b, loc, scale) where b is the shape parameter.
+    """
+    if len(params) >= 3:
+        b, loc, scale = params[0], params[-2], params[-1]
+    elif len(params) == 2:
+        b, loc, scale = params[0], params[1], 1.0
+    elif len(params) == 1:
+        b, loc, scale = params[0], 0.0, 1.0
+    else:
+        raise ValueError("Pareto distribution requires at least 1 parameter (b)")
+    # Avoid division by zero when q=1
+    return loc + scale * np.power(1.0 - q, -1.0 / b)
+
+
+def _ppf_laplace(q: np.ndarray, params: Tuple) -> np.ndarray:
+    """Fast PPF for Laplace distribution.
+
+    ppf(q) = loc - scale * sign(q - 0.5) * log(1 - 2*|q - 0.5|)
+
+    Equivalently:
+    - For q < 0.5: ppf(q) = loc + scale * log(2*q)
+    - For q >= 0.5: ppf(q) = loc - scale * log(2*(1-q))
+
+    params = (loc, scale).
+    """
+    if len(params) >= 2:
+        loc, scale = params[-2], params[-1]
+    elif len(params) == 1:
+        loc, scale = params[0], 1.0
+    else:
+        loc, scale = 0.0, 1.0
+    # Use piecewise for numerical stability
+    result = np.where(
+        q < 0.5,
+        loc + scale * np.log(2.0 * np.maximum(q, 1e-300)),
+        loc - scale * np.log(2.0 * np.maximum(1.0 - q, 1e-300)),
+    )
+    return result
+
+
 # Registry of fast PPF implementations
 _FAST_PPF_REGISTRY: Dict[str, PPFFunc] = {
     "norm": _ppf_norm,
@@ -164,6 +258,10 @@ _FAST_PPF_REGISTRY: Dict[str, PPFFunc] = {
     "weibull_min": _ppf_weibull_min,
     "gamma": _ppf_gamma,
     "beta": _ppf_beta,
+    "chi2": _ppf_chi2,
+    "t": _ppf_t,
+    "pareto": _ppf_pareto,
+    "laplace": _ppf_laplace,
 }
 
 

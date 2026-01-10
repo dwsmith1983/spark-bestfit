@@ -2,11 +2,18 @@
 
 This module contains Spark-specific tests. All tests are skipped if PySpark
 is not installed, following the same pattern as test_ray_backend.py.
+
+Tests are marked with @pytest.mark.spark so CI can run them separately:
+    pytest -m spark       # Run only Spark tests
+    pytest -m "not spark" # Run without Spark tests
 """
 
 import numpy as np
 import pandas as pd
 import pytest
+
+# Mark all tests in this module as spark tests for CI filtering
+pytestmark = pytest.mark.spark
 
 # Skip all tests if pyspark not installed
 pyspark = pytest.importorskip("pyspark")

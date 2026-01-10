@@ -311,6 +311,7 @@ class TestFitResultsHierarchyProperties:
 class TestFittingOperationProperties:
     """Property-based tests for fitting operation invariants."""
 
+    @pytest.mark.slow
     @given(data=finite_float_array(min_size=100, max_size=500, min_value=0.1, max_value=1000))
     @settings(max_examples=15, deadline=None)
     def test_fitting_returns_finite_metrics(self, data):
@@ -362,6 +363,7 @@ class TestFittingOperationProperties:
         best = results.best(n=1, metric=metric)
         assert len(best) <= 1
 
+    @pytest.mark.slow
     @given(n=finite_float_array(min_size=100, max_size=300, min_value=1, max_value=100))
     @settings(max_examples=10, deadline=None)
     def test_filter_returns_subset(self, n):
@@ -586,6 +588,7 @@ class TestFitterConfigBuilderProperties:
 class TestFitterConfigIntegrationProperties:
     """Property-based tests for FitterConfig integration with fitters."""
 
+    @pytest.mark.slow
     @given(config=fitter_config(), data=finite_float_array(min_size=100, max_size=300))
     @settings(max_examples=10, deadline=None)
     def test_fit_with_config_does_not_raise(self, config, data):
@@ -610,6 +613,7 @@ class TestFitterConfigIntegrationProperties:
         results = fitter.fit(df, column="value", config=config)
         assert results.count() >= 0
 
+    @pytest.mark.slow
     @given(data=finite_float_array(min_size=100, max_size=200))
     @settings(max_examples=10, deadline=None)
     def test_config_vs_params_equivalence(self, data):

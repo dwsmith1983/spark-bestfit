@@ -130,23 +130,21 @@ __all__ = [
 
 # Conditionally add SparkBackend to exports if pyspark is installed
 if _SPARK_AVAILABLE:
-    __all__.append("SparkBackend")
+    __all__ += ["SparkBackend"]
 
 # Conditionally add RayBackend to exports if ray is installed
 if _RAY_AVAILABLE:
-    __all__.append("RayBackend")
+    __all__ += ["RayBackend"]
 
 # Conditionally add plotting functions to exports if matplotlib is installed
 if _MATPLOTLIB_AVAILABLE:
-    __all__.extend(
-        [
-            "plot_distribution",
-            "plot_comparison",
-            "plot_qq",
-            "plot_pp",
-            "plot_discrete_distribution",
-            "plot_residual_histogram",
-            "plot_cdf_comparison",
-            "plot_diagnostics",
-        ]
-    )
+    __all__ += [
+        "plot_distribution",
+        "plot_comparison",
+        "plot_qq",
+        "plot_pp",
+        "plot_discrete_distribution",
+        "plot_residual_histogram",
+        "plot_cdf_comparison",
+        "plot_diagnostics",
+    ]

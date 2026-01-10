@@ -16,13 +16,16 @@ class TestFastPPFRegistry:
 
     def test_has_fast_ppf_supported_distributions(self):
         """Verify has_fast_ppf returns True for supported distributions."""
-        supported = ["norm", "expon", "uniform", "lognorm", "weibull_min", "gamma", "beta"]
+        supported = [
+            "norm", "expon", "uniform", "lognorm", "weibull_min",
+            "gamma", "beta", "chi2", "t", "pareto", "laplace",
+        ]
         for dist in supported:
             assert has_fast_ppf(dist), f"{dist} should be supported"
 
     def test_has_fast_ppf_unsupported_distributions(self):
         """Verify has_fast_ppf returns False for unsupported distributions."""
-        unsupported = ["pareto", "chi2", "t", "f", "laplace"]
+        unsupported = ["f", "cauchy", "levy", "invgauss"]
         for dist in unsupported:
             assert not has_fast_ppf(dist), f"{dist} should not be supported"
 
@@ -133,6 +136,62 @@ class TestFastPPFAccuracy:
         result = fast_ppf("beta", params, quantiles)
         np.testing.assert_allclose(result, expected, rtol=1e-10)
 
+    def test_chi2_ppf(self, quantiles):
+        """Test chi-squared distribution PPF accuracy."""
+        params = (5.0, 0.0, 1.0)  # df=5, loc=0, scale=1
+        expected = st.chi2.ppf(quantiles, *params)
+        result = fast_ppf("chi2", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_chi2_ppf_with_params(self, quantiles):
+        """Test chi-squared distribution PPF with non-default params."""
+        params = (10.0, 2.0, 1.5)  # df=10, loc=2, scale=1.5
+        expected = st.chi2.ppf(quantiles, *params)
+        result = fast_ppf("chi2", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_t_ppf(self, quantiles):
+        """Test Student's t distribution PPF accuracy."""
+        params = (5.0, 0.0, 1.0)  # df=5, loc=0, scale=1
+        expected = st.t.ppf(quantiles, *params)
+        result = fast_ppf("t", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_t_ppf_with_params(self, quantiles):
+        """Test Student's t distribution PPF with non-default params."""
+        params = (10.0, 5.0, 2.0)  # df=10, loc=5, scale=2
+        expected = st.t.ppf(quantiles, *params)
+        result = fast_ppf("t", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_pareto_ppf(self, quantiles):
+        """Test Pareto distribution PPF accuracy."""
+        params = (2.0, 0.0, 1.0)  # b=2, loc=0, scale=1
+        expected = st.pareto.ppf(quantiles, *params)
+        result = fast_ppf("pareto", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_pareto_ppf_with_params(self, quantiles):
+        """Test Pareto distribution PPF with non-default params."""
+        params = (3.0, 1.0, 2.0)  # b=3, loc=1, scale=2
+        expected = st.pareto.ppf(quantiles, *params)
+        result = fast_ppf("pareto", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_laplace_ppf(self, quantiles):
+        """Test Laplace distribution PPF accuracy."""
+        params = (0.0, 1.0)  # loc=0, scale=1
+        expected = st.laplace.ppf(quantiles, *params)
+        result = fast_ppf("laplace", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_laplace_ppf_with_params(self, quantiles):
+        """Test Laplace distribution PPF with non-default params."""
+        params = (5.0, 2.0)  # loc=5, scale=2
+        expected = st.laplace.ppf(quantiles, *params)
+        result = fast_ppf("laplace", params, quantiles)
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
 
 class TestFastPPFFallback:
     """Tests for fallback behavior with unsupported distributions."""
@@ -140,11 +199,11 @@ class TestFastPPFFallback:
     def test_fallback_to_scipy(self):
         """Verify fallback to scipy for unsupported distributions."""
         quantiles = np.array([0.1, 0.5, 0.9])
-        params = (2.0, 0.0, 1.0)  # shape, loc, scale
+        params = (0.0, 1.0)  # loc, scale
 
-        # Pareto is not in fast_ppf registry
-        expected = st.pareto.ppf(quantiles, *params)
-        result = fast_ppf("pareto", params, quantiles)
+        # Cauchy is not in fast_ppf registry
+        expected = st.cauchy.ppf(quantiles, *params)
+        result = fast_ppf("cauchy", params, quantiles)
 
         np.testing.assert_allclose(result, expected, rtol=1e-10)
 
