@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from spark_bestfit.results import FitResultsType
 
 
-@dataclass
+@dataclass(slots=True)
 class GaussianCopula:
     """Gaussian copula for generating correlated multi-column samples.
 
@@ -66,6 +66,7 @@ class GaussianCopula:
     marginals: Dict[str, DistributionFitResult]
     correlation_matrix: np.ndarray = field(repr=False)
     _cholesky: np.ndarray = field(init=False, repr=False)
+    _frozen_dists: Dict[str, st.rv_continuous] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate copula state after initialization."""
@@ -168,8 +169,6 @@ class GaussianCopula:
         Returns:
             Frozen scipy distribution with parameters bound
         """
-        if not hasattr(self, "_frozen_dists"):
-            self._frozen_dists: Dict[str, st.rv_continuous] = {}
         if col not in self._frozen_dists:
             marginal = self.marginals[col]
             # get_scipy_dist() now returns frozen distribution by default
