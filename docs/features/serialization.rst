@@ -64,7 +64,7 @@ The JSON format includes metadata for versioning and debugging:
 
     {
       "schema_version": "1.0",
-      "spark_bestfit_version": "2.0.0",
+      "spark_bestfit_version": "2.6.0",
       "created_at": "2026-01-04T15:30:00.123456+00:00",
       "distribution": "gamma",
       "parameters": [2.0, 0.0, 5.0],
