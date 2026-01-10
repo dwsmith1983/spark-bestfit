@@ -152,4 +152,21 @@ class TruncatedFrozenDist:
         return np.std(samples)
 
 
-__all__ = ["TruncatedFrozenDist"]
+def create_truncated_dist(frozen_dist, lb: float, ub: float) -> TruncatedFrozenDist:
+    """Create a truncated distribution wrapper.
+
+    Convenience function that creates a TruncatedFrozenDist with raise_on_empty=False
+    so fitting continues silently when truncation bounds contain no probability mass.
+
+    Args:
+        frozen_dist: Frozen scipy.stats distribution
+        lb: Lower bound
+        ub: Upper bound
+
+    Returns:
+        Truncated distribution wrapper with pdf, logpdf, cdf methods
+    """
+    return TruncatedFrozenDist(frozen_dist, lb, ub, raise_on_empty=False)
+
+
+__all__ = ["TruncatedFrozenDist", "create_truncated_dist"]
