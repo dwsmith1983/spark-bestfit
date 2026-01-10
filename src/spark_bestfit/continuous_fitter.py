@@ -193,6 +193,7 @@ class DistributionFitter(BaseFitter):
         upper_bound: Optional[Union[float, Dict[str, float]]] = None,
         lazy_metrics: bool = False,
         prefilter: Union[bool, str] = False,
+        estimation_method: str = "mle",
     ) -> FitResultsType:
         """Fit distributions to data column(s).
 
@@ -240,6 +241,13 @@ class DistributionFitter(BaseFitter):
                 - 'aggressive': Also filters by kurtosis (may skip valid distributions)
                 Pre-filtering uses scipy's distribution support bounds (dist.a, dist.b)
                 and sample moments. Filtered distributions are logged for transparency.
+            estimation_method: Parameter estimation method (v2.5.0):
+                - "mle": Maximum Likelihood Estimation (default). Uses scipy.stats.fit().
+                    Fast and accurate for most distributions.
+                - "mse": Maximum Spacing Estimation. More robust for heavy-tailed
+                    distributions (Pareto, Cauchy, etc.) where MLE may fail.
+                - "auto": Automatically select MSE for heavy-tailed data based on
+                    kurtosis and extreme value analysis, MLE otherwise.
 
         Returns:
             FitResults object with fitted distributions
@@ -299,6 +307,7 @@ class DistributionFitter(BaseFitter):
                 num_partitions=num_partitions,
                 lazy_metrics=lazy_metrics,
                 progress_callback=progress_callback,
+                estimation_method=estimation_method,
             )
 
         # Normalize column/columns to list
@@ -361,6 +370,7 @@ class DistributionFitter(BaseFitter):
                 lazy_metrics=cfg.lazy_metrics,
                 prefilter=cfg.prefilter,
                 progress_callback=cfg.progress_callback,
+                estimation_method=cfg.estimation_method,
             )
             all_results_dfs.append(results_df)
 
@@ -410,6 +420,7 @@ class DistributionFitter(BaseFitter):
         lazy_metrics: bool = False,
         prefilter: Union[bool, str] = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        estimation_method: str = "mle",
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -426,6 +437,10 @@ class DistributionFitter(BaseFitter):
             lazy_metrics: If True, skip KS/AD computation for performance (v1.5.0)
             prefilter: Pre-filter mode (False, True, or 'aggressive') (v1.6.0)
             progress_callback: Optional callback for progress updates (v2.0.0)
+            estimation_method: Parameter estimation method (v2.5.0):
+                - "mle": Maximum Likelihood Estimation (default)
+                - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
+                - "auto": Automatically select MSE for heavy-tailed data
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -499,16 +514,26 @@ class DistributionFitter(BaseFitter):
             indicators = ", ".join(heavy_tail_info["indicators"])
             import warnings
 
-            warnings.warn(
-                f"Column '{column}' exhibits heavy-tail characteristics ({indicators}). "
-                f"Consider: (1) heavy-tail distributions like pareto, cauchy, t; "
-                f"(2) data transformation (log, sqrt); "
-                f"(3) checking for outliers. "
-                f"Standard distributions may provide poor fits.",
-                UserWarning,
-                stacklevel=4,
-            )
+            # Only warn if not already using MSE (which handles heavy tails well)
+            if estimation_method != "mse":
+                warnings.warn(
+                    f"Column '{column}' exhibits heavy-tail characteristics ({indicators}). "
+                    f"Consider: (1) heavy-tail distributions like pareto, cauchy, t; "
+                    f"(2) using estimation_method='mse' for robust fitting; "
+                    f"(3) data transformation (log, sqrt); "
+                    f"(4) checking for outliers. "
+                    f"Standard distributions may provide poor fits.",
+                    UserWarning,
+                    stacklevel=4,
+                )
             logger.warning(f"  Heavy-tail detected for '{column}': {indicators}")
+
+        # Resolve "auto" estimation method: use MSE for heavy-tailed data
+        resolved_estimation_method = estimation_method
+        if estimation_method == "auto":
+            resolved_estimation_method = "mse" if heavy_tail_info["is_heavy_tailed"] else "mle"
+            if resolved_estimation_method == "mse":
+                logger.info("  Auto-selected MSE estimation for heavy-tailed data")
 
         # Interleave slow distributions for better partition balance
         # Lazy import to avoid circular dependency with core.py
@@ -534,6 +559,7 @@ class DistributionFitter(BaseFitter):
             is_discrete=False,
             progress_callback=progress_callback,
             custom_distributions=custom_dists,
+            estimation_method=resolved_estimation_method,
         )
 
         # Convert results to DataFrame

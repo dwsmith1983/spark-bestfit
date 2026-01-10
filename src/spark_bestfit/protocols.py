@@ -77,6 +77,7 @@ class ExecutionBackend(Protocol):
         is_discrete: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         custom_distributions: Optional[Dict[str, Any]] = None,
+        estimation_method: str = "mle",
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel.
 
@@ -105,6 +106,9 @@ class ExecutionBackend(Protocol):
                 LocalBackend/RayBackend, or via StatusTracker for SparkBackend.
             custom_distributions: Optional dict mapping custom distribution names
                 to rv_continuous objects. Passed to workers for fitting. (v2.4.0)
+            estimation_method: Parameter estimation method (v2.5.0):
+                - "mle": Maximum Likelihood Estimation (default)
+                - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
 
         Returns:
             List of fit result dicts. Each dict contains:
