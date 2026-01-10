@@ -18,7 +18,7 @@ Type Aliases:
 
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -45,7 +45,7 @@ except ImportError:
     _PYSPARK_AVAILABLE = False
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame as SparkDataFrame
+    pass
 
 
 class BaseFitResults(ABC):
@@ -233,9 +233,7 @@ class BaseFitResults(ABC):
         """
         # Import appropriate metric computation function
         if context.is_discrete:
-            from spark_bestfit.discrete_fitting import (
-                compute_ks_ad_metrics_discrete as compute_metrics,
-            )
+            from spark_bestfit.discrete_fitting import compute_ks_ad_metrics_discrete as compute_metrics
         else:
             from spark_bestfit.fitting import compute_ks_ad_metrics as compute_metrics
 
@@ -941,9 +939,7 @@ class LazyFitResults(BaseFitResults):
 
             # Select appropriate metric computation function
             if context.is_discrete:
-                from spark_bestfit.discrete_fitting import (
-                    compute_ks_ad_metrics_discrete as compute_metrics,
-                )
+                from spark_bestfit.discrete_fitting import compute_ks_ad_metrics_discrete as compute_metrics
             else:
                 from spark_bestfit.fitting import compute_ks_ad_metrics as compute_metrics
 

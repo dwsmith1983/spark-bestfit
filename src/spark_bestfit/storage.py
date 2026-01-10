@@ -241,9 +241,7 @@ class DistributionFitResult:
 
         return frozen_dist
 
-    def sample(
-        self, size: int = DEFAULT_SAMPLE_SIZE, random_state: Optional[int] = None
-    ) -> np.ndarray:
+    def sample(self, size: int = DEFAULT_SAMPLE_SIZE, random_state: Optional[int] = None) -> np.ndarray:
         """Generate random samples from the fitted distribution.
 
         Args:
@@ -398,12 +396,7 @@ class DistributionFitResult:
             >>> best.save("model.pkl", format="pickle")
             >>> best.save("compact.json", indent=None)
         """
-        from spark_bestfit.serialization import (
-            detect_format,
-            save_json,
-            save_pickle,
-            serialize_to_dict,
-        )
+        from spark_bestfit.serialization import detect_format, save_json, save_pickle, serialize_to_dict
 
         path = Path(path)
         file_format = format or detect_format(path)
@@ -439,12 +432,7 @@ class DistributionFitResult:
         Warning:
             Only load pickle files from trusted sources.
         """
-        from spark_bestfit.serialization import (
-            deserialize_from_dict,
-            detect_format,
-            load_json,
-            load_pickle,
-        )
+        from spark_bestfit.serialization import deserialize_from_dict, detect_format, load_json, load_pickle
 
         path = Path(path)
         if not path.exists():
