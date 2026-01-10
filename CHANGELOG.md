@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v2.7.0 (2026-01-10)
+
+### Features
+
+- **copula**: Add fast_ppf for optimized inverse CDF computation
+  ([`8ea8f20`](https://github.com/dwsmith1983/spark-bestfit/commit/8ea8f2019c18bc4dd907ad5218a437c8f009e6f7))
+
+
 ## v2.6.0 (2026-01-10)
 
 ### Bug Fixes
