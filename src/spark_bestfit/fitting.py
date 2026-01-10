@@ -35,6 +35,7 @@ from spark_bestfit.estimation import (
 # Re-export everything from metrics module
 from spark_bestfit.metrics import (
     AD_PVALUE_DISTRIBUTIONS,
+    NUMERICAL_EPSILON,
     compute_ad_pvalue,
     compute_ad_statistic,
     compute_ad_statistic_frozen,
@@ -57,6 +58,7 @@ __all__ = [
     "FIT_RESULT_SCHEMA",
     "HEAVY_TAIL_DISTRIBUTIONS",
     "AD_PVALUE_DISTRIBUTIONS",
+    "NUMERICAL_EPSILON",
     "EstimationMethod",
     # Data analysis
     "compute_data_stats",

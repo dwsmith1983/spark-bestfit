@@ -6,7 +6,33 @@ Measures speedup of fast_ppf over scipy.stats.ppf for:
 - Truncated vs non-truncated distributions
 - Batch operations vs individual calls
 
-Run with: make benchmark
+Run with: pytest tests/benchmarks/test_benchmark_fast_ppf.py -v --benchmark-only
+
+Expected performance (measured with 100K elements):
+==================================================
+
+Distribution speedups vary significantly based on implementation:
+
+    +-------------+----------------+---------------------------------------------+
+    | Distribution| Approx Speedup | Reason                                      |
+    +-------------+----------------+---------------------------------------------+
+    | uniform     | ~16x           | Trivial linear: loc + scale * q             |
+    | weibull_min | ~2.7x          | Closed-form: (-log1p(-q))^(1/c)             |
+    | expon       | ~2.3x          | Closed-form: -log1p(-q)                     |
+    | norm        | ~1.5x          | Direct ndtri call                           |
+    | lognorm     | ~1.3x          | exp(s * ndtri(q))                           |
+    | gamma       | ~1.0x          | Uses scipy.special.gammaincinv (same as scipy.stats) |
+    | beta        | ~1.0x          | Uses scipy.special.betaincinv (same as scipy.stats) |
+    +-------------+----------------+---------------------------------------------+
+
+Note: Gamma and beta show no speedup because their PPF requires numerical
+inversion of the incomplete gamma/beta functions - the same scipy.special
+functions that scipy.stats uses internally.
+
+Copula sampling impact:
+- PPF is a small portion of total copula.sample() cost
+- Other factors: Cholesky decomposition, CDF transforms, memory allocation
+- End-to-end speedup is typically modest (~3-5%) for typical use cases
 """
 
 import numpy as np

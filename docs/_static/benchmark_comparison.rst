@@ -18,24 +18,24 @@ The following benchmarks were run on a local development machine.
      - Ray Dataset
      - Fastest
    * - 25,000
-     - 4.78s
-     - 2.76s
-     - 4.65s
+     - 5.04s
+     - 2.89s
+     - 4.80s
      - **Ray+pandas**
    * - 100,000
-     - 6.65s
-     - 2.85s
-     - 4.26s
+     - 6.59s
+     - 2.98s
+     - 4.37s
      - **Ray+pandas**
    * - 500,000
-     - 5.90s
-     - 3.05s
-     - 4.22s
+     - 6.03s
+     - 3.20s
+     - 4.44s
      - **Ray+pandas**
    * - 1,000,000
-     - 5.05s
-     - 2.70s
-     - 4.48s
+     - 5.16s
+     - 2.90s
+     - 4.26s
      - **Ray+pandas**
 
 **Distribution Count Scaling** (10K rows)
@@ -50,27 +50,27 @@ The following benchmarks were run on a local development machine.
      - Ray Dataset
      - Fastest
    * - 5
-     - 0.46s
-     - 0.09s
-     - 1.75s
+     - 0.49s
+     - 0.10s
+     - 1.79s
      - **Ray+pandas**
    * - 20
-     - 0.87s
-     - 0.26s
-     - 1.96s
+     - 0.98s
+     - 0.29s
+     - 2.04s
      - **Ray+pandas**
    * - 50
-     - 1.46s
-     - 0.58s
-     - 2.26s
+     - 1.53s
+     - 0.63s
+     - 2.36s
      - **Ray+pandas**
    * - 90
-     - 5.71s
-     - 2.77s
-     - 4.49s
+     - 5.97s
+     - 2.89s
+     - 4.57s
      - **Ray+pandas**
    * - 107
-     - 6.57s
-     - 2.91s
-     - 4.26s
+     - 6.64s
+     - 3.00s
+     - 4.36s
      - **Ray+pandas**

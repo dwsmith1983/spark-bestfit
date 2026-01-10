@@ -3,9 +3,23 @@
 This module provides optimized PPF computations for common distributions,
 bypassing scipy.stats overhead by calling scipy.special functions directly.
 
-The standard scipy.stats.rv_continuous.ppf() uses iterative root-finding,
-which adds ~28x overhead compared to direct formulas. This module implements
-closed-form PPFs for distributions where they exist.
+The scipy.stats.rv_continuous.ppf() machinery adds overhead for parameter
+validation, bounds checking, and generic handling. This module provides
+direct implementations that skip this overhead where possible.
+
+Performance improvements vary by distribution (benchmarked with 100K elements):
+
+    - uniform:     ~16x faster (trivial linear transformation)
+    - weibull_min: ~2.7x faster (closed-form using log1p)
+    - expon:       ~2.3x faster (closed-form using log1p)
+    - norm:        ~1.5x faster (direct ndtri call)
+    - lognorm:     ~1.3x faster (exp of ndtri)
+    - gamma:       ~1.0x (same scipy.special function as scipy.stats)
+    - beta:        ~1.0x (same scipy.special function as scipy.stats)
+
+Note: Gamma and beta use scipy.special.gammaincinv/betaincinv which are
+the same numerical routines used by scipy.stats, so no speedup is expected.
+The main benefit for these distributions is API consistency.
 
 Supported distributions with fast PPF:
     - norm: Normal/Gaussian
@@ -28,6 +42,7 @@ Example:
     >>> values = fast_ppf("pareto", (2.0, 0, 1), q)
 """
 
+from functools import lru_cache
 from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
@@ -231,6 +246,33 @@ def fast_ppf(
     return dist.ppf(q, *params)
 
 
+@lru_cache(maxsize=256)
+def _cached_truncation_bounds(
+    distribution: str,
+    params: Tuple,
+    lb: Optional[float],
+    ub: Optional[float],
+) -> Tuple[float, float]:
+    """Compute and cache CDF values at truncation bounds.
+
+    This cache significantly speeds up repeated calls with the same
+    distribution/parameters/bounds, which is common in copula sampling.
+
+    Args:
+        distribution: Name of the scipy.stats distribution
+        params: Distribution parameters (must be hashable tuple)
+        lb: Lower truncation bound
+        ub: Upper truncation bound
+
+    Returns:
+        Tuple of (cdf_lb, cdf_ub)
+    """
+    dist = getattr(st, distribution)
+    cdf_lb = dist.cdf(lb, *params) if lb is not None and np.isfinite(lb) else 0.0
+    cdf_ub = dist.cdf(ub, *params) if ub is not None and np.isfinite(ub) else 1.0
+    return cdf_lb, cdf_ub
+
+
 def _map_truncated_quantiles(
     distribution: str,
     params: Tuple,
@@ -244,11 +286,10 @@ def _map_truncated_quantiles(
     [CDF(lb), CDF(ub)] before applying PPF.
 
     q_mapped = CDF(lb) + q * (CDF(ub) - CDF(lb))
-    """
-    dist = getattr(st, distribution)
 
-    cdf_lb = dist.cdf(lb, *params) if lb is not None and np.isfinite(lb) else 0.0
-    cdf_ub = dist.cdf(ub, *params) if ub is not None and np.isfinite(ub) else 1.0
+    Uses LRU caching for CDF boundary computations to speed up repeated calls.
+    """
+    cdf_lb, cdf_ub = _cached_truncation_bounds(distribution, params, lb, ub)
 
     norm = cdf_ub - cdf_lb
     if norm <= 0:
@@ -256,6 +297,15 @@ def _map_truncated_quantiles(
         return np.full_like(q, cdf_lb)
 
     return cdf_lb + q * norm
+
+
+def clear_ppf_cache() -> None:
+    """Clear the LRU cache for truncation bound computations.
+
+    Call this if you need to free memory or after changing distribution
+    definitions. Usually not needed unless using many unique parameter sets.
+    """
+    _cached_truncation_bounds.cache_clear()
 
 
 def fast_ppf_batch(
@@ -300,6 +350,7 @@ def fast_ppf_batch(
 
 
 __all__ = [
+    "clear_ppf_cache",
     "fast_ppf",
     "fast_ppf_batch",
     "has_fast_ppf",
