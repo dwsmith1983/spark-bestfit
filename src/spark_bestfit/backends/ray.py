@@ -46,6 +46,7 @@ def _fit_continuous_distribution(
     upper_bound: Optional[float],
     lazy_metrics: bool,
     estimation_method: str = "mle",
+    censoring_indicator: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """Fit a single continuous distribution (runs as Ray task).
 
@@ -65,6 +66,7 @@ def _fit_continuous_distribution(
         upper_bound=upper_bound,
         lazy_metrics=lazy_metrics,
         estimation_method=estimation_method,
+        censoring_indicator=censoring_indicator,
     )
 
 
@@ -200,6 +202,7 @@ class RayBackend:
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         custom_distributions: Optional[Dict[str, Any]] = None,
         estimation_method: str = "mle",
+        censoring_indicator: Optional[np.ndarray] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Ray tasks.
 
@@ -229,6 +232,8 @@ class RayBackend:
             estimation_method: Parameter estimation method (v2.5.0):
                 - "mle": Maximum Likelihood Estimation (default)
                 - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
+            censoring_indicator: Boolean array where True=observed event,
+                False=censored. When provided, uses censored MLE. (v2.9.0)
 
         Returns:
             List of fit result dicts (only successful fits, SSE < inf)
@@ -272,6 +277,7 @@ class RayBackend:
                     upper_bound=upper_bound,
                     lazy_metrics=lazy_metrics,
                     estimation_method=estimation_method,
+                    censoring_indicator=censoring_indicator,
                 )
                 for d in distributions
             ]

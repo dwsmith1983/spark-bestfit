@@ -56,6 +56,9 @@ class FitterConfig:
         bounded: Enable truncated distribution fitting.
         lower_bound: Lower bound for truncated fitting (scalar or per-column dict).
         upper_bound: Upper bound for truncated fitting (scalar or per-column dict).
+        censoring_column: Column name containing censoring indicator for survival data.
+            True/1 = observed event, False/0 = right-censored observation.
+            When specified, uses censored MLE for parameter estimation.
         num_partitions: Number of parallel partitions (None = auto-determine).
         lazy_metrics: Defer KS/AD computation until accessed.
         progress_callback: Optional callback for progress updates.
@@ -91,6 +94,9 @@ class FitterConfig:
     bounded: bool = False
     lower_bound: Optional[Union[float, Dict[str, float]]] = None
     upper_bound: Optional[Union[float, Dict[str, float]]] = None
+
+    # === Censored Data (v2.9.0) ===
+    censoring_column: Optional[str] = None  # Column with censoring indicator (True=observed, False=censored)
 
     # === Performance ===
     num_partitions: Optional[int] = None
@@ -158,6 +164,9 @@ class FitterConfigBuilder:
         self._bounded: bool = False
         self._lower_bound: Optional[Union[float, Dict[str, float]]] = None
         self._upper_bound: Optional[Union[float, Dict[str, float]]] = None
+
+        # Censored data
+        self._censoring_column: Optional[str] = None
 
         # Performance
         self._num_partitions: Optional[int] = None
@@ -334,6 +343,34 @@ class FitterConfigBuilder:
         self._num_partitions = n
         return self
 
+    def with_censoring(self, column: str) -> "FitterConfigBuilder":
+        """Configure censored data fitting for survival analysis (v2.9.0).
+
+        When fitting censored data, the fitter uses censored MLE which accounts
+        for right-censored observations (events that haven't occurred yet).
+
+        Common survival distributions: weibull_min, expon, lognorm, gamma.
+
+        Args:
+            column: Name of the column containing the censoring indicator.
+                True/1 = observed event, False/0 = right-censored observation.
+
+        Returns:
+            Self for method chaining.
+
+        Note:
+            KS/AD statistics are skipped for censored fits as they assume
+            complete data. Use AIC/BIC for model comparison instead.
+
+        Example:
+            >>> config = (FitterConfigBuilder()
+            ...     .with_censoring("event_occurred")
+            ...     .build())
+            >>> results = fitter.fit(df, column="time_to_event", config=config)
+        """
+        self._censoring_column = column
+        return self
+
     def with_estimation_method(self, method: str = "mle") -> "FitterConfigBuilder":
         """Configure parameter estimation method (v2.5.0).
 
@@ -382,6 +419,7 @@ class FitterConfigBuilder:
             bounded=self._bounded,
             lower_bound=self._lower_bound,
             upper_bound=self._upper_bound,
+            censoring_column=self._censoring_column,
             num_partitions=self._num_partitions,
             lazy_metrics=self._lazy_metrics,
             estimation_method=self._estimation_method,

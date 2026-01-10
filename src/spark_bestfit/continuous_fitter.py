@@ -321,6 +321,10 @@ class DistributionFitter(BaseFitter):
         # Validate bounds - handle both scalar and dict forms
         self._validate_bounds(cfg.lower_bound, cfg.upper_bound, target_columns)
 
+        # Validate censoring column if specified (v2.9.0)
+        if cfg.censoring_column is not None:
+            self._validate_censoring_column(df, cfg.censoring_column)
+
         # Get row count (single operation for all columns)
         row_count = self._get_row_count(df)
         if row_count == 0:
@@ -378,6 +382,7 @@ class DistributionFitter(BaseFitter):
                 prefilter=cfg.prefilter,
                 progress_callback=cfg.progress_callback,
                 estimation_method=cfg.estimation_method,
+                censoring_column=cfg.censoring_column,
             )
             all_results_dfs.append(results_df)
 
@@ -428,6 +433,7 @@ class DistributionFitter(BaseFitter):
         prefilter: Union[bool, str] = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         estimation_method: str = "mle",
+        censoring_column: Optional[str] = None,
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -448,6 +454,8 @@ class DistributionFitter(BaseFitter):
                 - "mle": Maximum Likelihood Estimation (default)
                 - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
                 - "auto": Automatically select MSE for heavy-tailed data
+            censoring_column: Column name containing censoring indicator (v2.9.0).
+                True/1 = observed event, False/0 = right-censored observation.
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -460,6 +468,16 @@ class DistributionFitter(BaseFitter):
 
         # Create fitting sample
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
+
+        # Extract censoring indicator if specified (v2.9.0)
+        censoring_indicator: Optional[np.ndarray] = None
+        if censoring_column is not None:
+            censoring_indicator = self._create_fitting_sample(df_sample, censoring_column, row_count)
+            censoring_indicator = censoring_indicator.astype(bool)
+            logger.info(
+                f"  Censored data: {int(np.sum(censoring_indicator))}/{len(censoring_indicator)} "
+                f"observed events ({100 * np.mean(censoring_indicator):.1f}%)"
+            )
 
         # Handle empty sample (all NaN/inf data filtered out)
         if len(data_sample) == 0:
@@ -567,6 +585,7 @@ class DistributionFitter(BaseFitter):
             progress_callback=progress_callback,
             custom_distributions=custom_dists,
             estimation_method=resolved_estimation_method,
+            censoring_indicator=censoring_indicator,
         )
 
         # Convert results to DataFrame
@@ -802,6 +821,42 @@ class DistributionFitter(BaseFitter):
         # Continuous-specific: validate bins parameter
         if isinstance(bins, int) and bins <= 0:
             raise ValueError(f"bins must be positive, got {bins}")
+
+    @staticmethod
+    def _validate_censoring_column(df: DataFrame, censoring_column: str) -> None:
+        """Validate censoring column exists and is boolean/binary (v2.9.0).
+
+        Args:
+            df: DataFrame containing data
+            censoring_column: Name of the censoring indicator column
+
+        Raises:
+            ValueError: If column doesn't exist or contains non-binary values
+        """
+        # Use base class method to check column exists
+        BaseFitter._validate_column_exists(df, censoring_column)
+
+        # Check column data type - should be boolean or numeric with only 0/1 values
+        # For Spark DataFrames
+        if hasattr(df, "schema"):
+            from pyspark.sql.types import BooleanType, IntegerType, LongType
+
+            col_type = df.schema[censoring_column].dataType
+            if not isinstance(col_type, (BooleanType, IntegerType, LongType)):
+                raise ValueError(
+                    f"Censoring column '{censoring_column}' must be boolean or integer type "
+                    f"(True/1 = observed, False/0 = censored), got {col_type}"
+                )
+        # For pandas DataFrames
+        elif hasattr(df, "dtypes"):
+            import pandas as pd
+
+            col_dtype = df[censoring_column].dtype
+            if col_dtype not in [bool, "bool", pd.BooleanDtype()] and not pd.api.types.is_integer_dtype(col_dtype):
+                raise ValueError(
+                    f"Censoring column '{censoring_column}' must be boolean or integer type "
+                    f"(True/1 = observed, False/0 = censored), got {col_dtype}"
+                )
 
     # _validate_bounds inherited from BaseFitter
     # _resolve_bounds inherited from BaseFitter
