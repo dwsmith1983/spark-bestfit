@@ -1,6 +1,8 @@
 Maximum Spacing Estimation
 ==========================
 
+.. versionadded:: 2.5.0
+
 spark-bestfit supports **Maximum Spacing Estimation (MSE)** as an alternative
 to Maximum Likelihood Estimation (MLE) for parameter fitting. MSE is particularly
 robust for heavy-tailed distributions where MLE may fail or produce poor estimates.

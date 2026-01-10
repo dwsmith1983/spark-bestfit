@@ -15,9 +15,6 @@
 
 ### Features
 
-- Add residual diagnostics plots ([#104](https://github.com/dwsmith1983/spark-bestfit/pull/104),
-  [`e2df9ff`](https://github.com/dwsmith1983/spark-bestfit/commit/e2df9ffd3434c06a7663eae806e75149e5efac04))
-
 - Add residual diagnostics plots and quality improvements
   ([#104](https://github.com/dwsmith1983/spark-bestfit/pull/104),
   [`e2df9ff`](https://github.com/dwsmith1983/spark-bestfit/commit/e2df9ffd3434c06a7663eae806e75149e5efac04))

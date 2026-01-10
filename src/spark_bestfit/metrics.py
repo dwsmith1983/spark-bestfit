@@ -13,7 +13,7 @@ import numpy as np
 import scipy.stats as st
 from scipy.stats import rv_continuous
 
-from spark_bestfit.truncated import TruncatedFrozenDist, create_truncated_dist
+from spark_bestfit.truncated import create_truncated_dist
 
 # Distributions that support Anderson-Darling p-value computation via scipy
 # Maps our distribution names to scipy.anderson's dist parameter
@@ -65,9 +65,7 @@ def compute_information_criteria(
         return np.inf, np.inf
 
 
-def compute_information_criteria_frozen(
-    frozen_dist: Any, n_params: int, data: np.ndarray
-) -> Tuple[float, float]:
+def compute_information_criteria_frozen(frozen_dist: Any, n_params: int, data: np.ndarray) -> Tuple[float, float]:
     """Compute AIC and BIC information criteria using a frozen distribution.
 
     This version works with frozen (and possibly truncated) distributions,
@@ -104,9 +102,7 @@ def compute_information_criteria_frozen(
         return np.inf, np.inf
 
 
-def compute_ks_statistic(
-    dist: rv_continuous, params: Tuple[float, ...], data: np.ndarray
-) -> Tuple[float, float]:
+def compute_ks_statistic(dist: rv_continuous, params: Tuple[float, ...], data: np.ndarray) -> Tuple[float, float]:
     """Compute Kolmogorov-Smirnov statistic and p-value.
 
     The KS statistic measures the maximum distance between the empirical

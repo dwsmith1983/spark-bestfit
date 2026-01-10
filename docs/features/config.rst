@@ -119,6 +119,27 @@ Builder Methods
    * - ``build()``
      - Create immutable ``FitterConfig``
 
+Estimation Method
+-----------------
+
+.. versionadded:: 2.5.0
+
+Configure the parameter estimation method:
+
+.. code-block:: python
+
+    config = (
+        FitterConfigBuilder()
+        .with_estimation_method('mse')  # or 'mle', 'auto'
+        .build()
+    )
+
+Options:
+
+- ``mle``: Maximum Likelihood Estimation (default)
+- ``mse``: Maximum Spacing Estimation (robust for heavy-tailed)
+- ``auto``: Automatically select based on data characteristics
+
 Config Attributes
 -----------------
 
