@@ -34,7 +34,6 @@ import numpy as np
 from scipy import special
 from scipy import stats as st
 
-
 # Type alias for PPF function signature
 PPFFunc = Callable[[np.ndarray, Tuple], np.ndarray]
 
