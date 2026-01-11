@@ -15,11 +15,12 @@ Example:
     >>> results = fitter.fit(df, column='value')
 """
 
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 
 
+@runtime_checkable
 class ExecutionBackend(Protocol):
     """Protocol for distributed execution backends.
 
@@ -49,7 +50,7 @@ class ExecutionBackend(Protocol):
             Backend-specific broadcast handle. For Spark, this is a Broadcast
             object. For local backend, returns the data directly.
         """
-        ...
+        ...  # pragma: no cover
 
     def destroy_broadcast(self, handle: Any) -> None:
         """Clean up broadcast variable resources.
@@ -60,7 +61,7 @@ class ExecutionBackend(Protocol):
         Args:
             handle: Broadcast handle returned by broadcast()
         """
-        ...
+        ...  # pragma: no cover
 
     def parallel_fit(
         self,
@@ -123,7 +124,7 @@ class ExecutionBackend(Protocol):
             - ks_statistic, ks_pvalue: Optional[float]
             - data_min, data_max, etc.: Optional[float]
         """
-        ...
+        ...  # pragma: no cover
 
     def get_parallelism(self) -> int:
         """Get available parallelism (cores/executors).
@@ -134,7 +135,7 @@ class ExecutionBackend(Protocol):
         Returns:
             Number of available parallel execution slots
         """
-        ...
+        ...  # pragma: no cover
 
     def collect_column(self, df: Any, column: str) -> np.ndarray:
         """Collect single column from DataFrame as numpy array.
@@ -149,7 +150,7 @@ class ExecutionBackend(Protocol):
         Returns:
             Numpy array of column values
         """
-        ...
+        ...  # pragma: no cover
 
     def get_column_stats(self, df: Any, column: str) -> Dict[str, float]:
         """Get column statistics (min, max, count).
@@ -164,7 +165,7 @@ class ExecutionBackend(Protocol):
         Returns:
             Dict with keys: 'min', 'max', 'count'
         """
-        ...
+        ...  # pragma: no cover
 
     def sample_column(
         self,
@@ -187,7 +188,7 @@ class ExecutionBackend(Protocol):
         Returns:
             Numpy array of sampled values
         """
-        ...
+        ...  # pragma: no cover
 
     def create_dataframe(
         self,
@@ -205,7 +206,7 @@ class ExecutionBackend(Protocol):
         Returns:
             Backend-specific DataFrame
         """
-        ...
+        ...  # pragma: no cover
 
     # =========================================================================
     # Copula and Histogram Methods (v2.0)
@@ -231,7 +232,7 @@ class ExecutionBackend(Protocol):
         Returns:
             Correlation matrix as numpy array of shape (n_columns, n_columns)
         """
-        ...
+        ...  # pragma: no cover
 
     def compute_histogram(
         self,
@@ -253,7 +254,7 @@ class ExecutionBackend(Protocol):
             Tuple of (bin_counts, total_count) where bin_counts is an array
             of counts for each bin
         """
-        ...
+        ...  # pragma: no cover
 
     def generate_samples(
         self,
@@ -279,4 +280,4 @@ class ExecutionBackend(Protocol):
         Returns:
             Backend-specific DataFrame with generated samples
         """
-        ...
+        ...  # pragma: no cover
