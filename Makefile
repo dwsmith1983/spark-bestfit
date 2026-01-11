@@ -1,4 +1,14 @@
-.PHONY: help install install-dev install-test test test-cov clean build publish-test publish pre-commit check setup docs docs-clean benchmark benchmark-ray benchmark-all benchmark-charts validate-notebooks mutate mutate-fast mutate-module mutate-dry mutate-summary mutate-survivors mutate-clean
+.PHONY: help
+.PHONY: install install-dev install-test
+.PHONY: test test-cov
+.PHONY: clean build publish-test publish
+.PHONY: pre-commit check setup
+.PHONY: docs docs-clean
+.PHONY: benchmark benchmark-ray benchmark-all benchmark-charts
+.PHONY: validate-notebooks
+.PHONY: mutate mutate-fast mutate-module mutate-dry mutate-summary mutate-survivors mutate-clean
+
+PYTHONPATH := src
 
 .DEFAULT_GOAL := help
 
@@ -19,10 +29,10 @@ install-test: ## Install package with test dependencies only
 	pip install -e ".[test]"
 
 test: ## Run tests with pytest
-	PYTHONPATH=src pytest
+	PYTHONPATH=$(PYTHONPATH) pytest
 
 test-cov: ## Run tests with coverage report
-	PYTHONPATH=src pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=html -v
+	PYTHONPATH=$(PYTHONPATH) pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-report=html -v
 
 clean: ## Clean build artifacts and cache files
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache htmlcov/ .coverage
@@ -54,10 +64,10 @@ setup: install-dev ## Initial setup for development
 	@echo "Run 'make test' to verify everything works"
 
 benchmark: ## Run Spark performance benchmarks (not run in CI)
-	PYTHONPATH=src pytest tests/benchmarks/test_benchmark_scaling.py -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=spark-latest --benchmark-save-data
+	PYTHONPATH=$(PYTHONPATH) pytest tests/benchmarks/test_benchmark_scaling.py -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=spark-latest --benchmark-save-data
 
 benchmark-ray: ## Run Ray performance benchmarks (requires ray installed)
-	PYTHONPATH=src pytest tests/benchmarks/test_benchmark_ray.py -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=ray-latest --benchmark-save-data
+	PYTHONPATH=$(PYTHONPATH) pytest tests/benchmarks/test_benchmark_ray.py -v --benchmark-only --benchmark-min-rounds=20 --benchmark-save=ray-latest --benchmark-save-data
 
 benchmark-all: benchmark benchmark-ray ## Run both Spark and Ray benchmarks
 
@@ -69,7 +79,7 @@ validate-notebooks: ## Run all example notebooks to validate they execute withou
 	@for nb in examples/*.ipynb examples/**/*.ipynb; do \
 		if [ -f "$$nb" ]; then \
 			echo "  Running $$nb..."; \
-			PYTHONPATH=src python -m jupyter nbconvert --to notebook --execute --inplace \
+			PYTHONPATH=$(PYTHONPATH) python -m jupyter nbconvert --to notebook --execute --inplace \
 				--ExecutePreprocessor.timeout=600 "$$nb" || exit 1; \
 		fi; \
 	done
@@ -85,7 +95,7 @@ mutate: ## Run mutation testing - SLOW (~37 hours), prefer mutate-fast
 	@echo "Consider using 'make mutate-fast' instead (~6 hours)"
 	@echo ""
 	rm -f .mutmut-cache
-	PYTHONPATH=src mutmut run
+	PYTHONPATH=$(PYTHONPATH) mutmut run
 
 mutate-fast: ## Run per-module mutation testing (~6 hours)
 	@echo "Running per-module mutation tests..."
