@@ -19,6 +19,21 @@ import scipy.stats as st
 
 from spark_bestfit import DistributionFitter, FitterConfigBuilder
 from spark_bestfit.estimation import fit_censored_mle
+from spark_bestfit.distributions import DistributionRegistry
+
+
+@pytest.fixture
+def survival_fitter(local_backend):
+    """Create a DistributionFitter with only survival-analysis distributions.
+
+    Censored MLE is expensive - limit to relevant distributions for fast tests.
+    """
+    # Get all distribution names and exclude all except survival-analysis ones
+    all_dists = set(DistributionRegistry.ALL_DISTRIBUTIONS)
+    keep_dists = {"expon", "weibull_min", "gamma", "lognorm"}
+    exclude_dists = tuple(all_dists - keep_dists)
+
+    return DistributionFitter(backend=local_backend, excluded_distributions=exclude_dists)
 
 
 class TestFitCensoredMLE:
@@ -140,7 +155,7 @@ class TestCensoredFitterConfig:
 class TestCensoredFitting:
     """Integration tests for censored distribution fitting."""
 
-    def test_censored_fitting_basic(self, local_backend):
+    def test_censored_fitting_basic(self, survival_fitter):
         """Basic censored fitting works with LocalBackend."""
         np.random.seed(42)
 
@@ -157,18 +172,13 @@ class TestCensoredFitting:
         })
 
         config = FitterConfigBuilder().with_censoring("event").build()
-        fitter = DistributionFitter(backend=local_backend)
-        # Limit distributions to avoid slow test (censored MLE is expensive)
-        results = fitter.fit(
-            df, column="time", config=config,
-            distributions=["expon", "weibull_min"],
-            max_distributions=2
-        )
+        # survival_fitter only includes expon, weibull_min, gamma, lognorm
+        results = survival_fitter.fit(df, column="time", config=config, max_distributions=2)
 
         # Should have results
         assert len(results.best(n=2)) > 0
 
-    def test_censored_fitting_skips_ks_ad(self, local_backend):
+    def test_censored_fitting_skips_ks_ad(self, survival_fitter):
         """KS and AD statistics are skipped for censored fits."""
         np.random.seed(42)
 
@@ -184,13 +194,8 @@ class TestCensoredFitting:
         })
 
         config = FitterConfigBuilder().with_censoring("event").build()
-        fitter = DistributionFitter(backend=local_backend)
-        # Limit distributions to avoid slow test (censored MLE is expensive)
-        results = fitter.fit(
-            df, column="time", config=config,
-            distributions=["expon"],
-            max_distributions=1
-        )
+        # survival_fitter only includes expon, weibull_min, gamma, lognorm
+        results = survival_fitter.fit(df, column="time", config=config, max_distributions=1)
 
         best = results.best(n=1)[0]
 
@@ -264,7 +269,7 @@ class TestCensoredValidation:
         with pytest.raises(ValueError, match="boolean or integer"):
             fitter.fit(df, column="time", config=config)
 
-    def test_valid_censoring_column_boolean(self, local_backend):
+    def test_valid_censoring_column_boolean(self, survival_fitter):
         """Boolean censoring column is accepted."""
         np.random.seed(42)
         df = pd.DataFrame({
@@ -273,17 +278,11 @@ class TestCensoredValidation:
         })
 
         config = FitterConfigBuilder().with_censoring("event").build()
-        fitter = DistributionFitter(backend=local_backend)
-
-        # Should not raise (limit distributions for speed)
-        results = fitter.fit(
-            df, column="time", config=config,
-            distributions=["expon", "weibull_min"],
-            max_distributions=2
-        )
+        # survival_fitter only includes expon, weibull_min, gamma, lognorm
+        results = survival_fitter.fit(df, column="time", config=config, max_distributions=2)
         assert len(results.best(n=2)) > 0
 
-    def test_valid_censoring_column_integer(self, local_backend):
+    def test_valid_censoring_column_integer(self, survival_fitter):
         """Integer (0/1) censoring column is accepted."""
         np.random.seed(42)
         df = pd.DataFrame({
@@ -292,12 +291,6 @@ class TestCensoredValidation:
         })
 
         config = FitterConfigBuilder().with_censoring("event").build()
-        fitter = DistributionFitter(backend=local_backend)
-
-        # Should not raise (limit distributions for speed)
-        results = fitter.fit(
-            df, column="time", config=config,
-            distributions=["expon", "weibull_min"],
-            max_distributions=2
-        )
+        # survival_fitter only includes expon, weibull_min, gamma, lognorm
+        results = survival_fitter.fit(df, column="time", config=config, max_distributions=2)
         assert len(results.best(n=2)) > 0
