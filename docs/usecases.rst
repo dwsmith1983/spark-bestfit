@@ -220,6 +220,46 @@ and simulate scenarios.
 
    # Run what-if scenarios (add agents, change volume, etc.)
 
+Data Drift Detection
+--------------------
+
+**Business Context:** Production ML models degrade when underlying data distributions
+shift. Drift detection monitors feature distributions over time and alerts when
+significant changes occur, enabling proactive model retraining and data quality
+monitoring.
+
+**spark-bestfit Features Used:**
+
+- ``lazy_metrics=False`` for KS statistics and p-values
+- ``DistributionFitter`` for baseline and monitoring period fitting
+- ``scipy.stats.ks_2samp`` for direct sample comparison
+- Multi-column fitting for multi-feature monitoring
+
+**Notebook:** `examples/spark/usecase_drift_detection.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_drift_detection.ipynb>`_
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter
+   from scipy.stats import ks_2samp
+
+   fitter = DistributionFitter(spark)
+
+   # Establish baseline from historical data
+   baseline_results = fitter.fit(
+       baseline_df,
+       column='feature',
+       lazy_metrics=False  # Need KS statistics
+   )
+   baseline_samples = baseline_df.toPandas()['feature'].values
+
+   # Monitor new data for drift
+   new_samples = new_df.toPandas()['feature'].values
+   ks_stat, p_value = ks_2samp(baseline_samples, new_samples)
+
+   if p_value < 0.05:
+       print(f"DRIFT DETECTED: KS={ks_stat:.4f}, p={p_value:.4e}")
+       # Trigger retraining, alert, or investigation
+
 Capital Budgeting Monte Carlo (Ray)
 -----------------------------------
 
@@ -297,6 +337,9 @@ Which Use Case Fits Your Needs?
    * - Discrete Event Simulation
      - get_scipy_dist(), sampling
      - Operations, staffing, capacity planning
+   * - Data Drift Detection
+     - KS tests, multi-feature monitoring
+     - ML monitoring, data quality, model retraining
    * - Capital Budgeting (Ray)
      - FitterConfigBuilder, RayBackend, NPV/IRR
      - Investment decisions, project evaluation
