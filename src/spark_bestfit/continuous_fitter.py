@@ -1043,13 +1043,14 @@ class DistributionFitter(BaseFitter):
             >>> fitter.plot_qq(best, df, 'value', title='Q-Q Plot')
         """
         from spark_bestfit.plotting import plot_qq
+        from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # Sample data for Q-Q plot using sample() instead of orderBy(rand())
-        # sample() operates per-partition without shuffle, much faster for large datasets
-        row_count = df.count()
+        # Sample data for Q-Q plot using multi-backend helpers
+        # Works with Spark DataFrames, Ray Datasets, and pandas DataFrames
+        row_count = _get_dataframe_row_count(df)
         fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
-        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed).limit(max_points)
-        data = sample_df.toPandas()[column].values
+        sampled = _sample_dataframe_column(df, column, fraction, self.random_seed)
+        data = sampled[:max_points]
 
         return plot_qq(
             result=result,
@@ -1136,13 +1137,14 @@ class DistributionFitter(BaseFitter):
             >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
         """
         from spark_bestfit.plotting import plot_pp
+        from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # Sample data for P-P plot using sample() instead of orderBy(rand())
-        # sample() operates per-partition without shuffle, much faster for large datasets
-        row_count = df.count()
+        # Sample data for P-P plot using multi-backend helpers
+        # Works with Spark DataFrames, Ray Datasets, and pandas DataFrames
+        row_count = _get_dataframe_row_count(df)
         fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
-        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed).limit(max_points)
-        data = sample_df.toPandas()[column].values
+        sampled = _sample_dataframe_column(df, column, fraction, self.random_seed)
+        data = sampled[:max_points]
 
         return plot_pp(
             result=result,
