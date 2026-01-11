@@ -140,7 +140,6 @@ class TestCensoredFitterConfig:
 class TestCensoredFitting:
     """Integration tests for censored distribution fitting."""
 
-    @pytest.mark.skip(reason="Test hangs in CI - needs investigation")
     def test_censored_fitting_basic(self, local_backend):
         """Basic censored fitting works with LocalBackend."""
         np.random.seed(42)
@@ -159,7 +158,12 @@ class TestCensoredFitting:
 
         config = FitterConfigBuilder().with_censoring("event").build()
         fitter = DistributionFitter(backend=local_backend)
-        results = fitter.fit(df, column="time", config=config, max_distributions=2)
+        # Limit distributions to avoid slow test (censored MLE is expensive)
+        results = fitter.fit(
+            df, column="time", config=config,
+            distributions=["expon", "weibull_min"],
+            max_distributions=2
+        )
 
         # Should have results
         assert len(results.best(n=2)) > 0
@@ -181,7 +185,12 @@ class TestCensoredFitting:
 
         config = FitterConfigBuilder().with_censoring("event").build()
         fitter = DistributionFitter(backend=local_backend)
-        results = fitter.fit(df, column="time", config=config, max_distributions=1)
+        # Limit distributions to avoid slow test (censored MLE is expensive)
+        results = fitter.fit(
+            df, column="time", config=config,
+            distributions=["expon"],
+            max_distributions=1
+        )
 
         best = results.best(n=1)[0]
 
@@ -266,8 +275,12 @@ class TestCensoredValidation:
         config = FitterConfigBuilder().with_censoring("event").build()
         fitter = DistributionFitter(backend=local_backend)
 
-        # Should not raise
-        results = fitter.fit(df, column="time", config=config, max_distributions=2)
+        # Should not raise (limit distributions for speed)
+        results = fitter.fit(
+            df, column="time", config=config,
+            distributions=["expon", "weibull_min"],
+            max_distributions=2
+        )
         assert len(results.best(n=2)) > 0
 
     def test_valid_censoring_column_integer(self, local_backend):
@@ -281,6 +294,10 @@ class TestCensoredValidation:
         config = FitterConfigBuilder().with_censoring("event").build()
         fitter = DistributionFitter(backend=local_backend)
 
-        # Should not raise
-        results = fitter.fit(df, column="time", config=config, max_distributions=2)
+        # Should not raise (limit distributions for speed)
+        results = fitter.fit(
+            df, column="time", config=config,
+            distributions=["expon", "weibull_min"],
+            max_distributions=2
+        )
         assert len(results.best(n=2)) > 0
