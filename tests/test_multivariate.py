@@ -248,9 +248,9 @@ class TestMultivariateNormalResultMethods:
         # Should be symmetric
         np.testing.assert_array_almost_equal(corr, corr.T)
 
-        # Off-diagonal should be between -1 and 1
-        assert np.all(corr >= -1.0)
-        assert np.all(corr <= 1.0)
+        # Off-diagonal should be between -1 and 1 (allow small numerical tolerance)
+        assert np.all(corr >= -1.0 - 1e-10)
+        assert np.all(corr <= 1.0 + 1e-10)
 
 
 class TestMultivariateNormalResultSerialization:
