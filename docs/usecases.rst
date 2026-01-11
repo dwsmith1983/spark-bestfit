@@ -18,7 +18,11 @@ to calculate Value-at-Risk (VaR) and other risk metrics.
 - Distributed sampling for scenario generation
 - ``lazy_metrics=True`` for performance
 
-**Notebook:** `examples/spark/usecase_monte_carlo.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_monte_carlo.ipynb>`_
+**Notebooks:**
+
+- **Spark:** `examples/spark/usecase_monte_carlo.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_monte_carlo.ipynb>`_
+- **Local:** `examples/local/usecase_monte_carlo.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/local/usecase_monte_carlo.ipynb>`_
+- **Ray:** `examples/ray/usecase_monte_carlo.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_monte_carlo.ipynb>`_
 
 .. code-block:: python
 
@@ -53,7 +57,11 @@ enables generating statistically similar synthetic datasets.
 - Serialization for saving/loading fitted models
 - Distributed sampling at scale
 
-**Notebook:** `examples/spark/usecase_synthetic_data.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_synthetic_data.ipynb>`_
+**Notebooks:**
+
+- **Spark:** `examples/spark/usecase_synthetic_data.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_synthetic_data.ipynb>`_
+- **Local:** `examples/local/usecase_synthetic_data.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/local/usecase_synthetic_data.ipynb>`_
+- **Ray:** `examples/ray/usecase_synthetic_data.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_synthetic_data.ipynb>`_
 
 .. code-block:: python
 
@@ -86,7 +94,11 @@ with proper uncertainty quantification.
 - Bootstrap confidence intervals
 - ``lazy_metrics=True`` for quick model selection
 
-**Notebook:** `examples/spark/usecase_ab_testing.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_ab_testing.ipynb>`_
+**Notebooks:**
+
+- **Spark:** `examples/spark/usecase_ab_testing.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_ab_testing.ipynb>`_
+- **Local:** `examples/local/usecase_ab_testing.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/local/usecase_ab_testing.ipynb>`_
+- **Ray:** `examples/ray/usecase_ab_testing.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_ab_testing.ipynb>`_
 
 .. code-block:: python
 
@@ -123,7 +135,11 @@ capturing extreme loss events.
 - Bounded fitting for capped policies
 - Q-Q plots for tail behavior validation
 
-**Notebook:** `examples/spark/usecase_insurance.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_insurance.ipynb>`_
+**Notebooks:**
+
+- **Spark:** `examples/spark/usecase_insurance.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_insurance.ipynb>`_
+- **Local:** `examples/local/usecase_insurance.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/local/usecase_insurance.ipynb>`_
+- **Ray:** `examples/ray/usecase_insurance.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_insurance.ipynb>`_
 
 .. code-block:: python
 
@@ -159,7 +175,11 @@ from this distribution?" The Kolmogorov-Smirnov (KS) test provides formal hypoth
 - ``metric='ad_statistic'`` for tail-sensitive validation
 - ``fit.pvalue`` for hypothesis test interpretation
 
-**Notebook:** `examples/spark/usecase_model_validation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_model_validation.ipynb>`_
+**Notebooks:**
+
+- **Spark:** `examples/spark/usecase_model_validation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_model_validation.ipynb>`_
+- **Local:** `examples/local/usecase_model_validation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/local/usecase_model_validation.ipynb>`_
+- **Ray:** `examples/ray/usecase_model_validation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_model_validation.ipynb>`_
 
 .. code-block:: python
 
@@ -198,7 +218,11 @@ and simulate scenarios.
 - ``lazy_metrics=False`` to validate distributional assumptions
 - ``get_scipy_dist()`` to sample from fitted distributions in simulations
 
-**Notebook:** `examples/spark/usecase_simulation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_simulation.ipynb>`_
+**Notebooks:**
+
+- **Spark:** `examples/spark/usecase_simulation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_simulation.ipynb>`_
+- **Local:** `examples/local/usecase_simulation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/local/usecase_simulation.ipynb>`_
+- **Ray:** `examples/ray/usecase_simulation.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/ray/usecase_simulation.ipynb>`_
 
 .. code-block:: python
 
@@ -219,6 +243,46 @@ and simulate scenarios.
    service_times = service_dist.rvs(size=1000)
 
    # Run what-if scenarios (add agents, change volume, etc.)
+
+Data Drift Detection
+--------------------
+
+**Business Context:** Production ML models degrade when underlying data distributions
+shift. Drift detection monitors feature distributions over time and alerts when
+significant changes occur, enabling proactive model retraining and data quality
+monitoring.
+
+**spark-bestfit Features Used:**
+
+- ``lazy_metrics=False`` for KS statistics and p-values
+- ``DistributionFitter`` for baseline and monitoring period fitting
+- ``scipy.stats.ks_2samp`` for direct sample comparison
+- Multi-column fitting for multi-feature monitoring
+
+**Notebook:** `examples/spark/usecase_drift_detection.ipynb <https://github.com/dwsmith1983/spark-bestfit/blob/main/examples/spark/usecase_drift_detection.ipynb>`_
+
+.. code-block:: python
+
+   from spark_bestfit import DistributionFitter
+   from scipy.stats import ks_2samp
+
+   fitter = DistributionFitter(spark)
+
+   # Establish baseline from historical data
+   baseline_results = fitter.fit(
+       baseline_df,
+       column='feature',
+       lazy_metrics=False  # Need KS statistics
+   )
+   baseline_samples = baseline_df.toPandas()['feature'].values
+
+   # Monitor new data for drift
+   new_samples = new_df.toPandas()['feature'].values
+   ks_stat, p_value = ks_2samp(baseline_samples, new_samples)
+
+   if p_value < 0.05:
+       print(f"DRIFT DETECTED: KS={ks_stat:.4f}, p={p_value:.4e}")
+       # Trigger retraining, alert, or investigation
 
 Capital Budgeting Monte Carlo (Ray)
 -----------------------------------
@@ -297,6 +361,9 @@ Which Use Case Fits Your Needs?
    * - Discrete Event Simulation
      - get_scipy_dist(), sampling
      - Operations, staffing, capacity planning
+   * - Data Drift Detection
+     - KS tests, multi-feature monitoring
+     - ML monitoring, data quality, model retraining
    * - Capital Budgeting (Ray)
      - FitterConfigBuilder, RayBackend, NPV/IRR
      - Investment decisions, project evaluation

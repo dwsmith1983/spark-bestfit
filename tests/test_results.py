@@ -1307,3 +1307,215 @@ class TestFitResultsWithPandas:
 
         assert "value" in best_per
         assert len(best_per["value"]) == 1
+
+
+class TestDataFrameHelperFunctions:
+    """Tests for DataFrame helper functions supporting multiple backends."""
+
+    def test_is_spark_dataframe_with_spark(self, spark_session):
+        """Test _is_spark_dataframe returns True for Spark DataFrame."""
+        from spark_bestfit.storage import _is_spark_dataframe
+
+        df = spark_session.createDataFrame([(1.0,), (2.0,)], ["value"])
+        assert _is_spark_dataframe(df) is True
+
+    def test_is_spark_dataframe_with_pandas(self):
+        """Test _is_spark_dataframe returns False for pandas DataFrame."""
+        import pandas as pd
+
+        from spark_bestfit.storage import _is_spark_dataframe
+
+        df = pd.DataFrame({"value": [1.0, 2.0]})
+        assert _is_spark_dataframe(df) is False
+
+    def test_is_ray_dataset_with_pandas(self):
+        """Test _is_ray_dataset returns False for pandas DataFrame."""
+        import pandas as pd
+
+        from spark_bestfit.storage import _is_ray_dataset
+
+        df = pd.DataFrame({"value": [1.0, 2.0]})
+        assert _is_ray_dataset(df) is False
+
+    def test_is_ray_dataset_with_spark(self, spark_session):
+        """Test _is_ray_dataset returns False for Spark DataFrame."""
+        from spark_bestfit.storage import _is_ray_dataset
+
+        df = spark_session.createDataFrame([(1.0,), (2.0,)], ["value"])
+        assert _is_ray_dataset(df) is False
+
+    def test_get_dataframe_row_count_pandas(self):
+        """Test _get_dataframe_row_count with pandas DataFrame."""
+        import pandas as pd
+
+        from spark_bestfit.storage import _get_dataframe_row_count
+
+        df = pd.DataFrame({"value": [1.0, 2.0, 3.0, 4.0, 5.0]})
+        assert _get_dataframe_row_count(df) == 5
+
+    def test_get_dataframe_row_count_spark(self, spark_session):
+        """Test _get_dataframe_row_count with Spark DataFrame."""
+        from spark_bestfit.storage import _get_dataframe_row_count
+
+        df = spark_session.createDataFrame([(1.0,), (2.0,), (3.0,)], ["value"])
+        assert _get_dataframe_row_count(df) == 3
+
+    def test_collect_dataframe_column_pandas(self):
+        """Test _collect_dataframe_column with pandas DataFrame."""
+        import pandas as pd
+
+        from spark_bestfit.storage import _collect_dataframe_column
+
+        df = pd.DataFrame({"value": [1.0, 2.0, 3.0]})
+        result = _collect_dataframe_column(df, "value")
+
+        assert isinstance(result, np.ndarray)
+        np.testing.assert_array_equal(result, np.array([1.0, 2.0, 3.0]))
+
+    def test_collect_dataframe_column_spark(self, spark_session):
+        """Test _collect_dataframe_column with Spark DataFrame."""
+        from spark_bestfit.storage import _collect_dataframe_column
+
+        df = spark_session.createDataFrame([(1.0,), (2.0,), (3.0,)], ["value"])
+        result = _collect_dataframe_column(df, "value")
+
+        assert isinstance(result, np.ndarray)
+        np.testing.assert_array_equal(result, np.array([1.0, 2.0, 3.0]))
+
+    def test_sample_dataframe_column_pandas(self):
+        """Test _sample_dataframe_column with pandas DataFrame."""
+        import pandas as pd
+
+        from spark_bestfit.storage import _sample_dataframe_column
+
+        df = pd.DataFrame({"value": list(range(100))})
+        result = _sample_dataframe_column(df, "value", fraction=0.1, seed=42)
+
+        assert isinstance(result, np.ndarray)
+        assert len(result) == 10  # 10% of 100
+
+    def test_sample_dataframe_column_spark(self, spark_session):
+        """Test _sample_dataframe_column with Spark DataFrame."""
+        from spark_bestfit.storage import _sample_dataframe_column
+
+        df = spark_session.createDataFrame([(float(i),) for i in range(100)], ["value"])
+        result = _sample_dataframe_column(df, "value", fraction=0.1, seed=42)
+
+        assert isinstance(result, np.ndarray)
+        # Spark sampling is approximate, check reasonable range
+        assert 5 <= len(result) <= 20
+
+    def test_sample_dataframe_column_reproducible(self):
+        """Test _sample_dataframe_column is reproducible with same seed."""
+        import pandas as pd
+
+        from spark_bestfit.storage import _sample_dataframe_column
+
+        df = pd.DataFrame({"value": list(range(100))})
+        result1 = _sample_dataframe_column(df, "value", fraction=0.1, seed=42)
+        result2 = _sample_dataframe_column(df, "value", fraction=0.1, seed=42)
+
+        np.testing.assert_array_equal(result1, result2)
+
+
+class TestConfidenceIntervalsMultiBackend:
+    """Tests for confidence_intervals with multiple backends."""
+
+    def test_confidence_intervals_pandas(self):
+        """Test confidence_intervals with pandas DataFrame."""
+        import pandas as pd
+
+        # Create sample normal data
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=500)
+        df = pd.DataFrame({"value": data})
+
+        # Create a result for this data
+        result = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+        )
+
+        # Compute CI
+        ci = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=50, random_seed=42
+        )
+
+        # Should have correct parameter names
+        assert "loc" in ci
+        assert "scale" in ci
+
+        # CIs should be valid tuples
+        for param, (lower, upper) in ci.items():
+            assert lower < upper
+
+    def test_confidence_intervals_pandas_discrete(self):
+        """Test confidence_intervals for discrete distribution with pandas."""
+        import pandas as pd
+
+        # Create sample Poisson data
+        np.random.seed(42)
+        data = np.random.poisson(lam=7, size=300)
+        df = pd.DataFrame({"count": data})
+
+        result = DistributionFitResult(
+            distribution="poisson",
+            parameters=[7.0],
+            sse=0.005,
+        )
+
+        ci = result.confidence_intervals(
+            df, column="count", alpha=0.05, n_bootstrap=50, random_seed=42
+        )
+
+        assert "mu" in ci
+        lower, upper = ci["mu"]
+        assert lower < upper
+
+    def test_confidence_intervals_pandas_large_data_sampling(self):
+        """Test confidence_intervals correctly samples large pandas DataFrames."""
+        import pandas as pd
+
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=50000)
+        df = pd.DataFrame({"value": data})
+
+        result = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+        )
+
+        # Should not error even with large data
+        ci = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=30,
+            max_samples=5000, random_seed=42
+        )
+
+        assert "loc" in ci
+        assert "scale" in ci
+
+    def test_confidence_intervals_pandas_reproducible(self):
+        """Test confidence_intervals is reproducible with same seed on pandas."""
+        import pandas as pd
+
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=300)
+        df = pd.DataFrame({"value": data})
+
+        result = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+        )
+
+        ci1 = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=30, random_seed=123
+        )
+        ci2 = result.confidence_intervals(
+            df, column="value", alpha=0.05, n_bootstrap=30, random_seed=123
+        )
+
+        assert ci1["loc"] == ci2["loc"]
+        assert ci1["scale"] == ci2["scale"]

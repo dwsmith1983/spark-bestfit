@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## Unreleased
+
+### Features
+
+- **mixture**: Add Gaussian Mixture Model fitting with EM algorithm
+  - New `GaussianMixtureFitter` class for fitting GMMs
+  - New `GaussianMixtureResult` dataclass with sample(), pdf(), predict() methods
+  - Model selection via AIC/BIC
+  - Soft clustering via predict_proba() and responsibilities_
+  - JSON/pickle serialization support
+  - Documentation in docs/features/mixture.rst
+
+
 ## v2.8.1 (2026-01-10)
 
 ### Bug Fixes

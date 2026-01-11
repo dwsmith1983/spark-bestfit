@@ -12,6 +12,9 @@ Type Aliases:
     MetricName: Valid metric names for sorting/filtering.
     ContinuousHistogram: Tuple type for continuous distribution histograms.
     DiscreteHistogram: Tuple type for discrete distribution histograms.
+    HistogramBins: Array of bin edges (len = n_bins + 1).
+    HistogramCounts: Array of counts/density per bin.
+    HistogramResult: Tuple type for HistogramComputer results (counts, bins).
 
 Constants:
     FITTING_SAMPLE_SIZE: Default sample size for fitting (10000).
@@ -27,7 +30,7 @@ Constants:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Tuple, TypeAlias, Union
 
 import numpy as np
 import scipy.stats as st
@@ -44,7 +47,6 @@ except ImportError:
     _PYSPARK_AVAILABLE = False
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame as SparkDataFrame
     from pyspark.sql import SparkSession
 
 
@@ -83,6 +85,117 @@ ContinuousHistogram = Tuple[np.ndarray, np.ndarray]
 
 # DiscreteHistogram: (x_values, empirical_pmf) where both arrays have same length
 DiscreteHistogram = Tuple[np.ndarray, np.ndarray]
+
+# HistogramBins: Array of bin edges (len = n_bins + 1)
+HistogramBins: TypeAlias = np.ndarray
+
+# HistogramCounts: Array of counts/density per bin
+HistogramCounts: TypeAlias = np.ndarray
+
+# HistogramResult: Complete histogram from HistogramComputer.compute_histogram()
+# Order is (counts, bins) where counts has n_bins elements and bins has n_bins + 1 edges
+HistogramResult: TypeAlias = Tuple[np.ndarray, np.ndarray]
+
+
+# =============================================================================
+# DataFrame Utilities (Multi-Backend Support)
+# =============================================================================
+
+
+def _is_spark_dataframe(df) -> bool:
+    """Check if df is a Spark DataFrame.
+
+    Uses duck typing to detect Spark DataFrames without requiring pyspark import.
+
+    Args:
+        df: DataFrame to check
+
+    Returns:
+        True if df is a Spark DataFrame, False otherwise
+    """
+    return hasattr(df, "toPandas") and hasattr(df, "select")
+
+
+def _is_ray_dataset(df) -> bool:
+    """Check if df is a Ray Dataset (not a pandas DataFrame).
+
+    Uses duck typing to detect Ray Datasets. Note that pandas DataFrames
+    don't have select_columns(), so this won't match them.
+
+    Args:
+        df: DataFrame to check
+
+    Returns:
+        True if df is a Ray Dataset, False otherwise
+    """
+    return hasattr(df, "select_columns") and hasattr(df, "to_pandas")
+
+
+def _get_dataframe_row_count(df) -> int:
+    """Get total row count from any supported DataFrame type.
+
+    Supports Spark DataFrames, Ray Datasets, and pandas DataFrames.
+
+    Args:
+        df: DataFrame (Spark, Ray Dataset, or pandas)
+
+    Returns:
+        Total number of rows in the DataFrame
+    """
+    if _is_spark_dataframe(df):
+        return df.count()
+    elif _is_ray_dataset(df):
+        return df.count()
+    else:  # pandas DataFrame
+        return len(df)
+
+
+def _collect_dataframe_column(df, column: str) -> np.ndarray:
+    """Extract a column from any supported DataFrame type as numpy array.
+
+    Supports Spark DataFrames, Ray Datasets, and pandas DataFrames.
+
+    Args:
+        df: DataFrame (Spark, Ray Dataset, or pandas)
+        column: Column name to extract
+
+    Returns:
+        Numpy array of column values
+    """
+    if _is_spark_dataframe(df):
+        return np.array(df.select(column).toPandas()[column].values)
+    elif _is_ray_dataset(df):
+        return df.select_columns([column]).to_pandas()[column].values
+    else:  # pandas DataFrame
+        return df[column].values
+
+
+def _sample_dataframe_column(df, column: str, fraction: float, seed: Optional[int]) -> np.ndarray:
+    """Sample a column from any supported DataFrame type and return as numpy array.
+
+    Supports Spark DataFrames, Ray Datasets, and pandas DataFrames.
+
+    Args:
+        df: DataFrame (Spark, Ray Dataset, or pandas)
+        column: Column name to sample
+        fraction: Fraction of rows to sample (0 < fraction <= 1)
+        seed: Random seed for reproducibility (can be None)
+
+    Returns:
+        Numpy array of sampled column values
+    """
+    if _is_spark_dataframe(df):
+        if seed is not None:
+            sampled = df.sample(withReplacement=False, fraction=fraction, seed=seed)
+        else:
+            sampled = df.sample(withReplacement=False, fraction=fraction)
+        return np.array(sampled.select(column).toPandas()[column].values)
+    elif _is_ray_dataset(df):
+        sampled = df.random_sample(fraction, seed=seed)
+        return sampled.select_columns([column]).to_pandas()[column].values
+    else:  # pandas DataFrame
+        sample_df = df[[column]].sample(frac=fraction, random_state=seed)
+        return sample_df[column].values
 
 
 # =============================================================================
@@ -475,7 +588,7 @@ class DistributionFitResult:
 
     def confidence_intervals(
         self,
-        df: "SparkDataFrame",
+        df,
         column: str,
         alpha: float = DEFAULT_PVALUE_THRESHOLD,
         n_bootstrap: int = DEFAULT_BOOTSTRAP_SAMPLES,
@@ -489,7 +602,8 @@ class DistributionFitResult:
         empirical distribution of fitted parameters.
 
         Args:
-            df: Spark DataFrame containing the data
+            df: DataFrame containing the data (Spark DataFrame, pandas DataFrame,
+                or Ray Dataset)
             column: Column name containing the data
             alpha: Significance level (default 0.05 for 95% CI)
             n_bootstrap: Number of bootstrap samples (default 1000)
@@ -518,19 +632,15 @@ class DistributionFitResult:
         from spark_bestfit.distributions import DiscreteDistributionRegistry
         from spark_bestfit.fitting import bootstrap_confidence_intervals
 
-        # Sample data from DataFrame
-        total_rows = df.count()
+        # Sample data from DataFrame (supports Spark, pandas, and Ray backends)
+        total_rows = _get_dataframe_row_count(df)
         if total_rows <= max_samples:
             # Collect all rows
-            data = np.array(df.select(column).toPandas()[column].values)
+            data = _collect_dataframe_column(df, column)
         else:
             # Sample rows
             fraction = max_samples / total_rows
-            if random_seed is not None:
-                sampled_df = df.sample(withReplacement=False, fraction=fraction, seed=random_seed)
-            else:
-                sampled_df = df.sample(withReplacement=False, fraction=fraction)
-            data = np.array(sampled_df.select(column).toPandas()[column].values)
+            data = _sample_dataframe_column(df, column, fraction, random_seed)
 
         # Check if this is a discrete distribution
         registry = DiscreteDistributionRegistry()

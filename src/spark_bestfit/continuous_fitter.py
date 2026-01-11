@@ -321,6 +321,10 @@ class DistributionFitter(BaseFitter):
         # Validate bounds - handle both scalar and dict forms
         self._validate_bounds(cfg.lower_bound, cfg.upper_bound, target_columns)
 
+        # Validate censoring column if specified (v2.9.0)
+        if cfg.censoring_column is not None:
+            self._validate_censoring_column(df, cfg.censoring_column)
+
         # Get row count (single operation for all columns)
         row_count = self._get_row_count(df)
         if row_count == 0:
@@ -333,6 +337,7 @@ class DistributionFitter(BaseFitter):
             column_bounds = self._resolve_bounds(df, target_columns, cfg.lower_bound, cfg.upper_bound)
 
         # Sample if needed (single operation for all columns)
+        # For adaptive sampling, use first column as representative for skew analysis
         df_sample = self._apply_sampling(
             df,
             row_count,
@@ -340,6 +345,11 @@ class DistributionFitter(BaseFitter):
             cfg.sample_fraction,
             cfg.max_sample_size,
             cfg.sample_threshold,
+            column=target_columns[0] if target_columns else None,
+            adaptive_sampling=cfg.adaptive_sampling,
+            sampling_mode=cfg.sampling_mode,
+            skew_threshold_mild=cfg.skew_threshold_mild,
+            skew_threshold_high=cfg.skew_threshold_high,
         )
 
         # Get distributions to fit (same for all columns)
@@ -372,6 +382,7 @@ class DistributionFitter(BaseFitter):
                 prefilter=cfg.prefilter,
                 progress_callback=cfg.progress_callback,
                 estimation_method=cfg.estimation_method,
+                censoring_column=cfg.censoring_column,
             )
             all_results_dfs.append(results_df)
 
@@ -422,6 +433,7 @@ class DistributionFitter(BaseFitter):
         prefilter: Union[bool, str] = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         estimation_method: str = "mle",
+        censoring_column: Optional[str] = None,
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -442,6 +454,8 @@ class DistributionFitter(BaseFitter):
                 - "mle": Maximum Likelihood Estimation (default)
                 - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
                 - "auto": Automatically select MSE for heavy-tailed data
+            censoring_column: Column name containing censoring indicator (v2.9.0).
+                True/1 = observed event, False/0 = right-censored observation.
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -454,6 +468,16 @@ class DistributionFitter(BaseFitter):
 
         # Create fitting sample
         data_sample = self._create_fitting_sample(df_sample, column, row_count)
+
+        # Extract censoring indicator if specified (v2.9.0)
+        censoring_indicator: Optional[np.ndarray] = None
+        if censoring_column is not None:
+            censoring_indicator = self._create_fitting_sample(df_sample, censoring_column, row_count)
+            censoring_indicator = censoring_indicator.astype(bool)
+            logger.info(
+                f"  Censored data: {int(np.sum(censoring_indicator))}/{len(censoring_indicator)} "
+                f"observed events ({100 * np.mean(censoring_indicator):.1f}%)"
+            )
 
         # Handle empty sample (all NaN/inf data filtered out)
         if len(data_sample) == 0:
@@ -561,6 +585,7 @@ class DistributionFitter(BaseFitter):
             progress_callback=progress_callback,
             custom_distributions=custom_dists,
             estimation_method=resolved_estimation_method,
+            censoring_indicator=censoring_indicator,
         )
 
         # Convert results to DataFrame
@@ -797,6 +822,42 @@ class DistributionFitter(BaseFitter):
         if isinstance(bins, int) and bins <= 0:
             raise ValueError(f"bins must be positive, got {bins}")
 
+    @staticmethod
+    def _validate_censoring_column(df: DataFrame, censoring_column: str) -> None:
+        """Validate censoring column exists and is boolean/binary (v2.9.0).
+
+        Args:
+            df: DataFrame containing data
+            censoring_column: Name of the censoring indicator column
+
+        Raises:
+            ValueError: If column doesn't exist or contains non-binary values
+        """
+        # Use base class method to check column exists
+        BaseFitter._validate_column_exists(df, censoring_column)
+
+        # Check column data type - should be boolean or numeric with only 0/1 values
+        # For Spark DataFrames
+        if hasattr(df, "schema"):
+            from pyspark.sql.types import BooleanType, IntegerType, LongType
+
+            col_type = df.schema[censoring_column].dataType
+            if not isinstance(col_type, (BooleanType, IntegerType, LongType)):
+                raise ValueError(
+                    f"Censoring column '{censoring_column}' must be boolean or integer type "
+                    f"(True/1 = observed, False/0 = censored), got {col_type}"
+                )
+        # For pandas DataFrames
+        elif hasattr(df, "dtypes"):
+            import pandas as pd
+
+            col_dtype = df[censoring_column].dtype
+            if col_dtype not in [bool, "bool", pd.BooleanDtype()] and not pd.api.types.is_integer_dtype(col_dtype):
+                raise ValueError(
+                    f"Censoring column '{censoring_column}' must be boolean or integer type "
+                    f"(True/1 = observed, False/0 = censored), got {col_dtype}"
+                )
+
     # _validate_bounds inherited from BaseFitter
     # _resolve_bounds inherited from BaseFitter
     # _apply_sampling inherited from BaseFitter
@@ -982,13 +1043,14 @@ class DistributionFitter(BaseFitter):
             >>> fitter.plot_qq(best, df, 'value', title='Q-Q Plot')
         """
         from spark_bestfit.plotting import plot_qq
+        from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # Sample data for Q-Q plot using sample() instead of orderBy(rand())
-        # sample() operates per-partition without shuffle, much faster for large datasets
-        row_count = df.count()
+        # Sample data for Q-Q plot using multi-backend helpers
+        # Works with Spark DataFrames, Ray Datasets, and pandas DataFrames
+        row_count = _get_dataframe_row_count(df)
         fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
-        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed).limit(max_points)
-        data = sample_df.toPandas()[column].values
+        sampled = _sample_dataframe_column(df, column, fraction, self.random_seed)
+        data = sampled[:max_points]
 
         return plot_qq(
             result=result,
@@ -1075,13 +1137,14 @@ class DistributionFitter(BaseFitter):
             >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
         """
         from spark_bestfit.plotting import plot_pp
+        from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # Sample data for P-P plot using sample() instead of orderBy(rand())
-        # sample() operates per-partition without shuffle, much faster for large datasets
-        row_count = df.count()
+        # Sample data for P-P plot using multi-backend helpers
+        # Works with Spark DataFrames, Ray Datasets, and pandas DataFrames
+        row_count = _get_dataframe_row_count(df)
         fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
-        sample_df = df.select(column).sample(fraction=fraction, seed=self.random_seed).limit(max_points)
-        data = sample_df.toPandas()[column].values
+        sampled = _sample_dataframe_column(df, column, fraction, self.random_seed)
+        data = sampled[:max_points]
 
         return plot_pp(
             result=result,

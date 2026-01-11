@@ -429,9 +429,8 @@ class TestMultiColumnFitting:
 class TestDistributionFitterPlotting:
     """Tests for plotting functionality.
 
-    Note: The fitter's plot() and plot_qq() methods currently use Spark DataFrame API
-    directly (df.select, df.sample, etc.) which isn't backend-agnostic. These tests
-    use the plotting module directly with numpy arrays instead.
+    The fitter's plot_qq() and plot_pp() methods support multiple backends
+    (Spark, Ray, pandas) using the storage module helpers.
     """
 
     def test_plot_after_fit(self, local_backend, pandas_dataset):
@@ -520,6 +519,92 @@ class TestDistributionFitterPlotting:
 
         assert fig is not None
         assert ax is not None
+
+    def test_fitter_plot_qq_with_pandas_dataframe(self, local_backend, pandas_dataset):
+        """Test fitter.plot_qq() with pandas DataFrame directly."""
+        import matplotlib.pyplot as plt
+
+        fitter = DistributionFitter(backend=local_backend, random_seed=42)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
+        best = results.best(n=1)[0]
+
+        # Call fitter.plot_qq() with pandas DataFrame - should now work
+        fig, ax = fitter.plot_qq(best, pandas_dataset, column="value", max_points=100)
+
+        assert fig is not None
+        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Verify plot has scatter points and reference line
+        assert len(ax.collections) >= 1, "Should have scatter plot"
+        assert len(ax.lines) >= 1, "Should have reference line"
+
+        plt.close(fig)
+
+    def test_fitter_plot_pp_with_pandas_dataframe(self, local_backend, pandas_dataset):
+        """Test fitter.plot_pp() with pandas DataFrame directly."""
+        import matplotlib.pyplot as plt
+
+        fitter = DistributionFitter(backend=local_backend, random_seed=42)
+        results = fitter.fit(pandas_dataset, column="value", max_distributions=5)
+        best = results.best(n=1)[0]
+
+        # Call fitter.plot_pp() with pandas DataFrame - should now work
+        fig, ax = fitter.plot_pp(best, pandas_dataset, column="value", max_points=100)
+
+        assert fig is not None
+        assert ax is not None
+        assert isinstance(fig, plt.Figure)
+        assert isinstance(ax, plt.Axes)
+
+        # Verify plot has scatter points and reference line
+        assert len(ax.collections) >= 1, "Should have scatter plot"
+        assert len(ax.lines) >= 1, "Should have reference line"
+
+        # Verify P-P specific bounds (probabilities are always 0 to 1)
+        assert ax.get_xlim() == (0, 1), "X-axis should be [0, 1] for probabilities"
+        assert ax.get_ylim() == (0, 1), "Y-axis should be [0, 1] for probabilities"
+
+        plt.close(fig)
+
+    def test_fitter_plot_qq_small_dataset(self, local_backend):
+        """Test fitter.plot_qq() with small pandas DataFrame."""
+        import matplotlib.pyplot as plt
+
+        # Small dataset
+        df = pd.DataFrame({"value": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]})
+
+        fitter = DistributionFitter(backend=local_backend, random_seed=42)
+        results = fitter.fit(df, column="value", max_distributions=3)
+        best = results.best(n=1)[0]
+
+        # Should handle small dataset without errors
+        fig, ax = fitter.plot_qq(best, df, column="value", max_points=100)
+
+        assert fig is not None
+        assert ax is not None
+
+        plt.close(fig)
+
+    def test_fitter_plot_pp_small_dataset(self, local_backend):
+        """Test fitter.plot_pp() with small pandas DataFrame."""
+        import matplotlib.pyplot as plt
+
+        # Small dataset
+        df = pd.DataFrame({"value": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]})
+
+        fitter = DistributionFitter(backend=local_backend, random_seed=42)
+        results = fitter.fit(df, column="value", max_distributions=3)
+        best = results.best(n=1)[0]
+
+        # Should handle small dataset without errors
+        fig, ax = fitter.plot_pp(best, df, column="value", max_points=100)
+
+        assert fig is not None
+        assert ax is not None
+
+        plt.close(fig)
 
 
 class TestEdgeCases:

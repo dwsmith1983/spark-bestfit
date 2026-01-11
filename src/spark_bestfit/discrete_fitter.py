@@ -241,6 +241,7 @@ class DiscreteDistributionFitter(BaseFitter):
             column_bounds = self._resolve_bounds(df, target_columns, cfg.lower_bound, cfg.upper_bound)
 
         # Sample if needed (single operation for all columns)
+        # For adaptive sampling, use first column as representative for skew analysis
         df_sample = self._apply_sampling(
             df,
             row_count,
@@ -248,6 +249,11 @@ class DiscreteDistributionFitter(BaseFitter):
             cfg.sample_fraction,
             cfg.max_sample_size,
             cfg.sample_threshold,
+            column=target_columns[0] if target_columns else None,
+            adaptive_sampling=cfg.adaptive_sampling,
+            sampling_mode=cfg.sampling_mode,
+            skew_threshold_mild=cfg.skew_threshold_mild,
+            skew_threshold_high=cfg.skew_threshold_high,
         )
 
         # Get distributions to fit (same for all columns)

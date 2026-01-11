@@ -22,6 +22,9 @@ Type Aliases:
     MetricName: Valid metric names for sorting/filtering.
     ContinuousHistogram: Tuple type for continuous distribution histograms.
     DiscreteHistogram: Tuple type for discrete distribution histograms.
+    HistogramBins: Array of bin edges (len = n_bins + 1).
+    HistogramCounts: Array of counts/density per bin.
+    HistogramResult: Tuple type for HistogramComputer results (counts, bins).
     FitResultsType: Union of EagerFitResults and LazyFitResults.
 
 Constants:
@@ -60,6 +63,9 @@ from spark_bestfit.storage import (  # Constants; Type aliases; Data classes
     ContinuousHistogram,
     DiscreteHistogram,
     DistributionFitResult,
+    HistogramBins,
+    HistogramCounts,
+    HistogramResult,
     LazyMetricsContext,
     MetricName,
 )
@@ -83,6 +89,9 @@ __all__ = [
     "MetricName",
     "ContinuousHistogram",
     "DiscreteHistogram",
+    "HistogramBins",
+    "HistogramCounts",
+    "HistogramResult",
     "FitResultsType",
     # Data classes
     "DistributionFitResult",

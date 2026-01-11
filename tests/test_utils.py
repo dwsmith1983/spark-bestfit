@@ -39,14 +39,10 @@ class TestGetSparkSession:
 
         assert df.count() == 3
 
-    def test_raises_error_when_no_session_available(self):
+    def test_raises_error_when_no_session_available(self, monkeypatch):
         """Test that RuntimeError is raised when no session is available."""
-        # Stop any existing session
-        existing = SparkSession.getActiveSession()
-        if existing:
-            existing.stop()
+        # Mock getActiveSession to return None instead of actually stopping
+        monkeypatch.setattr(SparkSession, "getActiveSession", lambda: None)
 
         with pytest.raises(RuntimeError, match="No SparkSession provided"):
             get_spark_session(None)
-
-        # Recreate session for other tests (fixture will handle this)

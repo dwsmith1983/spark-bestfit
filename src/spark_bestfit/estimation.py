@@ -306,6 +306,177 @@ def fit_mse(
     return tuple(result.x)
 
 
+# Distributions well-suited for survival/reliability analysis
+SURVIVAL_DISTRIBUTIONS = frozenset(
+    {
+        "weibull_min",  # Most common survival distribution
+        "expon",  # Constant hazard rate
+        "lognorm",  # Log-normal times
+        "gamma",  # Flexible shape
+        "gompertz",  # Mortality data
+        "loglogistic",  # Alternative to Weibull (fisk in scipy)
+        "fisk",  # Log-logistic (scipy name)
+        "genextreme",  # Extreme value theory
+        "invgauss",  # Inverse Gaussian
+        "burr",  # Flexible hazard shapes
+        "burr12",  # Type XII Burr
+    }
+)
+
+
+def fit_censored_mle(
+    dist: rv_continuous,
+    data: np.ndarray,
+    censoring_indicator: np.ndarray,
+    initial_params: Optional[Tuple[float, ...]] = None,
+) -> Tuple[float, ...]:
+    """Fit distribution using censored Maximum Likelihood Estimation.
+
+    For right-censored data, the log-likelihood is:
+        LL(θ) = Σ log f(tᵢ; θ) + Σ log S(tⱼ; θ)
+               observed          censored
+
+    where:
+        f(t; θ) = PDF of the distribution
+        S(t; θ) = 1 - F(t; θ) = survival function (probability of surviving beyond t)
+
+    This accounts for censored observations by contributing (1 - CDF) instead of PDF
+    to the likelihood, reflecting that we only know the event hasn't occurred yet.
+
+    Args:
+        dist: scipy.stats distribution object (unfrozen)
+        data: Time-to-event data array
+        censoring_indicator: Boolean array where True=observed event, False=censored
+        initial_params: Initial parameter guess. If None, uses MLE on observed
+            data as starting point.
+
+    Returns:
+        Tuple of fitted parameters (same format as scipy.stats.fit)
+
+    Raises:
+        ValueError: If optimization fails to converge or data is insufficient
+
+    Example:
+        >>> from scipy import stats
+        >>> # Simulate survival data with 30% censoring
+        >>> true_times = stats.weibull_min.rvs(c=2.0, scale=10, size=1000)
+        >>> censor_times = np.random.uniform(5, 20, size=1000)
+        >>> observed_times = np.minimum(true_times, censor_times)
+        >>> event_occurred = true_times <= censor_times
+        >>> params = fit_censored_mle(stats.weibull_min, observed_times, event_occurred)
+    """
+    # Convert to boolean if needed
+    censoring = np.asarray(censoring_indicator, dtype=bool)
+
+    if len(data) != len(censoring):
+        raise ValueError(f"Data length ({len(data)}) must match censoring indicator length ({len(censoring)})")
+
+    # Separate observed and censored data
+    observed_mask = censoring
+    observed_data = data[observed_mask]
+    censored_data = data[~observed_mask]
+
+    n_total = len(data)
+    n_observed = len(observed_data)
+    n_censored = len(censored_data)
+
+    if n_observed == 0:
+        raise ValueError("Cannot fit with no observed events")
+
+    # Warn if heavy censoring (>80%)
+    censor_fraction = n_censored / n_total
+    if censor_fraction > 0.8:
+        warnings.warn(
+            f"Heavy censoring detected ({censor_fraction:.1%} censored). " "Parameter estimates may be unstable.",
+            UserWarning,
+        )
+
+    def neg_log_likelihood(params: np.ndarray) -> float:
+        """Negative censored log-likelihood (to minimize)."""
+        try:
+            # Unpack parameters: shape params are all but last two (loc, scale)
+            if len(params) > 2:
+                shape = tuple(params[:-2])
+                loc = params[-2]
+                scale = params[-1]
+            else:
+                shape = ()
+                loc = params[0]
+                scale = params[1]
+
+            # Ensure scale is positive
+            if scale <= 0:
+                return np.inf
+
+            # Log-likelihood for observed events: log f(t)
+            ll_observed = 0.0
+            if n_observed > 0:
+                logpdf_vals = dist.logpdf(observed_data, *shape, loc=loc, scale=scale)
+                # Handle -inf from logpdf (very unlikely values)
+                logpdf_vals = np.clip(logpdf_vals, -700, None)  # Avoid -inf
+                ll_observed = np.sum(logpdf_vals)
+
+            # Log-likelihood for censored observations: log S(t) = log(1 - F(t))
+            ll_censored = 0.0
+            if n_censored > 0:
+                # Use logsf for numerical stability (log survival function)
+                logsf_vals = dist.logsf(censored_data, *shape, loc=loc, scale=scale)
+                # Handle -inf from logsf (very high times with almost certain event)
+                logsf_vals = np.clip(logsf_vals, -700, None)
+                ll_censored = np.sum(logsf_vals)
+
+            total_ll = ll_observed + ll_censored
+
+            # Check for invalid result
+            if not np.isfinite(total_ll):
+                return np.inf
+
+            return -total_ll
+
+        except (ValueError, RuntimeError, FloatingPointError):
+            return np.inf
+
+    # Get initial parameter estimate using MLE on observed data
+    if initial_params is None:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                initial_params = dist.fit(observed_data)
+        except Exception:
+            # Fallback to data statistics
+            mean, std = np.mean(observed_data), np.std(observed_data)
+            if dist.shapes:
+                n_shapes = len(dist.shapes.split(","))
+                initial_params = tuple([1.0] * n_shapes + [mean, std])
+            else:
+                initial_params = (mean, std)
+
+    # Optimize using Nelder-Mead (robust for non-smooth objectives)
+    result = minimize(
+        neg_log_likelihood,
+        initial_params,
+        method="Nelder-Mead",
+        options={"maxiter": 2000, "xatol": 1e-8, "fatol": 1e-8},
+    )
+
+    if not result.success or result.fun == np.inf:
+        # Try with L-BFGS-B as fallback
+        n_params = len(initial_params)
+        bounds = [(None, None)] * (n_params - 1) + [(NUMERICAL_EPSILON, None)]
+        result = minimize(
+            neg_log_likelihood,
+            initial_params,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxiter": 2000},
+        )
+
+    if not result.success or result.fun == np.inf:
+        raise ValueError(f"Censored MLE optimization failed: {result.message}")
+
+    return tuple(result.x)
+
+
 def create_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
@@ -316,6 +487,7 @@ def create_fitting_udf(
     lazy_metrics: bool = False,
     custom_distributions_broadcast: Optional[Broadcast[Dict[str, rv_continuous]]] = None,
     estimation_method: str = "mle",
+    censoring_indicator_broadcast: Optional[Broadcast[np.ndarray]] = None,
 ) -> Callable[[pd.Series], pd.DataFrame]:
     """Factory function to create Pandas UDF with broadcasted data.
 
@@ -339,6 +511,9 @@ def create_fitting_udf(
         estimation_method: Parameter estimation method (v2.5.0):
             - "mle": Maximum Likelihood Estimation (default)
             - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
+        censoring_indicator_broadcast: Broadcast variable containing boolean array
+            where True=observed event, False=censored. When provided, uses
+            censored MLE for parameter estimation (v2.9.0).
 
     Returns:
         Pandas UDF function for fitting distributions
@@ -370,6 +545,7 @@ def create_fitting_udf(
         y_hist, bin_edges = histogram_broadcast.value
         data_sample = data_sample_broadcast.value
         custom_distributions = custom_distributions_broadcast.value if custom_distributions_broadcast else None
+        censoring_indicator = censoring_indicator_broadcast.value if censoring_indicator_broadcast else None
 
         # Fit each distribution in the batch
         results = []
@@ -387,6 +563,7 @@ def create_fitting_udf(
                     lazy_metrics=lazy_metrics,
                     custom_distributions=custom_distributions,
                     estimation_method=estimation_method,
+                    censoring_indicator=censoring_indicator,
                 )
             except Exception:
                 # Safety net: catch any unexpected exceptions to prevent job failure
@@ -415,6 +592,7 @@ def fit_single_distribution(
     lazy_metrics: bool = False,
     custom_distributions: Optional[Dict[str, rv_continuous]] = None,
     estimation_method: str = "mle",
+    censoring_indicator: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """Fit a single distribution and compute goodness-of-fit metrics.
 
@@ -444,10 +622,14 @@ def fit_single_distribution(
         estimation_method: Parameter estimation method (v2.5.0):
             - "mle": Maximum Likelihood Estimation (default, uses scipy.stats.fit)
             - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
+        censoring_indicator: Boolean array where True=observed event, False=censored.
+            When provided, uses censored MLE for parameter estimation.
+            KS/AD statistics are skipped for censored fits. (v2.9.0)
 
     Returns:
         Dictionary with fit result fields including data_min, data_max, etc.
     """
+    is_censored = censoring_indicator is not None
     try:
         with warnings.catch_warnings(record=True) as caught_warnings:
             warnings.simplefilter("always")
@@ -459,7 +641,15 @@ def fit_single_distribution(
                 dist = getattr(st, dist_name)
 
             # Fit distribution to data sample using specified estimation method
-            if estimation_method == "mse":
+            if is_censored:
+                # Censored MLE for survival/reliability data
+                try:
+                    params = fit_censored_mle(dist, data_sample, censoring_indicator)
+                except (ValueError, RuntimeError):
+                    # Fall back to standard MLE on observed data only
+                    observed_data = data_sample[censoring_indicator.astype(bool)]
+                    params = dist.fit(observed_data)
+            elif estimation_method == "mse":
                 try:
                     params = fit_mse(dist, data_sample)
                 except (ValueError, RuntimeError):
@@ -499,9 +689,10 @@ def fit_single_distribution(
             # Compute information criteria using frozen distribution (fast, always computed)
             aic, bic = compute_information_criteria_frozen(frozen_dist, len(params), data_sample)
 
-            # Compute expensive metrics only if not lazy
-            if lazy_metrics:
-                # Skip KS/AD computation for performance - will be computed on-demand
+            # Compute expensive metrics only if not lazy and not censored
+            # Note: KS/AD tests assume complete data; invalid for censored observations
+            if lazy_metrics or is_censored:
+                # Skip KS/AD computation - either for performance or because data is censored
                 ks_stat, pvalue = None, None
                 ad_stat, ad_pvalue = None, None
             else:
@@ -853,12 +1044,14 @@ __all__ = [
     "FITTING_SAMPLE_SIZE",
     "FIT_RESULT_SCHEMA",
     "HEAVY_TAIL_DISTRIBUTIONS",
+    "SURVIVAL_DISTRIBUTIONS",
     "EstimationMethod",
     # Data analysis
     "compute_data_stats",
     "detect_heavy_tail",
     # Parameter estimation
     "fit_mse",
+    "fit_censored_mle",
     "fit_single_distribution",
     "create_fitting_udf",
     "bootstrap_confidence_intervals",

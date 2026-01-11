@@ -89,6 +89,7 @@ class SparkBackend:
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         custom_distributions: Optional[Dict[str, Any]] = None,
         estimation_method: str = "mle",
+        censoring_indicator: Optional[np.ndarray] = None,
     ) -> List[Dict[str, Any]]:
         """Execute distribution fitting in parallel using Pandas UDFs.
 
@@ -121,6 +122,8 @@ class SparkBackend:
             estimation_method: Parameter estimation method (v2.5.0):
                 - "mle": Maximum Likelihood Estimation (default)
                 - "mse": Maximum Spacing Estimation (robust for heavy-tailed data)
+            censoring_indicator: Boolean array where True=observed event,
+                False=censored. When provided, uses censored MLE. (v2.9.0)
 
         Returns:
             List of fit result dicts
@@ -141,6 +144,7 @@ class SparkBackend:
         histogram_bc = self.broadcast(histogram)
         data_sample_bc = self.broadcast(data_sample)
         custom_dist_bc = self.broadcast(custom_distributions) if custom_distributions else None
+        censoring_bc = self.broadcast(censoring_indicator) if censoring_indicator is not None else None
 
         try:
             # Create DataFrame of distributions
@@ -179,6 +183,7 @@ class SparkBackend:
                     lazy_metrics=lazy_metrics,
                     custom_distributions_broadcast=custom_dist_bc,
                     estimation_method=estimation_method,
+                    censoring_indicator_broadcast=censoring_bc,
                 )
 
             # Apply UDF and expand struct
@@ -200,6 +205,8 @@ class SparkBackend:
             self.destroy_broadcast(data_sample_bc)
             if custom_dist_bc is not None:
                 self.destroy_broadcast(custom_dist_bc)
+            if censoring_bc is not None:
+                self.destroy_broadcast(censoring_bc)
 
     def get_parallelism(self) -> int:
         """Get the default parallelism from Spark configuration.

@@ -13,7 +13,23 @@ Example:
 """
 
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Callable, Dict, Optional, Tuple, Union
+
+
+class SamplingMode(Enum):
+    """Sampling strategy mode for large datasets.
+
+    Attributes:
+        AUTO: Automatically select strategy based on data skewness (default).
+            Uses uniform for symmetric data, stratified for skewed data.
+        UNIFORM: Force uniform random sampling (backwards compatible).
+        STRATIFIED: Force stratified sampling across percentile bins.
+    """
+
+    AUTO = "auto"
+    UNIFORM = "uniform"
+    STRATIFIED = "stratified"
 
 
 @dataclass(frozen=True)
@@ -33,9 +49,16 @@ class FitterConfig:
         sample_fraction: Fraction to sample (None = auto-determine).
         max_sample_size: Maximum rows when auto-determining sample size.
         sample_threshold: Row count above which sampling is applied.
+        adaptive_sampling: Use adaptive sampling based on data skewness (v2.9.0).
+        sampling_mode: Sampling strategy (AUTO, UNIFORM, or STRATIFIED).
+        skew_threshold_mild: Skewness threshold for mild stratification (default 0.5).
+        skew_threshold_high: Skewness threshold for aggressive stratification (default 2.0).
         bounded: Enable truncated distribution fitting.
         lower_bound: Lower bound for truncated fitting (scalar or per-column dict).
         upper_bound: Upper bound for truncated fitting (scalar or per-column dict).
+        censoring_column: Column name containing censoring indicator for survival data.
+            True/1 = observed event, False/0 = right-censored observation.
+            When specified, uses censored MLE for parameter estimation.
         num_partitions: Number of parallel partitions (None = auto-determine).
         lazy_metrics: Defer KS/AD computation until accessed.
         progress_callback: Optional callback for progress updates.
@@ -61,10 +84,19 @@ class FitterConfig:
     max_sample_size: int = 1_000_000
     sample_threshold: int = 10_000_000
 
+    # === Adaptive Sampling (v2.9.0) ===
+    adaptive_sampling: bool = True
+    sampling_mode: SamplingMode = SamplingMode.AUTO
+    skew_threshold_mild: float = 0.5
+    skew_threshold_high: float = 2.0
+
     # === Bounds ===
     bounded: bool = False
     lower_bound: Optional[Union[float, Dict[str, float]]] = None
     upper_bound: Optional[Union[float, Dict[str, float]]] = None
+
+    # === Censored Data (v2.9.0) ===
+    censoring_column: Optional[str] = None  # Column with censoring indicator (True=observed, False=censored)
 
     # === Performance ===
     num_partitions: Optional[int] = None
@@ -122,10 +154,19 @@ class FitterConfigBuilder:
         self._max_sample_size: int = 1_000_000
         self._sample_threshold: int = 10_000_000
 
+        # Adaptive sampling
+        self._adaptive_sampling: bool = True
+        self._sampling_mode: SamplingMode = SamplingMode.AUTO
+        self._skew_threshold_mild: float = 0.5
+        self._skew_threshold_high: float = 2.0
+
         # Bounds
         self._bounded: bool = False
         self._lower_bound: Optional[Union[float, Dict[str, float]]] = None
         self._upper_bound: Optional[Union[float, Dict[str, float]]] = None
+
+        # Censored data
+        self._censoring_column: Optional[str] = None
 
         # Performance
         self._num_partitions: Optional[int] = None
@@ -195,6 +236,40 @@ class FitterConfigBuilder:
         self._sample_fraction = fraction
         self._max_sample_size = max_size
         self._sample_threshold = threshold
+        return self
+
+    def with_adaptive_sampling(
+        self,
+        enabled: bool = True,
+        mode: SamplingMode = SamplingMode.AUTO,
+        skew_threshold_mild: float = 0.5,
+        skew_threshold_high: float = 2.0,
+    ) -> "FitterConfigBuilder":
+        """Configure adaptive sampling based on data skewness (v2.9.0).
+
+        When enabled, sampling strategy is selected based on data skewness:
+        - |skew| < mild_threshold: Uniform sampling (efficient for symmetric data)
+        - mild_threshold <= |skew| < high_threshold: Stratified (5 bins)
+        - |skew| >= high_threshold: Stratified (10 bins) with tail oversampling
+
+        Args:
+            enabled: Whether adaptive sampling is enabled.
+            mode: Sampling strategy (AUTO, UNIFORM, or STRATIFIED).
+            skew_threshold_mild: Skewness threshold for mild stratification.
+            skew_threshold_high: Skewness threshold for aggressive stratification.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> config = (FitterConfigBuilder()
+            ...     .with_adaptive_sampling(enabled=True, mode=SamplingMode.AUTO)
+            ...     .build())
+        """
+        self._adaptive_sampling = enabled
+        self._sampling_mode = mode
+        self._skew_threshold_mild = skew_threshold_mild
+        self._skew_threshold_high = skew_threshold_high
         return self
 
     def with_lazy_metrics(self, lazy: bool = True) -> "FitterConfigBuilder":
@@ -268,6 +343,34 @@ class FitterConfigBuilder:
         self._num_partitions = n
         return self
 
+    def with_censoring(self, column: str) -> "FitterConfigBuilder":
+        """Configure censored data fitting for survival analysis (v2.9.0).
+
+        When fitting censored data, the fitter uses censored MLE which accounts
+        for right-censored observations (events that haven't occurred yet).
+
+        Common survival distributions: weibull_min, expon, lognorm, gamma.
+
+        Args:
+            column: Name of the column containing the censoring indicator.
+                True/1 = observed event, False/0 = right-censored observation.
+
+        Returns:
+            Self for method chaining.
+
+        Note:
+            KS/AD statistics are skipped for censored fits as they assume
+            complete data. Use AIC/BIC for model comparison instead.
+
+        Example:
+            >>> config = (FitterConfigBuilder()
+            ...     .with_censoring("event_occurred")
+            ...     .build())
+            >>> results = fitter.fit(df, column="time_to_event", config=config)
+        """
+        self._censoring_column = column
+        return self
+
     def with_estimation_method(self, method: str = "mle") -> "FitterConfigBuilder":
         """Configure parameter estimation method (v2.5.0).
 
@@ -309,9 +412,14 @@ class FitterConfigBuilder:
             sample_fraction=self._sample_fraction,
             max_sample_size=self._max_sample_size,
             sample_threshold=self._sample_threshold,
+            adaptive_sampling=self._adaptive_sampling,
+            sampling_mode=self._sampling_mode,
+            skew_threshold_mild=self._skew_threshold_mild,
+            skew_threshold_high=self._skew_threshold_high,
             bounded=self._bounded,
             lower_bound=self._lower_bound,
             upper_bound=self._upper_bound,
+            censoring_column=self._censoring_column,
             num_partitions=self._num_partitions,
             lazy_metrics=self._lazy_metrics,
             estimation_method=self._estimation_method,
