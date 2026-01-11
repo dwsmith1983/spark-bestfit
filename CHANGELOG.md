@@ -2,6 +2,65 @@
 
 <!-- version list -->
 
+## v3.0.0 (2026-01-11)
+
+### Bug Fixes
+
+- Exclude __init__.py from coverage ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- Make confidence_intervals work with all backends
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- Make plot_qq and plot_pp work with all backends
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- **examples**: Update notebooks to match v3.0.0 API
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- **tests**: Prevent Spark session pollution between tests
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+### Features
+
+- Add adaptive sampling based on data skew (closes #70)
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- Add Gaussian mixture model fitting (closes #16)
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- Add multivariate normal distribution fitting (closes #47)
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- Add right-censored data support for survival analysis (closes #69)
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- V3.0.0 Release ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- **examples**: Port use case notebooks to Local and Ray backends
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+- **types**: Add histogram type aliases for IDE autocomplete
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+### Refactoring
+
+- Clean up pyproject.toml using Hatch template inheritance
+  ([#160](https://github.com/dwsmith1983/spark-bestfit/pull/160),
+  [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
+
+
 ## Unreleased
 
 ### Features
