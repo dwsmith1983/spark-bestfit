@@ -162,3 +162,5 @@ Thumbs.db
 
 # GT workflow
 .beads/
+.logs/
+state.json
