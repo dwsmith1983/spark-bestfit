@@ -131,6 +131,7 @@ markers = [
 [tool.coverage.run]
 source = ["src/spark_bestfit"]
 branch = true
+omit = ["*/__init__.py"]
 
 [tool.coverage.report]
 exclude_lines = [
