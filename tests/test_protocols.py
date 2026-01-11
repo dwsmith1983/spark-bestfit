@@ -290,6 +290,7 @@ class TestRayBackendConformance:
     @pytest.fixture
     def ray_backend(self):
         """Create RayBackend instance for testing."""
+        pytest.importorskip("ray")
         from spark_bestfit.backends.ray import RayBackend
 
         return RayBackend()
