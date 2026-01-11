@@ -102,8 +102,7 @@ def _compute_precision_cholesky(covariances: np.ndarray, reg_covar: float = 1e-6
             precisions_chol[k] = np.linalg.solve(cov_chol, np.eye(n_features)).T
         except np.linalg.LinAlgError:
             raise ValueError(
-                f"Component {k} has singular covariance matrix. "
-                "Try increasing reg_covar or reducing n_components."
+                f"Component {k} has singular covariance matrix. " "Try increasing reg_covar or reducing n_components."
             )
 
     return precisions_chol
@@ -529,9 +528,7 @@ class GaussianMixtureFitter:
         n_samples, n_features = data.shape
 
         if n_samples < self.n_components:
-            raise ValueError(
-                f"n_samples ({n_samples}) must be >= n_components ({self.n_components})"
-            )
+            raise ValueError(f"n_samples ({n_samples}) must be >= n_components ({self.n_components})")
 
         # Try multiple initializations
         rng = np.random.default_rng(self.random_state)
