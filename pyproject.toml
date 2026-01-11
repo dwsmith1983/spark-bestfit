@@ -141,49 +141,33 @@ exclude_lines = [
 ]
 
 # Hatch test environments for cross-version testing
-[tool.hatch.envs.test]
+# Base environment with common test dependencies and scripts
+[tool.hatch.envs.hatch-test]
 dependencies = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-spark>=0.6.0",
 ]
 
-[tool.hatch.envs.test.scripts]
-run = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
+[tool.hatch.envs.hatch-test.scripts]
+test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 # Spark 3.5 with Python 3.11
-[[tool.hatch.envs.test.matrix]]
-python = ["3.11"]
-spark = ["3.5"]
-
-[tool.hatch.envs.test.overrides]
-matrix.spark.dependencies = [
-    { value = "pyspark>=3.5.0,<4.0.0", if = ["3.5"] },
-    { value = "pyspark>=4.0.0,<5.0.0", if = ["4.0"] },
-]
-
-# Separate environments with explicit dependencies for each combo
 [tool.hatch.envs.spark35-py311]
+template = "hatch-test"
 python = "3.11"
-dependencies = [
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-    "pytest-spark>=0.6.0",
+extra-dependencies = [
     "pyspark>=3.5.0,<4.0.0",
     "numpy>=1.24.0,<2.0.0",
     "pandas>=1.5.0,<3.0.0",
     "pyarrow>=12.0.0,<17.0.0",
 ]
 
-[tool.hatch.envs.spark35-py311.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
-
+# Spark 3.5 with Python 3.12
 [tool.hatch.envs.spark35-py312]
+template = "hatch-test"
 python = "3.12"
-dependencies = [
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-    "pytest-spark>=0.6.0",
+extra-dependencies = [
     "pyspark>=3.5.0,<4.0.0",
     "numpy>=1.26.0,<2.0.0",
     "pandas>=2.0.0,<3.0.0",
@@ -191,38 +175,27 @@ dependencies = [
     "setuptools",  # Provides distutils for PySpark 3.5 on Python 3.12+
 ]
 
-[tool.hatch.envs.spark35-py312.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
-
+# Spark 4.0 with Python 3.12
 [tool.hatch.envs.spark40-py312]
+template = "hatch-test"
 python = "3.12"
-dependencies = [
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-    "pytest-spark>=0.6.0",
+extra-dependencies = [
     "pyspark>=4.0.0,<5.0.0",
     "numpy>=2.0.0,<3.0.0",
     "pandas>=2.2.0,<3.0.0",
     "pyarrow>=17.0.0,<19.0.0",
 ]
 
-[tool.hatch.envs.spark40-py312.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
-
+# Spark 4.0 with Python 3.13
 [tool.hatch.envs.spark40-py313]
+template = "hatch-test"
 python = "3.13"
-dependencies = [
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-    "pytest-spark>=0.6.0",
+extra-dependencies = [
     "pyspark>=4.0.0,<5.0.0",
     "numpy>=2.0.0,<3.0.0",
     "pandas>=2.2.0,<3.0.0",
     "pyarrow>=17.0.0,<19.0.0",
 ]
-
-[tool.hatch.envs.spark40-py313.scripts]
-test = "pytest --cov=src/spark_bestfit --cov-report=term-missing --cov-fail-under=85 -v {args}"
 
 # Semantic Release configuration
 [tool.semantic_release]
