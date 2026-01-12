@@ -61,19 +61,6 @@
   [`e52d4a8`](https://github.com/dwsmith1983/spark-bestfit/commit/e52d4a8fd4c666fd82d714036f475f7545bc2245))
 
 
-## Unreleased
-
-### Features
-
-- **mixture**: Add Gaussian Mixture Model fitting with EM algorithm
-  - New `GaussianMixtureFitter` class for fitting GMMs
-  - New `GaussianMixtureResult` dataclass with sample(), pdf(), predict() methods
-  - Model selection via AIC/BIC
-  - Soft clustering via predict_proba() and responsibilities_
-  - JSON/pickle serialization support
-  - Documentation in docs/features/mixture.rst
-
-
 ## v2.8.1 (2026-01-10)
 
 ### Bug Fixes
