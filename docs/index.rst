@@ -70,6 +70,7 @@ spark-bestfit is designed for **batch processing** of statistical distribution f
    api
    faq
    glossary
+   adr/index
 
 Indices and tables
 ==================
