@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "pandas>=1.5.0,<3.0.0",
+    "pandas>=1.5.0,<4.0.0",
     "numpy>=1.24.0,<3.0.0",
     "scipy>=1.11.0,<2.0.0",
 ]
@@ -159,7 +159,7 @@ python = "3.11"
 extra-dependencies = [
     "pyspark>=3.5.0,<4.0.0",
     "numpy>=1.24.0,<2.0.0",
-    "pandas>=1.5.0,<3.0.0",
+    "pandas>=1.5.0,<4.0.0",
     "pyarrow>=12.0.0,<17.0.0",
 ]
 
