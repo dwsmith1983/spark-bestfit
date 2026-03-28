@@ -676,3 +676,24 @@ class BaseFitter(ABC):
             raise ValueError("Cannot provide both 'column' and 'columns' - use one or the other")
 
         return [column] if column is not None else columns
+
+    def _create_fitting_sample(self, df: DataFrame, column: str, row_count: int) -> np.ndarray:
+        """Create numpy sample array for scipy distribution fitting.
+
+        Samples up to FITTING_SAMPLE_SIZE rows from the DataFrame for use in
+        scipy's distribution fitting functions.
+
+        Args:
+            df: Spark DataFrame or pandas DataFrame containing data
+            column: Column name to sample
+            row_count: Total row count (used to calculate sampling fraction)
+
+        Returns:
+            Numpy array of sampled values for distribution fitting
+        """
+        from spark_bestfit.fitting import FITTING_SAMPLE_SIZE
+
+        sample_size = min(FITTING_SAMPLE_SIZE, row_count)
+        fraction = min(sample_size / row_count, 1.0)
+        # Use backend's sample_column which handles both Spark and pandas
+        return self._backend.sample_column(df, column, fraction=fraction, seed=self.random_seed)

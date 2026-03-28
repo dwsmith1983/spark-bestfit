@@ -4,6 +4,8 @@ import logging
 from functools import reduce
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
+
 # PySpark is optional - only import if available
 try:
     from pyspark.sql import DataFrame, SparkSession
@@ -24,7 +26,7 @@ from spark_bestfit.discrete_fitting import (
 )
 from spark_bestfit.distributions import DiscreteDistributionRegistry
 from spark_bestfit.fitting import FITTING_SAMPLE_SIZE, compute_data_stats
-from spark_bestfit.results import DistributionFitResult, FitResults, FitResultsType, LazyMetricsContext
+from spark_bestfit.results import DistributionFitResult, FitResultsType, LazyMetricsContext
 
 if TYPE_CHECKING:
     from spark_bestfit.protocols import ExecutionBackend
@@ -266,11 +268,20 @@ class DiscreteDistributionFitter(BaseFitter):
         # Fit each column and collect results
         all_results_dfs = []
         lazy_contexts: Dict[str, LazyMetricsContext] = {}
+        cached_samples: Dict[str, np.ndarray] = {}
 
         for col in target_columns:
             # Get per-column bounds (empty dict if not bounded)
             col_lower, col_upper = column_bounds.get(col, (None, None))
             logger.info(f"Fitting discrete column '{col}'...")
+
+            # Create fitting sample - this is what we'll cache (v2.10.0: Instant mode)
+            # For discrete data, convert to int and normalize via create_discrete_sample_data
+            data_sample = self._create_fitting_sample(df_sample, col, row_count)
+            data_sample = data_sample.astype(int)
+            data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
+            cached_samples[col] = data_sample
+
             results_df = self._fit_single_column(
                 df_sample=df_sample,
                 column=col,
@@ -281,6 +292,7 @@ class DiscreteDistributionFitter(BaseFitter):
                 upper_bound=col_upper,
                 lazy_metrics=cfg.lazy_metrics,
                 progress_callback=cfg.progress_callback,
+                data_sample=data_sample,
             )
             all_results_dfs.append(results_df)
 
@@ -294,6 +306,7 @@ class DiscreteDistributionFitter(BaseFitter):
                     lower_bound=col_lower,
                     upper_bound=col_upper,
                     is_discrete=True,  # Discrete distributions
+                    cached_sample=data_sample,
                 )
 
         # Union all results - handle both Spark and pandas DataFrames
@@ -313,8 +326,14 @@ class DiscreteDistributionFitter(BaseFitter):
             f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
         )
 
-        # Pass lazy contexts to FitResults for on-demand metric computation
-        return FitResults(combined_df, lazy_contexts=lazy_contexts if cfg.lazy_metrics else None)
+        # Pass lazy contexts and cached samples to FitResults for instant plotting
+        from spark_bestfit.results import create_fit_results
+
+        return create_fit_results(
+            combined_df,
+            lazy_contexts=lazy_contexts if cfg.lazy_metrics else None,
+            samples=cached_samples,
+        )
 
     def _fit_single_column(
         self,
@@ -327,6 +346,7 @@ class DiscreteDistributionFitter(BaseFitter):
         upper_bound: Optional[float] = None,
         lazy_metrics: bool = False,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
+        data_sample: Optional[np.ndarray] = None,
     ) -> DataFrame:
         """Fit discrete distributions to a single column (internal method).
 
@@ -340,18 +360,25 @@ class DiscreteDistributionFitter(BaseFitter):
             upper_bound: Optional upper bound for truncated distribution
             lazy_metrics: If True, skip KS computation for performance (v1.5.0)
             progress_callback: Optional callback for progress updates (v2.0.0)
+            data_sample: Optional pre-computed sample data (v2.10.0)
 
         Returns:
             Spark DataFrame with fit results for this column
         """
-        # Create integer data sample for fitting
-        sample_size = min(FITTING_SAMPLE_SIZE, row_count)
-        fraction = min(sample_size / row_count, 1.0)
-        # Use backend's sample_column which handles both Spark and pandas
-        raw_sample = self._backend.sample_column(df_sample, column, fraction=fraction, seed=self.random_seed)
+        # Create discrete histogram (returns x_values and pmf for plotting)
+        # For discrete data, we use PMF-based fitting
+        # Create fitting sample if not provided
+        if data_sample is None:
+            # Create integer data sample for fitting
+            sample_size = min(FITTING_SAMPLE_SIZE, row_count)
+            fraction = min(sample_size / row_count, 1.0)
+            # Use backend's sample_column which handles both Spark and pandas
+            raw_sample = self._backend.sample_column(df_sample, column, fraction=fraction, seed=self.random_seed)
+            data_sample = raw_sample.astype(int)
+            data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
 
         # Handle empty sample (all NaN/inf data filtered out)
-        if len(raw_sample) == 0:
+        if len(data_sample) == 0:
             logger.warning(f"  No valid data for '{column}' after filtering NaN/inf values")
             import pandas as pd
 
@@ -382,8 +409,6 @@ class DiscreteDistributionFitter(BaseFitter):
                     ]
                 )
 
-        data_sample = raw_sample.astype(int)
-        data_sample = create_discrete_sample_data(data_sample, sample_size=FITTING_SAMPLE_SIZE)
         logger.info(f"  Data sample for '{column}': {len(data_sample)} values")
 
         # Compute discrete histogram (PMF)
@@ -493,8 +518,8 @@ class DiscreteDistributionFitter(BaseFitter):
     def plot(
         self,
         result: DistributionFitResult,
-        df: DataFrame,
-        column: str,
+        df: Optional[DataFrame] = None,
+        column: Optional[str] = None,
         title: str = "",
         xlabel: str = "Value",
         ylabel: str = "Probability",
@@ -514,8 +539,8 @@ class DiscreteDistributionFitter(BaseFitter):
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data
-            column: Column name
+            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            column: Column name. If None, uses column_name from result.
             title: Plot title
             xlabel: X-axis label
             ylabel: Y-axis label
@@ -533,20 +558,37 @@ class DiscreteDistributionFitter(BaseFitter):
 
         Returns:
             Tuple of (figure, axis) from matplotlib
+
+        Example:
+            >>> best = results.best(n=1)[0]
+            >>> fitter.plot(best, df, 'value', title='Best Fit')
+            >>> # v2.10.0: instant plotting using cached sample
+            >>> fitter.plot(best, title='Instant Plot')
         """
         from spark_bestfit.plotting import plot_discrete_distribution
 
-        # Get data sample
-        # Handle Spark DataFrame, Ray Dataset, and pandas DataFrame
-        if hasattr(df, "sparkSession"):
-            row_count = df.count()
-        elif hasattr(df, "select_columns") and hasattr(df, "count"):
-            # Ray Dataset - use count() method
-            row_count = df.count()
+        # User-provided df takes priority over cached sample (v2.10.0)
+        if df is not None:
+            # User explicitly provided a DataFrame — use it
+            col = column or result.column_name
+            if col is None:
+                raise ValueError("column must be provided if result.column_name is None")
+
+            # Get data sample
+            # Handle Spark DataFrame, Ray Dataset, and pandas DataFrame
+            if hasattr(df, "sparkSession"):
+                row_count = df.count()
+            elif hasattr(df, "select_columns") and hasattr(df, "count"):
+                # Ray Dataset - use count() method
+                row_count = df.count()
+            else:
+                row_count = len(df)
+            fraction = min(10000 / row_count, 1.0)
+            data = self._backend.sample_column(df, col, fraction=fraction, seed=self.random_seed).astype(int)
+        elif result.cached_sample is not None:
+            data = result.cached_sample
         else:
-            row_count = len(df)
-        fraction = min(10000 / row_count, 1.0)
-        data = self._backend.sample_column(df, column, fraction=fraction, seed=self.random_seed).astype(int)
+            raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_discrete_distribution(
             result=result,

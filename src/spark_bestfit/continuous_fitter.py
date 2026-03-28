@@ -27,7 +27,7 @@ from spark_bestfit.fitting import (
     fit_single_distribution,
 )
 from spark_bestfit.histogram import HistogramComputer
-from spark_bestfit.results import DistributionFitResult, FitResults, FitResultsType, LazyMetricsContext
+from spark_bestfit.results import DistributionFitResult, FitResultsType, LazyMetricsContext, create_fit_results
 
 if TYPE_CHECKING:
     from scipy.stats import rv_continuous
@@ -363,11 +363,17 @@ class DistributionFitter(BaseFitter):
         # Fit each column and collect results
         all_results_dfs = []
         lazy_contexts: Dict[str, LazyMetricsContext] = {}
+        cached_samples: Dict[str, np.ndarray] = {}
 
         for col in target_columns:
             # Get per-column bounds (empty dict if not bounded)
             col_lower, col_upper = column_bounds.get(col, (None, None))
             logger.info(f"Fitting column '{col}'...")
+
+            # Create fitting sample - this is what we'll cache (v2.10.0: Instant mode)
+            data_sample = self._create_fitting_sample(df_sample, col, row_count)
+            cached_samples[col] = data_sample
+
             results_df = self._fit_single_column(
                 df_sample=df_sample,
                 column=col,
@@ -383,6 +389,7 @@ class DistributionFitter(BaseFitter):
                 progress_callback=cfg.progress_callback,
                 estimation_method=cfg.estimation_method,
                 censoring_column=cfg.censoring_column,
+                data_sample=data_sample,
             )
             all_results_dfs.append(results_df)
 
@@ -396,6 +403,7 @@ class DistributionFitter(BaseFitter):
                     lower_bound=col_lower,
                     upper_bound=col_upper,
                     is_discrete=False,
+                    cached_sample=data_sample,
                 )
 
         # Union all results - handle both Spark and pandas DataFrames
@@ -415,8 +423,12 @@ class DistributionFitter(BaseFitter):
             f"Total results: {total_results} ({len(target_columns)} columns × ~{len(distributions)} distributions)"
         )
 
-        # Pass lazy contexts to FitResults for on-demand metric computation
-        return FitResults(combined_df, lazy_contexts=lazy_contexts if cfg.lazy_metrics else None)
+        # Pass lazy contexts and cached samples to FitResults for instant plotting
+        return create_fit_results(
+            combined_df,
+            lazy_contexts=lazy_contexts if cfg.lazy_metrics else None,
+            samples=cached_samples,
+        )
 
     def _fit_single_column(
         self,
@@ -434,6 +446,7 @@ class DistributionFitter(BaseFitter):
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
         estimation_method: str = "mle",
         censoring_column: Optional[str] = None,
+        data_sample: Optional[np.ndarray] = None,
     ) -> DataFrame:
         """Fit distributions to a single column (internal method).
 
@@ -456,6 +469,7 @@ class DistributionFitter(BaseFitter):
                 - "auto": Automatically select MSE for heavy-tailed data
             censoring_column: Column name containing censoring indicator (v2.9.0).
                 True/1 = observed event, False/0 = right-censored observation.
+            data_sample: Optional pre-computed sample data (v2.10.0)
 
         Returns:
             Spark DataFrame with fit results for this column
@@ -466,8 +480,9 @@ class DistributionFitter(BaseFitter):
         )
         logger.info(f"  Histogram for '{column}': {len(bin_edges) - 1} bins")
 
-        # Create fitting sample
-        data_sample = self._create_fitting_sample(df_sample, column, row_count)
+        # Create fitting sample if not provided
+        if data_sample is None:
+            data_sample = self._create_fitting_sample(df_sample, column, row_count)
 
         # Extract censoring indicator if specified (v2.9.0)
         censoring_indicator: Optional[np.ndarray] = None
@@ -633,8 +648,8 @@ class DistributionFitter(BaseFitter):
     def plot(
         self,
         result: DistributionFitResult,
-        df: DataFrame,
-        column: str,
+        df: Optional[DataFrame] = None,
+        column: Optional[str] = None,
         bins: Union[int, Tuple[float, ...]] = 50,
         use_rice_rule: bool = True,
         title: str = "",
@@ -656,8 +671,8 @@ class DistributionFitter(BaseFitter):
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data
-            column: Column name
+            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            column: Column name. If None, uses column_name from result.
             bins: Number of histogram bins
             use_rice_rule: Use Rice rule for bins
             title: Plot title
@@ -680,15 +695,35 @@ class DistributionFitter(BaseFitter):
 
         Example:
             >>> fitter.plot(best, df, 'value', title='Best Fit')
-            >>> fitter.plot(best, df, 'value', figsize=(16, 10), dpi=300)
+            >>> # v2.10.0: instant plotting using cached sample
+            >>> fitter.plot(best, title='Instant Plot')
         """
         from spark_bestfit.plotting import plot_distribution
 
-        # Compute histogram for plotting (bin edges -> centers for display)
-        y_hist, bin_edges = self._histogram_computer.compute_histogram(
-            df, column, bins=bins, use_rice_rule=use_rice_rule
-        )
-        x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        # Use cached sample if available (v2.10.0: Instant mode)
+        if result.cached_sample is not None and df is None:
+            data = result.cached_sample
+            # Compute histogram from sample locally to avoid Spark DAG
+            if use_rice_rule:
+                n_bins = int(np.ceil(len(data) ** (1 / 3)) * 2)
+            else:
+                n_bins = bins if isinstance(bins, int) else len(bins) - 1
+
+            y_hist, bin_edges = np.histogram(data, bins=n_bins, density=True)
+            x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        elif df is not None:
+            # Fallback to computing histogram via Spark (original behavior)
+            col = column or result.column_name
+            if col is None:
+                raise ValueError("column must be provided if result.column_name is None")
+
+            # Compute histogram for plotting (bin edges -> centers for display)
+            y_hist, bin_edges = self._histogram_computer.compute_histogram(
+                df, col, bins=bins, use_rice_rule=use_rice_rule
+            )
+            x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        else:
+            raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_distribution(
             result=result,
@@ -985,8 +1020,8 @@ class DistributionFitter(BaseFitter):
     def plot_qq(
         self,
         result: DistributionFitResult,
-        df: DataFrame,
-        column: str,
+        df: Optional[DataFrame] = None,
+        column: Optional[str] = None,
         max_points: int = 1000,
         title: str = "",
         xlabel: str = "Theoretical Quantiles",
@@ -1014,8 +1049,8 @@ class DistributionFitter(BaseFitter):
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data
-            column: Column name
+            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            column: Column name. If None, uses column_name from result.
             max_points: Maximum data points to sample for plotting
             title: Plot title
             xlabel: X-axis label
@@ -1041,16 +1076,27 @@ class DistributionFitter(BaseFitter):
         Example:
             >>> best = results.best(n=1)[0]
             >>> fitter.plot_qq(best, df, 'value', title='Q-Q Plot')
+            >>> # v2.10.0: instant plotting using cached sample
+            >>> fitter.plot_qq(best, title='Instant Q-Q Plot')
         """
         from spark_bestfit.plotting import plot_qq
         from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # Sample data for Q-Q plot using multi-backend helpers
-        # Works with Spark DataFrames, Ray Datasets, and pandas DataFrames
-        row_count = _get_dataframe_row_count(df)
-        fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
-        sampled = _sample_dataframe_column(df, column, fraction, self.random_seed)
-        data = sampled[:max_points]
+        # User-provided df takes priority over cached sample (v2.10.0)
+        if df is not None:
+            # User explicitly provided a DataFrame — use it
+            col = column or result.column_name
+            if col is None:
+                raise ValueError("column must be provided if result.column_name is None")
+
+            row_count = _get_dataframe_row_count(df)
+            fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
+            sampled = _sample_dataframe_column(df, col, fraction, self.random_seed)
+            data = sampled[:max_points]
+        elif result.cached_sample is not None:
+            data = result.cached_sample[:max_points]
+        else:
+            raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_qq(
             result=result,
@@ -1077,8 +1123,8 @@ class DistributionFitter(BaseFitter):
     def plot_pp(
         self,
         result: DistributionFitResult,
-        df: DataFrame,
-        column: str,
+        df: Optional[DataFrame] = None,
+        column: Optional[str] = None,
         max_points: int = 1000,
         title: str = "",
         xlabel: str = "Theoretical Probabilities",
@@ -1108,8 +1154,8 @@ class DistributionFitter(BaseFitter):
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data
-            column: Column name
+            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            column: Column name. If None, uses column_name from result.
             max_points: Maximum data points to sample for plotting
             title: Plot title
             xlabel: X-axis label
@@ -1135,16 +1181,27 @@ class DistributionFitter(BaseFitter):
         Example:
             >>> best = results.best(n=1)[0]
             >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
+            >>> # v2.10.0: instant plotting using cached sample
+            >>> fitter.plot_pp(best, title='Instant P-P Plot')
         """
         from spark_bestfit.plotting import plot_pp
         from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # Sample data for P-P plot using multi-backend helpers
-        # Works with Spark DataFrames, Ray Datasets, and pandas DataFrames
-        row_count = _get_dataframe_row_count(df)
-        fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
-        sampled = _sample_dataframe_column(df, column, fraction, self.random_seed)
-        data = sampled[:max_points]
+        # User-provided df takes priority over cached sample (v2.10.0)
+        if df is not None:
+            # User explicitly provided a DataFrame — use it
+            col = column or result.column_name
+            if col is None:
+                raise ValueError("column must be provided if result.column_name is None")
+
+            row_count = _get_dataframe_row_count(df)
+            fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
+            sampled = _sample_dataframe_column(df, col, fraction, self.random_seed)
+            data = sampled[:max_points]
+        elif result.cached_sample is not None:
+            data = result.cached_sample[:max_points]
+        else:
+            raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_pp(
             result=result,

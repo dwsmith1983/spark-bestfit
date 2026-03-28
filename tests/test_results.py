@@ -561,7 +561,8 @@ class TestDistributionFitResultEdgeCases:
             "column_name", "distribution", "parameters", "sse", "aic", "bic",
             "ks_statistic", "pvalue", "ad_statistic", "ad_pvalue",
             "data_min", "data_max", "data_mean", "data_stddev", "data_count",
-            "lower_bound", "upper_bound"  # Added in v1.4.0 for bounded fitting
+            "data_kurtosis", "data_skewness",  # Added in v2.3.0
+            "lower_bound", "upper_bound",  # Added in v1.4.0 for bounded fitting
         }
         assert d["distribution"] == "gamma"
         assert d["parameters"] == [2.0, 0.0, 5.0]
