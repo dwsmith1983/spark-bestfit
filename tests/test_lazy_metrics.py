@@ -571,10 +571,15 @@ class TestLazyMetricsLifecycle:
         # Verify lazy context exists
         assert results.is_lazy
 
-        # Corrupt the source_df reference in the lazy context
+        # Corrupt the source_df reference AND clear cached sample
         # This simulates what happens when the DataFrame is unavailable
+        # and no cached sample exists (e.g., results loaded from disk)
         for context in results._lazy_contexts.values():
             context.source_df = None  # Invalidate the reference
+            context.cached_sample = None  # Clear cached sample
+
+        # Also clear the samples dict on the results object
+        results._samples = {}
 
         # Attempting to compute lazy metrics should raise RuntimeError
         with pytest.raises(RuntimeError, match="Failed to recreate sample"):
@@ -585,9 +590,12 @@ class TestLazyMetricsLifecycle:
         fitter = DistributionFitter(spark)
         results = fitter.fit(sample_df, column="value", max_distributions=2, lazy_metrics=True)
 
-        # Corrupt the source_df reference
+        # Corrupt the source_df reference AND clear cached sample
         for context in results._lazy_contexts.values():
             context.source_df = None
+            context.cached_sample = None
+
+        results._samples = {}
 
         # Error message should mention materialize() as the solution
         with pytest.raises(RuntimeError, match="materialize.*before unpersisting"):
