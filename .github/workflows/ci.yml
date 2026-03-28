@@ -26,7 +26,7 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -206,7 +206,7 @@ jobs:
           pip-audit --format=markdown --output=pip-audit-report.md || true
           pip-audit
       - name: Upload security report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: security-report
