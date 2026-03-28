@@ -233,6 +233,8 @@ class LazyMetricsContext:
     lower_bound: Optional[float] = None
     upper_bound: Optional[float] = None
     is_discrete: bool = False
+    # Cached sample data for instant plotting (v2.10.0)
+    cached_sample: Optional[np.ndarray] = None
 
 
 @dataclass(slots=True)
@@ -255,6 +257,9 @@ class DistributionFitResult:
         data_mean: Mean of the data used for fitting
         data_stddev: Standard deviation of the data used for fitting
         data_count: Number of samples in the data used for fitting
+        data_kurtosis: Excess kurtosis of the data used for fitting (v2.3.0)
+        data_skewness: Skewness of the data used for fitting (v2.3.0)
+        cached_sample: Cached sample data for instant plotting (v2.10.0)
         lower_bound: Lower bound for truncated distribution fitting (v1.4.0).
             When set, the distribution is truncated at this lower limit.
         upper_bound: Upper bound for truncated distribution fitting (v1.4.0).
@@ -292,6 +297,10 @@ class DistributionFitResult:
     data_mean: Optional[float] = None
     data_stddev: Optional[float] = None
     data_count: Optional[float] = None
+    data_kurtosis: Optional[float] = None
+    data_skewness: Optional[float] = None
+    # Cached sample data for instant plotting (v2.10.0)
+    cached_sample: Optional[np.ndarray] = None
     # Bounds for truncated distribution fitting (v1.4.0)
     lower_bound: Optional[float] = None
     upper_bound: Optional[float] = None
@@ -318,6 +327,8 @@ class DistributionFitResult:
             "data_mean": self.data_mean,
             "data_stddev": self.data_stddev,
             "data_count": self.data_count,
+            "data_kurtosis": self.data_kurtosis,
+            "data_skewness": self.data_skewness,
             "lower_bound": self.lower_bound,
             "upper_bound": self.upper_bound,
         }

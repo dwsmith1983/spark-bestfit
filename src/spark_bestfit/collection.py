@@ -71,13 +71,20 @@ class BaseFitResults(ABC):
         >>> good_fits = results.filter(sse_threshold=0.01)
     """
 
-    def __init__(self, results_df: Union[DataFrame, pd.DataFrame]):
+    def __init__(
+        self,
+        results_df: Union[DataFrame, pd.DataFrame],
+        samples: Optional[Dict[str, np.ndarray]] = None,
+    ):
         """Initialize BaseFitResults.
 
         Args:
             results_df: Spark DataFrame or pandas DataFrame with fit results
+            samples: Optional dict mapping column names to representative
+                data samples used during fitting.
         """
         self._df = results_df
+        self._samples = samples or {}
         # Cache whether this is a Spark DataFrame for fast access
         self._is_spark = hasattr(results_df, "sparkSession")
 
@@ -168,7 +175,9 @@ class BaseFitResults(ABC):
         """Recreate the exact sample used during fitting.
 
         Uses the stored seed and row count to reproduce the same sample
-        that was used during initial fitting.
+        that was used during initial fitting. If the context contains a
+        cached sample (v2.10.0), it is used directly to avoid re-scanning
+        the source DataFrame.
 
         Supports Spark DataFrames, Ray Datasets, and pandas DataFrames.
 
@@ -179,8 +188,12 @@ class BaseFitResults(ABC):
             NumPy array with the recreated sample
 
         Raises:
-            RuntimeError: If source DataFrame is no longer available
+            RuntimeError: If source DataFrame is no longer available and no cached sample
         """
+        # Return cached sample if available (v2.10.0: Instant mode)
+        if hasattr(context, "cached_sample") and context.cached_sample is not None:
+            return context.cached_sample
+
         try:
             sample_size = min(FITTING_SAMPLE_SIZE, context.row_count)
             fraction = min(sample_size / context.row_count, 1.0)
@@ -355,28 +368,42 @@ class BaseFitResults(ABC):
             else:
                 return row.get(key, default)
 
-        results = [
-            DistributionFitResult(
-                distribution=_get_row_value(row, "distribution"),
-                parameters=list(_get_row_value(row, "parameters", [])),
-                sse=_get_row_value(row, "sse"),
-                column_name=_get_row_value(row, "column_name"),
-                aic=_get_row_value(row, "aic"),
-                bic=_get_row_value(row, "bic"),
-                ks_statistic=_get_row_value(row, "ks_statistic"),
-                pvalue=_get_row_value(row, "pvalue"),
-                ad_statistic=_get_row_value(row, "ad_statistic"),
-                ad_pvalue=_get_row_value(row, "ad_pvalue"),
-                data_min=_get_row_value(row, "data_min"),
-                data_max=_get_row_value(row, "data_max"),
-                data_mean=_get_row_value(row, "data_mean"),
-                data_stddev=_get_row_value(row, "data_stddev"),
-                data_count=_get_row_value(row, "data_count"),
-                lower_bound=_get_row_value(row, "lower_bound"),
-                upper_bound=_get_row_value(row, "upper_bound"),
+        results = []
+        for row in top_n:
+            col_name = _get_row_value(row, "column_name")
+            # Get cached sample for this column if available
+            cached_sample = self._samples.get(col_name)
+
+            # If not in self._samples, check if it's in a lazy context
+            if cached_sample is None and hasattr(self, "_lazy_contexts"):
+                context = self._lazy_contexts.get(col_name or "_single_column_")
+                if context and hasattr(context, "cached_sample"):
+                    cached_sample = context.cached_sample
+
+            results.append(
+                DistributionFitResult(
+                    distribution=_get_row_value(row, "distribution"),
+                    parameters=list(_get_row_value(row, "parameters", [])),
+                    sse=_get_row_value(row, "sse"),
+                    column_name=col_name,
+                    aic=_get_row_value(row, "aic"),
+                    bic=_get_row_value(row, "bic"),
+                    ks_statistic=_get_row_value(row, "ks_statistic"),
+                    pvalue=_get_row_value(row, "pvalue"),
+                    ad_statistic=_get_row_value(row, "ad_statistic"),
+                    ad_pvalue=_get_row_value(row, "ad_pvalue"),
+                    data_min=_get_row_value(row, "data_min"),
+                    data_max=_get_row_value(row, "data_max"),
+                    data_mean=_get_row_value(row, "data_mean"),
+                    data_stddev=_get_row_value(row, "data_stddev"),
+                    data_count=_get_row_value(row, "data_count"),
+                    data_kurtosis=_get_row_value(row, "data_kurtosis"),
+                    data_skewness=_get_row_value(row, "data_skewness"),
+                    cached_sample=cached_sample,
+                    lower_bound=_get_row_value(row, "lower_bound"),
+                    upper_bound=_get_row_value(row, "upper_bound"),
+                )
             )
-            for row in top_n
-        ]
 
         # Emit warning if requested and best fit has poor p-value
         if warn_if_poor and results:
@@ -838,6 +865,7 @@ class LazyFitResults(BaseFitResults):
         self,
         results_df: Union[DataFrame, pd.DataFrame],
         lazy_contexts: Dict[str, LazyMetricsContext],
+        samples: Optional[Dict[str, np.ndarray]] = None,
     ):
         """Initialize LazyFitResults.
 
@@ -845,8 +873,9 @@ class LazyFitResults(BaseFitResults):
             results_df: Spark DataFrame or pandas DataFrame with fit results
             lazy_contexts: Dict mapping column names to LazyMetricsContext
                 for on-demand KS/AD computation. Required (not optional).
+            samples: Optional dict mapping column names to data samples
         """
-        super().__init__(results_df)
+        super().__init__(results_df, samples=samples)
         self._lazy_contexts = lazy_contexts
 
     @property
@@ -971,10 +1000,10 @@ class LazyFitResults(BaseFitResults):
 
             spark = self._df.sparkSession
             materialized_df = spark.createDataFrame(materialized_results, schema=FIT_RESULT_SCHEMA)
-            return EagerFitResults(materialized_df.cache())
+            return EagerFitResults(materialized_df.cache(), samples=self._samples)
         else:
             materialized_df = pd.DataFrame(materialized_results)
-            return EagerFitResults(materialized_df)
+            return EagerFitResults(materialized_df, samples=self._samples)
 
     def best(
         self,
@@ -1157,6 +1186,7 @@ FitResultsType = Union[EagerFitResults, LazyFitResults]
 def create_fit_results(
     results_df: Union[DataFrame, pd.DataFrame],
     lazy_contexts: Optional[Dict[str, LazyMetricsContext]] = None,
+    samples: Optional[Dict[str, np.ndarray]] = None,
 ) -> FitResultsType:
     """Factory function for creating FitResults.
 
@@ -1167,6 +1197,7 @@ def create_fit_results(
         results_df: Spark DataFrame or pandas DataFrame with fit results
         lazy_contexts: Optional dict mapping column names to LazyMetricsContext
             for on-demand KS/AD computation
+        samples: Optional dict mapping column names to data samples
 
     Returns:
         LazyFitResults if lazy_contexts provided, EagerFitResults otherwise
@@ -1181,8 +1212,8 @@ def create_fit_results(
         >>> lazy = create_fit_results(df, lazy_contexts={...})  # LazyFitResults
     """
     if lazy_contexts:
-        return LazyFitResults(results_df, lazy_contexts)
-    return EagerFitResults(results_df)
+        return LazyFitResults(results_df, lazy_contexts, samples=samples)
+    return EagerFitResults(results_df, samples=samples)
 
 
 # Backward-compatible alias (PascalCase to match original class name)
