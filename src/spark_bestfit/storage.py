@@ -47,7 +47,7 @@ except ImportError:
     _PYSPARK_AVAILABLE = False
 
 if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
+    pass
 
 
 # =============================================================================
@@ -383,67 +383,6 @@ class DistributionFitResult:
         # get_scipy_dist() returns a frozen distribution, optionally truncated
         frozen_dist = self.get_scipy_dist()
         return frozen_dist.rvs(size=size, random_state=random_state)
-
-    def sample_spark(
-        self,
-        n: int,
-        spark: Optional["SparkSession"] = None,
-        num_partitions: Optional[int] = None,
-        random_seed: Optional[int] = None,
-        column_name: str = "sample",
-    ) -> DataFrame:
-        """Generate distributed samples from the fitted distribution using Spark.
-
-        .. deprecated:: 2.0.0
-            Will be removed in v3.0.0. Use :func:`spark_bestfit.sampling.sample_distributed`
-            with ``SparkBackend`` instead.
-
-        Uses Spark's parallelism to generate samples across the cluster,
-        enabling efficient generation of millions of samples.
-
-        Args:
-            n: Total number of samples to generate
-            spark: SparkSession. If None, uses the active session.
-            num_partitions: Number of partitions to use. Defaults to spark default parallelism.
-            random_seed: Random seed for reproducibility. Each partition uses seed + partition_id.
-            column_name: Name for the output column (default: "sample")
-
-        Returns:
-            Spark DataFrame with single column containing samples
-
-        Example:
-            >>> result = fitter.fit(df, 'value').best(n=1)[0]
-            >>> samples_df = result.sample_spark(n=1_000_000, spark=spark)
-            >>> samples_df.show(5)
-            +-------------------+
-            |             sample|
-            +-------------------+
-            | 0.4691122931291924|
-            |-0.2828633018445851|
-            | 1.0093545783546243|
-            +-------------------+
-        """
-        import warnings
-
-        warnings.warn(
-            "sample_spark() is deprecated and will be removed in v3.0.0. "
-            "Use sample_distributed(backend=SparkBackend()) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from spark_bestfit.backends.spark import SparkBackend
-        from spark_bestfit.sampling import sample_distributed
-
-        backend = SparkBackend(spark)
-        return sample_distributed(
-            distribution=self.distribution,
-            parameters=self.parameters,
-            n=n,
-            backend=backend,
-            num_partitions=num_partitions,
-            random_seed=random_seed,
-            column_name=column_name,
-        )
 
     def pdf(self, x: np.ndarray) -> np.ndarray:
         """Evaluate probability density function at given points.

@@ -179,21 +179,21 @@ Benchmark results on local mode (your mileage may vary on a cluster):
 - **Memory distribution**: Even when local is faster, distributed sampling distributes
   memory across the cluster, enabling sample sizes that wouldn't fit on a single node
 
-Deprecated: sample_spark()
---------------------------
+Removed: sample_spark()
+-----------------------
 
-.. deprecated:: 2.0.0
-   The ``sample_spark()`` method is deprecated and will be removed in v3.0.0.
+.. versionchanged:: 3.0.1
+   The ``sample_spark()`` method was removed in v3.0.1 (deprecated since v2.2.0).
    Use ``sample_distributed()`` with an explicit backend instead.
 
-Migration example:
+If you are migrating from code that used ``sample_spark()``:
 
 .. code-block:: python
 
-    # Old (deprecated)
-    samples_df = best.sample_spark(n=1_000_000, spark=spark)
+    # Removed (was deprecated since v2.2.0)
+    # samples_df = best.sample_spark(n=1_000_000, spark=spark)
 
-    # New (recommended)
+    # Use instead
     from spark_bestfit.backends import BackendFactory
     from spark_bestfit.sampling import sample_distributed
 

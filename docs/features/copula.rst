@@ -278,21 +278,21 @@ This ensures that:
 - Each column follows its fitted marginal distribution
 - Columns maintain the correlation structure from the original data
 
-Deprecated: sample_spark()
---------------------------
+Removed: sample_spark()
+-----------------------
 
-.. deprecated:: 2.0.0
-   The ``sample_spark()`` method is deprecated and will be removed in v3.0.0.
+.. versionchanged:: 3.0.1
+   The ``sample_spark()`` method was removed in v3.0.1 (deprecated since v2.2.0).
    Use ``sample_distributed()`` with an explicit backend instead.
 
-Migration example:
+If you are migrating from code that used ``sample_spark()``:
 
 .. code-block:: python
 
-    # Old (deprecated)
-    samples_df = copula.sample_spark(n=100_000_000)
+    # Removed (was deprecated since v2.2.0)
+    # samples_df = copula.sample_spark(n=100_000_000)
 
-    # New (recommended)
+    # Use instead
     from spark_bestfit.backends import BackendFactory
 
     backend = BackendFactory.create("spark", spark_session=spark)

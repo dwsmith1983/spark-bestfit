@@ -21,7 +21,7 @@ Results
 -------
 
 .. autoclass:: spark_bestfit.results.DistributionFitResult
-   :members: sample, sample_spark, pdf, cdf, ppf
+   :members: sample, pdf, cdf, ppf
    :show-inheritance:
    :no-index:
 
