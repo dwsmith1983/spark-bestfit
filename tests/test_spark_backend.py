@@ -611,23 +611,6 @@ class TestSparkBackendSampling:
         # Std should be close to 10
         assert abs(pdf["sample"].std() - 10) < 3.0
 
-    def test_sample_spark_backward_compatible(self, spark):
-        """sample_spark (backward compat) still works."""
-        from spark_bestfit.sampling import sample_spark
-
-        result = sample_spark(
-            distribution="norm",
-            parameters=[0.0, 1.0],
-            n=50,
-            spark=spark,
-            random_seed=42,
-        )
-
-        pdf = result.toPandas()
-        assert len(pdf) == 50
-        assert "sample" in pdf.columns
-
-
 class TestSparkBackendProgressCallback:
     """Tests for progress callback with SparkBackend."""
 
@@ -921,23 +904,3 @@ class TestCopulaWithSparkBackend:
                 column_name="col2",
             ),
         }
-
-    def test_copula_sample_spark_backward_compatible(self, spark, copula_marginals):
-        """GaussianCopula.sample_spark works (backward compat)."""
-        from spark_bestfit.copula import GaussianCopula
-
-        # Create copula directly with known correlation
-        corr_matrix = np.array([[1.0, 0.5], [0.5, 1.0]])
-        copula = GaussianCopula(
-            column_names=["col1", "col2"],
-            marginals=copula_marginals,
-            correlation_matrix=corr_matrix,
-        )
-
-        # Use sample_spark (backward compat method)
-        samples_df = copula.sample_spark(n=50, spark=spark, random_seed=42)
-
-        # Should return Spark DataFrame
-        pdf = samples_df.toPandas()
-        assert len(pdf) == 50
-        assert list(pdf.columns) == ["col1", "col2"]

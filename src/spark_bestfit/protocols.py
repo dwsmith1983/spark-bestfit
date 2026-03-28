@@ -266,7 +266,7 @@ class ExecutionBackend(Protocol):
     ) -> Any:
         """Generate samples distributed across partitions.
 
-        Used by GaussianCopula.sample_spark() for distributed sample
+        Used by GaussianCopula.sample_distributed() for distributed sample
         generation. Each partition generates a subset of samples.
 
         Args:

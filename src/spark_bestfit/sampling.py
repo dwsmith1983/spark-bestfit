@@ -4,7 +4,6 @@ This module provides functions for generating samples from fitted distributions
 using the backend abstraction for distributed or local execution.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import numpy as np
@@ -81,64 +80,4 @@ def sample_distributed(
         column_names=[column_name],
         num_partitions=num_partitions,
         random_seed=random_seed,
-    )
-
-
-def sample_spark(
-    distribution: str,
-    parameters: List[float],
-    n: int,
-    spark: Optional[Any] = None,
-    num_partitions: Optional[int] = None,
-    random_seed: Optional[int] = None,
-    column_name: str = "sample",
-) -> Any:
-    """Generate distributed samples from a fitted distribution using Spark.
-
-    .. deprecated:: 2.0.0
-        Will be removed in v3.0.0. Use :func:`sample_distributed` with
-        ``SparkBackend`` instead.
-
-    This is a backward-compatible wrapper around sample_distributed().
-
-    Args:
-        distribution: scipy.stats distribution name
-        parameters: Distribution parameters (shape, loc, scale)
-        n: Total number of samples to generate
-        spark: SparkSession. If None, uses the active session.
-        num_partitions: Number of partitions to use. Defaults to spark default parallelism.
-        random_seed: Random seed for reproducibility. Each partition uses seed + partition_id.
-        column_name: Name for the output column (default: "sample")
-
-    Returns:
-        Spark DataFrame with single column containing samples
-
-    Example:
-        >>> df = sample_spark("norm", [0.0, 1.0], n=1_000_000, spark=spark)
-        >>> df.show(5)
-        +-------------------+
-        |             sample|
-        +-------------------+
-        | 0.4691122931291924|
-        |-0.2828633018445851|
-        | 1.0093545783546243|
-        +-------------------+
-    """
-    warnings.warn(
-        "sample_spark() is deprecated and will be removed in v3.0.0. "
-        "Use sample_distributed(backend=SparkBackend()) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from spark_bestfit.backends.spark import SparkBackend
-
-    backend = SparkBackend(spark)
-    return sample_distributed(
-        distribution=distribution,
-        parameters=parameters,
-        n=n,
-        backend=backend,
-        num_partitions=num_partitions,
-        random_seed=random_seed,
-        column_name=column_name,
     )

@@ -16,7 +16,7 @@ Example:
     >>>
     >>> # Generate correlated samples
     >>> samples = copula.sample(n=10000)  # Dict[str, np.ndarray]
-    >>> samples_df = copula.sample_spark(n=1_000_000, spark=spark)
+    >>> samples_df = copula.sample_distributed(n=1_000_000, backend=backend)
 """
 
 import json
@@ -187,7 +187,7 @@ class GaussianCopula:
         - Marginal distributions (from the fitted distributions)
         - Correlation structure (from the original data)
 
-        For large sample sizes (>10M), use sample_spark() instead.
+        For large sample sizes (>10M), use sample_distributed() instead.
 
         Args:
             n: Number of samples to generate
@@ -387,57 +387,6 @@ class GaussianCopula:
             column_names=column_names,
             num_partitions=num_partitions,
             random_seed=random_seed,
-        )
-
-    def sample_spark(
-        self,
-        n: int,
-        spark: Optional[Any] = None,
-        num_partitions: Optional[int] = None,
-        random_seed: Optional[int] = None,
-        return_uniform: bool = False,
-    ) -> Any:
-        """Generate correlated samples using Spark distributed computing.
-
-        .. deprecated:: 2.0.0
-            Will be removed in v3.0.0. Use :meth:`sample_distributed` with
-            ``SparkBackend`` instead.
-
-        This is a backward-compatible wrapper around sample_distributed().
-
-        Args:
-            n: Total number of samples to generate
-            spark: SparkSession. If None, uses the active session.
-            num_partitions: Number of partitions. Defaults to Spark default parallelism.
-            random_seed: Random seed for reproducibility
-            return_uniform: If True, return uniform [0,1] samples without
-                marginal transformation. This is faster. Default False returns
-                samples transformed to the fitted marginal distributions.
-
-        Returns:
-            Spark DataFrame with one column per marginal
-
-        Example:
-            >>> samples_df = copula.sample_spark(n=100_000_000, spark=spark)
-            >>> samples_df.show(5)
-        """
-        import warnings
-
-        warnings.warn(
-            "sample_spark() is deprecated and will be removed in v3.0.0. "
-            "Use sample_distributed(backend=SparkBackend()) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from spark_bestfit.backends.spark import SparkBackend
-
-        backend = SparkBackend(spark)
-        return self.sample_distributed(
-            n=n,
-            backend=backend,
-            num_partitions=num_partitions,
-            random_seed=random_seed,
-            return_uniform=return_uniform,
         )
 
     def save(
