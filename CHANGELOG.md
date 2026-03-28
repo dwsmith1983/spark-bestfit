@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v3.0.1 (2026-03-28)
+
+### Bug Fixes
+
+- Cache fitting sample to avoid Spark DAG recomputation in plot methods
+  ([#170](https://github.com/dwsmith1983/spark-bestfit/pull/170))
+
+### Breaking Changes
+
+- Remove deprecated `sample_spark()` methods scheduled for removal in v3.0.0.
+  Use `sample_distributed()` with an explicit backend instead.
+  ([#171](https://github.com/dwsmith1983/spark-bestfit/pull/171))
+
 ## v3.0.0 (2026-01-11)
 
 ### Bug Fixes
