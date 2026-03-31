@@ -87,7 +87,7 @@ jobs:
             "--cov-config=.coveragerc-ci" \
             -v
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: coverage.xml
           fail_ci_if_error: false
