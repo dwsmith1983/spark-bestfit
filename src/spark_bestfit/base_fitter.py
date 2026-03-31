@@ -706,5 +706,5 @@ class BaseFitter(ABC):
             "cached_sample is available (after fit()). The cached sample is being "
             "used instead. Pass force_recompute=True to force DataFrame evaluation.",
             FutureWarning,
-            stacklevel=2,
+            stacklevel=3,
         )

@@ -1110,10 +1110,8 @@ class TestPlotComparisonInstant:
         fitter = DistributionFitter(backend=LocalBackend())
 
         # Allow FutureWarning (cache wins over df after the fix)
-        import warnings as _w
-
-        with _w.catch_warnings():
-            _w.simplefilter("always")
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
             fig, ax = fitter.plot_comparison(
                 two_cached_results, df=pandas_dataset, column="value"
             )
