@@ -534,12 +534,15 @@ class DiscreteDistributionFitter(BaseFitter):
         grid_alpha: float = 0.3,
         save_path: Optional[str] = None,
         save_format: str = "png",
+        force_recompute: bool = False,
     ):
         """Plot fitted discrete distribution against data histogram.
 
         Args:
             result: DistributionFitResult to plot
             df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+                When a cached sample exists and ``force_recompute`` is False, the
+                cached sample is used and *df* is ignored (a warning is emitted).
             column: Column name. If None, uses column_name from result.
             title: Plot title
             xlabel: X-axis label
@@ -555,39 +558,44 @@ class DiscreteDistributionFitter(BaseFitter):
             grid_alpha: Grid transparency (0-1)
             save_path: Path to save figure (optional)
             save_format: Save format (png, pdf, svg)
+            force_recompute: If True, ignore cached sample and recompute from
+                *df*. Default False (v3.0.2).
 
         Returns:
             Tuple of (figure, axis) from matplotlib
 
         Example:
             >>> best = results.best(n=1)[0]
-            >>> fitter.plot(best, df, 'value', title='Best Fit')
-            >>> # v2.10.0: instant plotting using cached sample
+            >>> # v3.0.2: instant plotting using cached sample (default)
             >>> fitter.plot(best, title='Instant Plot')
+            >>> # Force recompute from DataFrame
+            >>> fitter.plot(best, df, 'value', title='Recomputed', force_recompute=True)
         """
         from spark_bestfit.plotting import plot_discrete_distribution
 
-        # User-provided df takes priority over cached sample (v2.10.0)
-        if df is not None:
-            # User explicitly provided a DataFrame — use it
+        # Cache takes priority over df (v3.0.2: cache-first mode)
+        if result.cached_sample is not None and not force_recompute:
+            if df is not None:
+                self._warn_df_with_cache("plot")
+            data = result.cached_sample
+        elif df is not None:
             col = column or result.column_name
             if col is None:
                 raise ValueError("column must be provided if result.column_name is None")
-
-            # Get data sample
             # Handle Spark DataFrame, Ray Dataset, and pandas DataFrame
             if hasattr(df, "sparkSession"):
                 row_count = df.count()
             elif hasattr(df, "select_columns") and hasattr(df, "count"):
-                # Ray Dataset - use count() method
                 row_count = df.count()
             else:
                 row_count = len(df)
             fraction = min(10000 / row_count, 1.0)
             data = self._backend.sample_column(df, col, fraction=fraction, seed=self.random_seed).astype(int)
-        elif result.cached_sample is not None:
-            data = result.cached_sample
         else:
+            if force_recompute:
+                raise ValueError(
+                    "force_recompute=True requires df to be provided, " "since the cached sample is bypassed."
+                )
             raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_discrete_distribution(

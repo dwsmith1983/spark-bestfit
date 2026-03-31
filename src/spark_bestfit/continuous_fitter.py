@@ -666,12 +666,16 @@ class DistributionFitter(BaseFitter):
         grid_alpha: float = 0.3,
         save_path: Optional[str] = None,
         save_format: str = "png",
+        force_recompute: bool = False,
     ):
         """Plot fitted distribution against data histogram.
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            df: DataFrame with data. Optional when result contains a cached
+                sample (the default after fitting). When both a cached sample
+                and df are provided, the cached sample is used unless
+                ``force_recompute=True``.
             column: Column name. If None, uses column_name from result.
             bins: Number of histogram bins
             use_rice_rule: Use Rice rule for bins
@@ -689,40 +693,45 @@ class DistributionFitter(BaseFitter):
             grid_alpha: Grid transparency (0-1)
             save_path: Path to save figure (optional)
             save_format: Save format (png, pdf, svg)
+            force_recompute: If True, ignore cached sample and recompute
+                histogram from ``df`` (requires ``df`` to be provided).
+                Default False.
 
         Returns:
             Tuple of (figure, axis) from matplotlib
 
         Example:
-            >>> fitter.plot(best, df, 'value', title='Best Fit')
-            >>> # v2.10.0: instant plotting using cached sample
+            >>> # Instant plot from cached sample (recommended)
             >>> fitter.plot(best, title='Instant Plot')
+            >>> # Explicit DataFrame (recomputes histogram via Spark)
+            >>> fitter.plot(best, df, 'value', title='Best Fit', force_recompute=True)
         """
         from spark_bestfit.plotting import plot_distribution
 
-        # Use cached sample if available (v2.10.0: Instant mode)
-        if result.cached_sample is not None and df is None:
+        # Cache-first: prefer cached sample to avoid Spark DAG recomputation
+        if result.cached_sample is not None and not force_recompute:
+            if df is not None:
+                self._warn_df_with_cache("plot")
             data = result.cached_sample
-            # Compute histogram from sample locally to avoid Spark DAG
             if use_rice_rule:
                 n_bins = int(np.ceil(len(data) ** (1 / 3)) * 2)
             else:
                 n_bins = bins if isinstance(bins, int) else len(bins) - 1
-
             y_hist, bin_edges = np.histogram(data, bins=n_bins, density=True)
             x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
         elif df is not None:
-            # Fallback to computing histogram via Spark (original behavior)
             col = column or result.column_name
             if col is None:
                 raise ValueError("column must be provided if result.column_name is None")
-
-            # Compute histogram for plotting (bin edges -> centers for display)
             y_hist, bin_edges = self._histogram_computer.compute_histogram(
                 df, col, bins=bins, use_rice_rule=use_rice_rule
             )
             x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
         else:
+            if force_recompute:
+                raise ValueError(
+                    "force_recompute=True requires df to be provided, " "since the cached sample is bypassed."
+                )
             raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_distribution(
@@ -748,8 +757,8 @@ class DistributionFitter(BaseFitter):
     def plot_comparison(
         self,
         results: List[DistributionFitResult],
-        df: DataFrame,
-        column: str,
+        df: Optional[DataFrame] = None,
+        column: Optional[str] = None,
         bins: Union[int, Tuple[float, ...]] = 50,
         use_rice_rule: bool = True,
         title: str = "Distribution Comparison",
@@ -766,13 +775,16 @@ class DistributionFitter(BaseFitter):
         grid_alpha: float = 0.3,
         save_path: Optional[str] = None,
         save_format: str = "png",
+        force_recompute: bool = False,
     ):
         """Plot multiple distributions for comparison.
 
         Args:
             results: List of DistributionFitResult objects
-            df: DataFrame with data
-            column: Column name
+            df: DataFrame with data. Optional when results contain a cached
+                sample. When both a cached sample and df are provided, the
+                cached sample is used unless ``force_recompute=True``.
+            column: Column name. If None, uses column_name from the first result.
             bins: Number of histogram bins
             use_rice_rule: Use Rice rule for bins
             title: Plot title
@@ -789,21 +801,54 @@ class DistributionFitter(BaseFitter):
             grid_alpha: Grid transparency
             save_path: Path to save figure
             save_format: Save format
+            force_recompute: If True, ignore cached samples and recompute
+                histogram from ``df`` (requires ``df`` to be provided).
+                Default False.
 
         Returns:
             Tuple of (figure, axis)
 
         Example:
             >>> top_3 = results.best(n=3)
-            >>> fitter.plot_comparison(top_3, df, 'value')
+            >>> # Instant comparison from cached sample (recommended)
+            >>> fitter.plot_comparison(top_3)
+            >>> # Explicit DataFrame (recomputes histogram via Spark)
+            >>> fitter.plot_comparison(top_3, df, 'value', force_recompute=True)
         """
         from spark_bestfit.plotting import plot_comparison
 
-        # Compute histogram for plotting (bin edges -> centers for display)
-        y_hist, bin_edges = self._histogram_computer.compute_histogram(
-            df, column, bins=bins, use_rice_rule=use_rice_rule
-        )
-        x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        # Try to get cached sample from results
+        first_cached = None
+        if not force_recompute:
+            for r in results:
+                if r.cached_sample is not None:
+                    first_cached = r.cached_sample
+                    break
+
+        if first_cached is not None:
+            if df is not None:
+                self._warn_df_with_cache("plot_comparison")
+            data = first_cached
+            if use_rice_rule:
+                n_bins = int(np.ceil(len(data) ** (1 / 3)) * 2)
+            else:
+                n_bins = bins if isinstance(bins, int) else len(bins) - 1
+            y_hist, bin_edges = np.histogram(data, bins=n_bins, density=True)
+            x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        elif df is not None:
+            col = column or (results[0].column_name if results else None)
+            if col is None:
+                raise ValueError("column must be provided when no cached sample is available")
+            y_hist, bin_edges = self._histogram_computer.compute_histogram(
+                df, col, bins=bins, use_rice_rule=use_rice_rule
+            )
+            x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        else:
+            if force_recompute:
+                raise ValueError(
+                    "force_recompute=True requires df to be provided, " "since the cached sample is bypassed."
+                )
+            raise ValueError("Either df must be provided or at least one result must contain a cached sample")
 
         return plot_comparison(
             results=results,
@@ -1040,6 +1085,7 @@ class DistributionFitter(BaseFitter):
         grid_alpha: float = 0.3,
         save_path: Optional[str] = None,
         save_format: str = "png",
+        force_recompute: bool = False,
     ):
         """Create a Q-Q plot to assess goodness-of-fit.
 
@@ -1049,7 +1095,10 @@ class DistributionFitter(BaseFitter):
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            df: DataFrame with data. Optional when result contains a cached
+                sample (the default after fitting). When both a cached sample
+                and df are provided, the cached sample is used unless
+                ``force_recompute=True``.
             column: Column name. If None, uses column_name from result.
             max_points: Maximum data points to sample for plotting
             title: Plot title
@@ -1069,33 +1118,40 @@ class DistributionFitter(BaseFitter):
             grid_alpha: Grid transparency (0-1)
             save_path: Path to save figure (optional)
             save_format: Save format (png, pdf, svg)
+            force_recompute: If True, ignore cached sample and resample
+                from ``df`` (requires ``df`` to be provided). Default False.
 
         Returns:
             Tuple of (figure, axis) from matplotlib
 
         Example:
             >>> best = results.best(n=1)[0]
-            >>> fitter.plot_qq(best, df, 'value', title='Q-Q Plot')
-            >>> # v2.10.0: instant plotting using cached sample
+            >>> # Instant Q-Q plot from cached sample (recommended)
             >>> fitter.plot_qq(best, title='Instant Q-Q Plot')
+            >>> # Explicit DataFrame (resamples via Spark)
+            >>> fitter.plot_qq(best, df, 'value', title='Q-Q Plot', force_recompute=True)
         """
         from spark_bestfit.plotting import plot_qq
         from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # User-provided df takes priority over cached sample (v2.10.0)
-        if df is not None:
-            # User explicitly provided a DataFrame — use it
+        # Cache-first: prefer cached sample to avoid Spark DAG recomputation
+        if result.cached_sample is not None and not force_recompute:
+            if df is not None:
+                self._warn_df_with_cache("plot_qq")
+            data = result.cached_sample[:max_points]
+        elif df is not None:
             col = column or result.column_name
             if col is None:
                 raise ValueError("column must be provided if result.column_name is None")
-
             row_count = _get_dataframe_row_count(df)
             fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
             sampled = _sample_dataframe_column(df, col, fraction, self.random_seed)
             data = sampled[:max_points]
-        elif result.cached_sample is not None:
-            data = result.cached_sample[:max_points]
         else:
+            if force_recompute:
+                raise ValueError(
+                    "force_recompute=True requires df to be provided, " "since the cached sample is bypassed."
+                )
             raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_qq(
@@ -1143,6 +1199,7 @@ class DistributionFitter(BaseFitter):
         grid_alpha: float = 0.3,
         save_path: Optional[str] = None,
         save_format: str = "png",
+        force_recompute: bool = False,
     ):
         """
         Create a P-P plot to assess goodness-of-fit.
@@ -1154,7 +1211,10 @@ class DistributionFitter(BaseFitter):
 
         Args:
             result: DistributionFitResult to plot
-            df: DataFrame with data. If None, uses cached sample from result (v2.10.0).
+            df: DataFrame with data. Optional when result contains a cached
+                sample (the default after fitting). When both a cached sample
+                and df are provided, the cached sample is used unless
+                ``force_recompute=True``.
             column: Column name. If None, uses column_name from result.
             max_points: Maximum data points to sample for plotting
             title: Plot title
@@ -1174,33 +1234,40 @@ class DistributionFitter(BaseFitter):
             grid_alpha: Grid transparency (0-1)
             save_path: Path to save figure (optional)
             save_format: Save format (png, pdf, svg)
+            force_recompute: If True, ignore cached sample and resample
+                from ``df`` (requires ``df`` to be provided). Default False.
 
         Returns:
             Tuple of (figure, axis) from matplotlib
 
         Example:
             >>> best = results.best(n=1)[0]
-            >>> fitter.plot_pp(best, df, 'value', title='P-P Plot')
-            >>> # v2.10.0: instant plotting using cached sample
+            >>> # Instant P-P plot from cached sample (recommended)
             >>> fitter.plot_pp(best, title='Instant P-P Plot')
+            >>> # Explicit DataFrame (resamples via Spark)
+            >>> fitter.plot_pp(best, df, 'value', title='P-P Plot', force_recompute=True)
         """
         from spark_bestfit.plotting import plot_pp
         from spark_bestfit.storage import _get_dataframe_row_count, _sample_dataframe_column
 
-        # User-provided df takes priority over cached sample (v2.10.0)
-        if df is not None:
-            # User explicitly provided a DataFrame — use it
+        # Cache-first: prefer cached sample to avoid Spark DAG recomputation
+        if result.cached_sample is not None and not force_recompute:
+            if df is not None:
+                self._warn_df_with_cache("plot_pp")
+            data = result.cached_sample[:max_points]
+        elif df is not None:
             col = column or result.column_name
             if col is None:
                 raise ValueError("column must be provided if result.column_name is None")
-
             row_count = _get_dataframe_row_count(df)
             fraction = min(max_points * 3 / row_count, 1.0) if row_count > 0 else 1.0
             sampled = _sample_dataframe_column(df, col, fraction, self.random_seed)
             data = sampled[:max_points]
-        elif result.cached_sample is not None:
-            data = result.cached_sample[:max_points]
         else:
+            if force_recompute:
+                raise ValueError(
+                    "force_recompute=True requires df to be provided, " "since the cached sample is bypassed."
+                )
             raise ValueError("Either df must be provided or result must contain a cached sample")
 
         return plot_pp(

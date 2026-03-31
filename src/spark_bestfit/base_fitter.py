@@ -1,6 +1,7 @@
 """Base class for distribution fitters - eliminates code duplication."""
 
 import logging
+import warnings
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 
@@ -697,3 +698,13 @@ class BaseFitter(ABC):
         fraction = min(sample_size / row_count, 1.0)
         # Use backend's sample_column which handles both Spark and pandas
         return self._backend.sample_column(df, column, fraction=fraction, seed=self.random_seed)
+
+    def _warn_df_with_cache(self, method_name: str) -> None:
+        """Emit FutureWarning when df is passed but cached_sample is available."""
+        warnings.warn(
+            f"The 'df' parameter passed to {method_name}() is unnecessary when "
+            "cached_sample is available (after fit()). The cached sample is being "
+            "used instead. Pass force_recompute=True to force DataFrame evaluation.",
+            FutureWarning,
+            stacklevel=3,
+        )

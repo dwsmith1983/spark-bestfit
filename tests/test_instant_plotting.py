@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+import warnings
 
 from spark_bestfit import DiscreteDistributionFitter, DistributionFitter
 from spark_bestfit.backends.local import LocalBackend
@@ -217,10 +218,14 @@ class TestInstantPlotUsesCachedSample:
             fitter.plot_pp(result_no_sample)
 
     def test_plot_with_df_prefers_df(self, pandas_dataset, normal_data):
-        """plot() with both df and cached_sample must complete without error.
+        """plot() with both df and cached_sample must emit FutureWarning and succeed.
 
-        When df is provided, the Spark/pandas path is used for the histogram.
-        The test verifies that passing df alongside a cached sample does not break.
+        After the cache-first fix, when df is passed alongside a cached_sample,
+        the cache is used (not df) and a FutureWarning is emitted to tell callers
+        that passing df is unnecessary.
+
+        FAILS currently because no FutureWarning is emitted — the current code
+        silently uses the df path without any deprecation notice.
         """
         fitter = DistributionFitter(backend=LocalBackend())
         result = DistributionFitResult(
@@ -231,8 +236,10 @@ class TestInstantPlotUsesCachedSample:
             cached_sample=normal_data,
         )
 
-        # Providing df should work without error (uses df path for histogram)
-        fig, ax = fitter.plot(result, df=pandas_dataset, column="value")
+        # Passing df alongside a cached_sample must emit FutureWarning
+        with pytest.warns(FutureWarning, match="unnecessary"):
+            fig, ax = fitter.plot(result, df=pandas_dataset, column="value")
+
         assert fig is not None
         assert isinstance(fig, plt.Figure)
         plt.close("all")
@@ -567,5 +574,565 @@ class TestEndToEndInstantPlotting:
         assert best.cached_sample is not None, "cached_sample must be set after fit()"
 
         fig, ax = fitter.plot_pp(best)
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+
+# ---------------------------------------------------------------------------
+# Cache-first priority: cached_sample takes priority over df
+# ---------------------------------------------------------------------------
+
+
+class TestCacheFirstPriority:
+    """Tests that cached_sample takes priority over df when both are present.
+
+    After the fix, all plot methods must use the cached_sample path when
+    result.cached_sample is set, regardless of whether df is also supplied.
+    These tests FAIL currently because:
+      - continuous plot() uses df when df is provided (cache only wins when df is None)
+      - continuous plot_qq() / plot_pp() check df FIRST — always use df when provided
+      - discrete plot() checks df FIRST — always uses df when provided
+      - plot_comparison() requires df as a positional argument (no cache path at all)
+    """
+
+    @pytest.fixture
+    def cached_norm_result(self, normal_data):
+        """DistributionFitResult for 'norm' with cached_sample set."""
+        return DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+            column_name="value",
+            cached_sample=normal_data,
+        )
+
+    @pytest.fixture
+    def cached_norm_result_2(self, normal_data):
+        """A second DistributionFitResult for 'norm' with cached_sample — for comparison plots."""
+        np.random.seed(99)
+        alt_sample = np.random.normal(50.0, 10.0, size=len(normal_data))
+        return DistributionFitResult(
+            distribution="norm",
+            parameters=[50.5, 9.8],
+            sse=0.006,
+            column_name="value",
+            cached_sample=alt_sample,
+        )
+
+    @pytest.fixture
+    def cached_poisson_result(self, poisson_data):
+        """DistributionFitResult for 'poisson' with integer cached_sample."""
+        return DistributionFitResult(
+            distribution="poisson",
+            parameters=[7.0],
+            sse=0.002,
+            column_name="counts",
+            cached_sample=poisson_data.astype(int),
+        )
+
+    def test_continuous_plot_cache_wins_over_df(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot() must use cached_sample even when df is provided.
+
+        FAILS currently because plot() takes the df path when df is not None
+        (line 704: `if result.cached_sample is not None and df is None:`).
+        After the fix, cache wins unconditionally when cached_sample is set and
+        force_recompute is not True.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        # Both df AND a result with cached_sample — cache must win (emitting FutureWarning)
+        with pytest.warns(FutureWarning):
+            fig, ax = fitter.plot(cached_norm_result, df=pandas_dataset, column="value")
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_continuous_plot_qq_cache_wins_over_df(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot_qq() must use cached_sample even when df is provided.
+
+        FAILS currently because plot_qq() checks df FIRST (line 1086:
+        `if df is not None:`) — cache is never reached when df is supplied.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning):
+            fig, ax = fitter.plot_qq(
+                cached_norm_result, df=pandas_dataset, column="value"
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_continuous_plot_pp_cache_wins_over_df(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot_pp() must use cached_sample even when df is provided.
+
+        FAILS currently because plot_pp() checks df FIRST (line 1191:
+        `if df is not None:`) — cache is never reached when df is supplied.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning):
+            fig, ax = fitter.plot_pp(
+                cached_norm_result, df=pandas_dataset, column="value"
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_discrete_plot_cache_wins_over_df(
+        self, cached_poisson_result, pandas_poisson_dataset
+    ):
+        """DiscreteDistributionFitter.plot() must use cached_sample even when df is provided.
+
+        FAILS currently because discrete plot() checks df FIRST (line 571:
+        `if df is not None:`) — cache is never reached when df is supplied.
+        """
+        fitter = DiscreteDistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning):
+            fig, ax = fitter.plot(
+                cached_poisson_result, df=pandas_poisson_dataset, column="counts"
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_comparison_uses_cached_samples_without_df(
+        self, cached_norm_result, cached_norm_result_2
+    ):
+        """plot_comparison() must work without df when results have cached_sample.
+
+        FAILS currently because plot_comparison() declares df as a required
+        positional argument — calling it without df raises TypeError.
+        After the fix, df becomes Optional and cached_samples are used instead.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        fig, ax = fitter.plot_comparison(
+            [cached_norm_result, cached_norm_result_2],
+        )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+
+# ---------------------------------------------------------------------------
+# FutureWarning emitted when df is passed but cache is available
+# ---------------------------------------------------------------------------
+
+
+class TestFutureWarningOnDfWithCache:
+    """Tests that FutureWarning is emitted when df is passed alongside a cached result.
+
+    These tests FAIL currently because none of the plot methods emit any warning
+    today — they silently use df when it is provided.
+    """
+
+    @pytest.fixture
+    def cached_norm_result(self, normal_data):
+        return DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+            column_name="value",
+            cached_sample=normal_data,
+        )
+
+    @pytest.fixture
+    def cached_poisson_result(self, poisson_data):
+        return DistributionFitResult(
+            distribution="poisson",
+            parameters=[7.0],
+            sse=0.002,
+            column_name="counts",
+            cached_sample=poisson_data.astype(int),
+        )
+
+    def test_plot_emits_future_warning_when_df_and_cache_both_present(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot() must emit FutureWarning mentioning 'unnecessary' when df is redundant.
+
+        FAILS currently — no warning is emitted.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning, match="unnecessary"):
+            fitter.plot(cached_norm_result, df=pandas_dataset, column="value")
+
+        plt.close("all")
+
+    def test_plot_qq_emits_future_warning_when_df_and_cache_both_present(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot_qq() must emit FutureWarning mentioning 'unnecessary' when df is redundant.
+
+        FAILS currently — no warning is emitted.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning, match="unnecessary"):
+            fitter.plot_qq(cached_norm_result, df=pandas_dataset, column="value")
+
+        plt.close("all")
+
+    def test_plot_pp_emits_future_warning_when_df_and_cache_both_present(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot_pp() must emit FutureWarning mentioning 'unnecessary' when df is redundant.
+
+        FAILS currently — no warning is emitted.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning, match="unnecessary"):
+            fitter.plot_pp(cached_norm_result, df=pandas_dataset, column="value")
+
+        plt.close("all")
+
+    def test_discrete_plot_emits_future_warning_when_df_and_cache_both_present(
+        self, cached_poisson_result, pandas_poisson_dataset
+    ):
+        """Discrete plot() must emit FutureWarning when df is redundant.
+
+        FAILS currently — no warning is emitted.
+        """
+        fitter = DiscreteDistributionFitter(backend=LocalBackend())
+
+        with pytest.warns(FutureWarning, match="unnecessary"):
+            fitter.plot(
+                cached_poisson_result, df=pandas_poisson_dataset, column="counts"
+            )
+
+        plt.close("all")
+
+    def test_no_warning_when_only_cache_no_df(self, cached_norm_result):
+        """plot() must NOT emit FutureWarning when df is absent (cache-only path).
+
+        This is the happy-path: caller omits df entirely, cache is used silently.
+        Must pass both before and after the fix.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            # Should NOT raise — no df means no warning
+            fig, ax = fitter.plot(cached_norm_result)
+
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_no_warning_when_only_df_no_cache(self, pandas_dataset):
+        """plot() must NOT emit FutureWarning when cached_sample is absent and df provided.
+
+        Normal usage: user provides df explicitly, result has no cache.
+        Must pass both before and after the fix.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+        result_no_cache = DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+            column_name="value",
+            # cached_sample intentionally absent
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            fig, ax = fitter.plot(result_no_cache, df=pandas_dataset, column="value")
+
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+
+# ---------------------------------------------------------------------------
+# force_recompute=True escape hatch: bypasses cache, uses df, no warning
+# ---------------------------------------------------------------------------
+
+
+class TestForceRecompute:
+    """Tests for the force_recompute=True parameter that bypasses the cache.
+
+    These tests FAIL currently because force_recompute is not yet a parameter
+    on any plot method — calling with force_recompute=True raises TypeError.
+    """
+
+    @pytest.fixture
+    def cached_norm_result(self, normal_data):
+        return DistributionFitResult(
+            distribution="norm",
+            parameters=[50.0, 10.0],
+            sse=0.005,
+            column_name="value",
+            cached_sample=normal_data,
+        )
+
+    @pytest.fixture
+    def cached_poisson_result(self, poisson_data):
+        return DistributionFitResult(
+            distribution="poisson",
+            parameters=[7.0],
+            sse=0.002,
+            column_name="counts",
+            cached_sample=poisson_data.astype(int),
+        )
+
+    def test_plot_force_recompute_uses_df_no_warning(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot(force_recompute=True) must use df, emit NO FutureWarning, and succeed.
+
+        FAILS currently — TypeError: plot() got an unexpected keyword argument
+        'force_recompute'.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            # Must not raise FutureWarning
+            fig, ax = fitter.plot(
+                cached_norm_result,
+                df=pandas_dataset,
+                column="value",
+                force_recompute=True,
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_qq_force_recompute_uses_df_no_warning(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot_qq(force_recompute=True) must use df, emit NO FutureWarning, and succeed.
+
+        FAILS currently — TypeError: plot_qq() got an unexpected keyword argument
+        'force_recompute'.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            fig, ax = fitter.plot_qq(
+                cached_norm_result,
+                df=pandas_dataset,
+                column="value",
+                force_recompute=True,
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_pp_force_recompute_uses_df_no_warning(
+        self, cached_norm_result, pandas_dataset
+    ):
+        """plot_pp(force_recompute=True) must use df, emit NO FutureWarning, and succeed.
+
+        FAILS currently — TypeError: plot_pp() got an unexpected keyword argument
+        'force_recompute'.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            fig, ax = fitter.plot_pp(
+                cached_norm_result,
+                df=pandas_dataset,
+                column="value",
+                force_recompute=True,
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_discrete_plot_force_recompute_uses_df_no_warning(
+        self, cached_poisson_result, pandas_poisson_dataset
+    ):
+        """Discrete plot(force_recompute=True) must use df, emit NO FutureWarning.
+
+        FAILS currently — TypeError: plot() got an unexpected keyword argument
+        'force_recompute'.
+        """
+        fitter = DiscreteDistributionFitter(backend=LocalBackend())
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            fig, ax = fitter.plot(
+                cached_poisson_result,
+                df=pandas_poisson_dataset,
+                column="counts",
+                force_recompute=True,
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_force_recompute_without_df_raises_value_error(self, cached_norm_result):
+        """force_recompute=True without df must raise ValueError with clear message."""
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        with pytest.raises(ValueError, match="force_recompute=True requires df"):
+            fitter.plot(cached_norm_result, force_recompute=True)
+
+    def test_plot_comparison_force_recompute_uses_df_no_warning(
+        self, pandas_dataset, normal_data
+    ):
+        """plot_comparison(force_recompute=True) must use df, emit NO FutureWarning."""
+        fitter = DistributionFitter(backend=LocalBackend())
+        results = [
+            DistributionFitResult(
+                distribution="norm",
+                parameters=[50.0, 10.0],
+                sse=0.005,
+                column_name="value",
+                cached_sample=normal_data,
+            ),
+        ]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            fig, ax = fitter.plot_comparison(
+                results, df=pandas_dataset, column="value", force_recompute=True
+            )
+
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+
+# ---------------------------------------------------------------------------
+# plot_comparison() instant path: df optional when results carry cached_sample
+# ---------------------------------------------------------------------------
+
+
+class TestPlotComparisonInstant:
+    """Tests for plot_comparison() using cached_sample instead of requiring df.
+
+    These tests FAIL currently because plot_comparison() declares:
+        df: DataFrame   (required positional argument)
+    so calling it without df raises TypeError immediately.
+    After the fix, df becomes Optional[DataFrame] = None and the method falls
+    back to the cached_sample on each result.
+    """
+
+    @pytest.fixture
+    def two_cached_results(self, normal_data):
+        """Two DistributionFitResult objects with distinct cached_samples."""
+        np.random.seed(7)
+        sample_a = np.random.normal(50.0, 10.0, size=len(normal_data))
+        np.random.seed(13)
+        sample_b = np.random.normal(50.5, 9.5, size=len(normal_data))
+        return [
+            DistributionFitResult(
+                distribution="norm",
+                parameters=[50.0, 10.0],
+                sse=0.005,
+                column_name="value",
+                cached_sample=sample_a,
+            ),
+            DistributionFitResult(
+                distribution="norm",
+                parameters=[50.5, 9.5],
+                sse=0.006,
+                column_name="value",
+                cached_sample=sample_b,
+            ),
+        ]
+
+    def test_plot_comparison_without_df_succeeds(self, two_cached_results):
+        """plot_comparison(results) without df must return a Figure.
+
+        FAILS currently — TypeError: plot_comparison() missing required
+        positional argument 'df'.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        fig, ax = fitter.plot_comparison(two_cached_results)
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_comparison_without_df_requires_cached_samples(self):
+        """plot_comparison(results) without df AND without cached_sample must raise ValueError.
+
+        When no df is provided AND results have no cached_sample, the method
+        has no data source and must raise ValueError.
+
+        FAILS currently — TypeError from missing df argument fires before
+        any ValueError logic.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+        results_no_cache = [
+            DistributionFitResult(
+                distribution="norm",
+                parameters=[50.0, 10.0],
+                sse=0.005,
+                # cached_sample intentionally absent
+            ),
+            DistributionFitResult(
+                distribution="norm",
+                parameters=[50.5, 9.5],
+                sse=0.006,
+                # cached_sample intentionally absent
+            ),
+        ]
+
+        with pytest.raises((ValueError, TypeError)):
+            fitter.plot_comparison(results_no_cache)
+
+    def test_plot_comparison_with_df_still_works(
+        self, two_cached_results, pandas_dataset
+    ):
+        """plot_comparison(results, df=..., column=...) must still work when df is provided.
+
+        Backwards-compatibility test: existing callers that pass df must not break.
+        After the fix, results carry cached_sample but df is also passed — since
+        there is a cache, a FutureWarning is emitted and the cache is used.
+
+        FAILS currently — TypeError from missing df argument (pre-fix) fires, OR
+        the method silently uses df (post-fix it will emit FutureWarning).
+        This test verifies the method at least succeeds (warning is tolerated).
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        # Allow FutureWarning (cache wins over df after the fix)
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            fig, ax = fitter.plot_comparison(
+                two_cached_results, df=pandas_dataset, column="value"
+            )
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_comparison_column_inferred_from_results(self, two_cached_results):
+        """plot_comparison() must infer column from result.column_name when df is absent.
+
+        When results carry column_name and the method uses cached_sample,
+        there is no need to pass column explicitly.
+
+        FAILS currently — TypeError from missing df argument.
+        """
+        fitter = DistributionFitter(backend=LocalBackend())
+
+        # column not passed — must be inferred from result.column_name="value"
+        fig, ax = fitter.plot_comparison(two_cached_results)
+
+        assert fig is not None
         assert isinstance(fig, plt.Figure)
         plt.close("all")
