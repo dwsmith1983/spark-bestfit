@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v3.0.2 (2026-03-31)
+
+### Bug Fixes
+
+- Plot methods now use the cached fitting sample even when `df` is passed,
+  avoiding Spark DAG recomputation that caused 10+ minute plot times at scale
+  ([#174](https://github.com/dwsmith1983/spark-bestfit/pull/174))
+
+### Features
+
+- `plot_comparison()` no longer requires `df` — uses cached samples from
+  result objects when available
+  ([#174](https://github.com/dwsmith1983/spark-bestfit/pull/174))
+
+- New `force_recompute=True` parameter on all plot methods to explicitly
+  opt into DataFrame re-evaluation when needed
+  ([#174](https://github.com/dwsmith1983/spark-bestfit/pull/174))
+
+### Deprecations
+
+- Passing `df` to plot methods when a cached sample is available now emits
+  a `FutureWarning`. Use `force_recompute=True` if DataFrame evaluation is
+  intentionally needed.
+
 ## v3.0.1 (2026-03-28)
 
 ### Bug Fixes
