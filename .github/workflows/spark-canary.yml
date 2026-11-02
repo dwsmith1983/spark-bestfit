@@ -141,7 +141,8 @@ jobs:
         if: matrix.python != null && env.VENV != ''
         continue-on-error: true
         run: |
-          "$VENV/bin/python" -m pytest -m spark --junitxml=junit.xml
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/$VENV/bin/python" "$VENV/bin/python" -m pytest -m spark --junitxml=junit.xml
       - name: Record installed packages
         id: freeze
         if: matrix.python != null && env.VENV != ''
@@ -263,7 +264,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 30
         run: |
-          .venv-base/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/.venv-base/bin/python" .venv-base/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
             tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
             --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-base-1.json
       - name: Benchmark pass 1 (target)
@@ -271,7 +273,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 30
         run: |
-          .venv-target/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/.venv-target/bin/python" .venv-target/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
             tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
             --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-target-1.json
       - name: Benchmark pass 2 (baseline)
@@ -279,7 +282,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 30
         run: |
-          .venv-base/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/.venv-base/bin/python" .venv-base/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
             tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
             --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-base-2.json
       - name: Benchmark pass 2 (target)
@@ -287,7 +291,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 30
         run: |
-          .venv-target/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/.venv-target/bin/python" .venv-target/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
             tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
             --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-target-2.json
       - name: Compare medians
@@ -326,7 +331,8 @@ jobs:
         timeout-minutes: 30
         run: |
           mapfile -t ids < regressed.txt
-          .venv-base/bin/python -m pytest "${ids[@]}" --benchmark-only \
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/.venv-base/bin/python" .venv-base/bin/python -m pytest "${ids[@]}" --benchmark-only \
             --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-base-3.json
       - name: Confirmation pass (target)
         if: steps.compare.outputs.confirm == 'true'
@@ -334,7 +340,8 @@ jobs:
         timeout-minutes: 30
         run: |
           mapfile -t ids < regressed.txt
-          .venv-target/bin/python -m pytest "${ids[@]}" --benchmark-only \
+          # Spark workers otherwise start the runner's python3, which lacks spark_bestfit.
+          PYSPARK_PYTHON="$PWD/.venv-target/bin/python" .venv-target/bin/python -m pytest "${ids[@]}" --benchmark-only \
             --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-target-3.json
       - name: Compare medians with the confirmation pass
         if: steps.compare.outputs.confirm == 'true'
