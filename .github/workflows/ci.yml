@@ -24,6 +24,7 @@ jobs:
       tests: ${{ steps.filter.outputs.tests }}
       docs: ${{ steps.filter.outputs.docs }}
       deps: ${{ steps.filter.outputs.deps }}
+      tools: ${{ steps.filter.outputs.tools }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -40,6 +41,9 @@ jobs:
               - '.readthedocs.yaml'
             deps:
               - 'pyproject.toml'
+            tools:
+              - 'scripts/spark_canary/**'
+              - 'tests/test_spark_canary_*.py'
 
   pre-commit:
     # Same skip logic as changes job
@@ -63,7 +67,8 @@ jobs:
     if: |
       needs.changes.outputs.src == 'true' ||
       needs.changes.outputs.tests == 'true' ||
-      needs.changes.outputs.deps == 'true'
+      needs.changes.outputs.deps == 'true' ||
+      needs.changes.outputs.tools == 'true'
     runs-on: ubuntu-latest
     name: Unit Tests (LocalBackend)
     steps:
