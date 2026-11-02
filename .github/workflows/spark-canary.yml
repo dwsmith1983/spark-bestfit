@@ -1,0 +1,454 @@
+# Spark release canary.
+#
+# Every Monday this asks PyPI for the newest pyspark patch of each minor from 3.5 up, tests
+# spark-bestfit against every one of them, A/B benchmarks the two newest minors, and opens or
+# comments on `spark-canary` issues for what it finds. The logic lives in scripts/spark_canary;
+# this file only wires the jobs together.
+#
+# pull_request runs (changes to the canary itself) are dry runs: they print the issues they would
+# file and use fewer benchmark rounds. A workflow_dispatch run from any branch files real issues,
+# exactly like the scheduled run, so only dispatch it when that is what you want.
+name: Spark release canary
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/spark_canary/**"
+      - ".github/workflows/spark-canary.yml"
+
+concurrency:
+  group: spark-canary-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+defaults:
+  run:
+    # bash runs with -eo pipefail, which the pip stderr capture below relies on.
+    shell: bash
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      targets: ${{ steps.plan.outputs.targets }}
+      bench: ${{ steps.plan.outputs.bench }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install helper dependencies
+        run: |
+          python -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt ||
+            python -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt
+      - name: Resolve canary targets from PyPI
+        id: plan
+        run: |
+          PYTHONPATH=scripts python -m spark_canary resolve --pyproject pyproject.toml > plan.json
+          cat plan.json
+          targets=$(jq -c .targets plan.json)
+          bench=$(jq -c .bench plan.json)
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          echo "bench=$bench" >> "$GITHUB_OUTPUT"
+
+  compat:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: compat (pyspark ${{ matrix.spark }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Interpreter for the canary helper itself, kept apart from the venvs under test.
+      - uses: actions/setup-python@v7
+        id: tools
+        with:
+          python-version: "3.12"
+      - name: Install helper dependencies
+        env:
+          TOOLS_PY: ${{ steps.tools.outputs.python-path }}
+        run: |
+          "$TOOLS_PY" -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt ||
+            "$TOOLS_PY" -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt
+      - uses: actions/setup-python@v7
+        id: py
+        if: matrix.python != null
+        with:
+          python-version: ${{ matrix.python }}
+      # Spark 3.5 runs on Java 8, 11 and 17; Spark 4.x needs 17 or 21.
+      - uses: actions/setup-java@v6
+        if: matrix.python != null
+        with:
+          distribution: temurin
+          java-version: ${{ startsWith(matrix.spark, '3.') && '17' || '21' }}
+
+      # Each install retries once and appends pip's stderr to pip-error.txt, which `record` reads
+      # to tell a network blip from a real resolution failure. A successful install exports VENV.
+      - name: Install with the project's dependency caps
+        id: constrained
+        if: matrix.python != null && matrix.in_range
+        continue-on-error: true
+        env:
+          PY: ${{ steps.py.outputs.python-path }}
+          SPARK: ${{ matrix.spark }}
+        run: |
+          pip_try() { { "$@" 2>&1 >&3 | tee -a pip-error.txt >&2; } 3>&1; }
+          pip_retry() { pip_try "$@" || pip_try "$@"; }
+          "$PY" -m venv .venv-constrained
+          pip_retry .venv-constrained/bin/pip install --retries 5 --timeout 60 \
+            -e ".[spark,test-base]" "pyspark[sql]==$SPARK"
+          echo "VENV=.venv-constrained" >> "$GITHUB_ENV"
+      - name: Install without the project's caps (fresh venv)
+        id: fallback
+        if: matrix.python != null && steps.constrained.outcome != 'success'
+        continue-on-error: true
+        env:
+          PY: ${{ steps.py.outputs.python-path }}
+          SPARK: ${{ matrix.spark }}
+        run: |
+          pip_try() { { "$@" 2>&1 >&3 | tee -a pip-error.txt >&2; } 3>&1; }
+          pip_retry() { pip_try "$@" || pip_try "$@"; }
+          "$PY" -m venv .venv-fallback
+          pip_retry .venv-fallback/bin/pip install --retries 5 --timeout 60 \
+            -e ".[test-base]" "pyspark[sql]==$SPARK"
+          echo "VENV=.venv-fallback" >> "$GITHUB_ENV"
+      - name: Install setuptools (distutils for pyspark 3.x on Python 3.12+)
+        id: setuptools
+        if: matrix.python != null && matrix.setuptools && env.VENV != ''
+        continue-on-error: true
+        run: |
+          pip_try() { { "$@" 2>&1 >&3 | tee -a pip-error.txt >&2; } 3>&1; }
+          pip_retry() { pip_try "$@" || pip_try "$@"; }
+          pip_retry "$VENV/bin/pip" install --retries 5 --timeout 60 setuptools
+      - name: Run Spark tests
+        id: tests
+        if: matrix.python != null && env.VENV != ''
+        continue-on-error: true
+        run: |
+          "$VENV/bin/python" -m pytest -m spark --junitxml=junit.xml
+      - name: Record installed packages
+        id: freeze
+        if: matrix.python != null && env.VENV != ''
+        continue-on-error: true
+        run: |
+          "$VENV/bin/pip" freeze > freeze.txt
+
+      # Runs after tolerated install or test failures and on timeout, but not after a setup step
+      # above broke: that is a canary malfunction, and recording it would file a false finding.
+      - name: Record result
+        if: always() && !failure()
+        env:
+          TOOLS_PY: ${{ steps.tools.outputs.python-path }}
+          SPARK: ${{ matrix.spark }}
+          PYTHON: ${{ matrix.python }}
+          IN_RANGE: ${{ matrix.in_range }}
+          CONSTRAINED: ${{ steps.constrained.outcome }}
+          UNCONSTRAINED: ${{ steps.fallback.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary record \
+            --spark "$SPARK" --python "$PYTHON" --in-range "$IN_RANGE" \
+            --constrained "$CONSTRAINED" --unconstrained "$UNCONSTRAINED" --tests "$TESTS" \
+            --junit junit.xml --freeze freeze.txt --pip-error pip-error.txt \
+            --out "result-$SPARK.json"
+          cat "result-$SPARK.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: canary-result-${{ matrix.spark }}
+          path: result-${{ matrix.spark }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  bench:
+    needs: resolve
+    # Dependabot's action bumps touch this file; a 150-minute A/B per bump buys nothing.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      BASELINE: ${{ fromJSON(needs.resolve.outputs.bench).baseline }}
+      TARGET: ${{ fromJSON(needs.resolve.outputs.bench).target }}
+      BENCH_PYTHON: ${{ fromJSON(needs.resolve.outputs.bench).python }}
+      # 23 benchmarks, about 5 s per round for the 1M-row cases; 5 rounds keeps the six passes
+      # inside the job timeout. PR runs only check the wiring.
+      ROUNDS: ${{ github.event_name == 'pull_request' && '2' || '5' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        id: tools
+        with:
+          python-version: "3.12"
+      - name: Install helper dependencies
+        env:
+          TOOLS_PY: ${{ steps.tools.outputs.python-path }}
+        run: |
+          "$TOOLS_PY" -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt ||
+            "$TOOLS_PY" -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt
+      - uses: actions/setup-python@v7
+        id: py
+        if: env.BENCH_PYTHON != ''
+        with:
+          python-version: ${{ env.BENCH_PYTHON }}
+      # One JVM for both sides: 17 while the baseline is Spark 3.x (both sides run on it),
+      # otherwise 21, which every Spark 4.x supports.
+      - uses: actions/setup-java@v6
+        if: env.BENCH_PYTHON != ''
+        with:
+          distribution: temurin
+          java-version: ${{ startsWith(fromJSON(needs.resolve.outputs.bench).baseline, '3.') && '17' || '21' }}
+
+      # Same install as compat: caps first, then a fresh venv without them. setuptools goes into
+      # both venvs; pyspark 3.x needs it on Python 3.12+ and it is inert for 4.x.
+      - name: Install baseline and target venvs
+        id: install
+        if: env.BENCH_PYTHON != ''
+        continue-on-error: true
+        env:
+          PY: ${{ steps.py.outputs.python-path }}
+        run: |
+          pip_try() { { "$@" 2>&1 >&3 | tee -a pip-error.txt >&2; } 3>&1; }
+          pip_retry() { pip_try "$@" || pip_try "$@"; }
+          install_side() {
+            local venv=$1 spark=$2
+            "$PY" -m venv "$venv"
+            if ! pip_retry "$venv/bin/pip" install --retries 5 --timeout 60 \
+                -e ".[spark,test-base]" "pyspark[sql]==$spark" "pytest-benchmark>=5.0.0"; then
+              echo "::warning::pyspark $spark does not install with the project's caps; retrying without them"
+              rm -rf "$venv"
+              "$PY" -m venv "$venv"
+              pip_retry "$venv/bin/pip" install --retries 5 --timeout 60 \
+                -e ".[test-base]" "pyspark[sql]==$spark" "pytest-benchmark>=5.0.0"
+            fi
+            pip_retry "$venv/bin/pip" install --retries 5 --timeout 60 setuptools
+          }
+          install_side .venv-base "$BASELINE"
+          install_side .venv-target "$TARGET"
+      - name: Skip the comparison
+        if: steps.install.outcome != 'success'
+        env:
+          TOOLS_PY: ${{ steps.tools.outputs.python-path }}
+        run: |
+          if [ -z "$BENCH_PYTHON" ]; then
+            reason="no Python version is listed by both pyspark $BASELINE and pyspark $TARGET"
+          else
+            reason="pyspark $BASELINE or pyspark $TARGET could not be installed for benchmarking (see the bench job log)"
+          fi
+          PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --skip "$reason" \
+            --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json
+
+      # Interleaved passes, each a fresh pytest process and JVM.
+      - name: Benchmark pass 1 (baseline)
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          .venv-base/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+            tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
+            --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-base-1.json
+      - name: Benchmark pass 1 (target)
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          .venv-target/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+            tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
+            --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-target-1.json
+      - name: Benchmark pass 2 (baseline)
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          .venv-base/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+            tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
+            --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-base-2.json
+      - name: Benchmark pass 2 (target)
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          .venv-target/bin/python -m pytest tests/benchmarks/test_benchmark_scaling.py \
+            tests/benchmarks/test_benchmark_discrete.py --benchmark-only \
+            --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-target-2.json
+      - name: Compare medians
+        id: compare
+        if: steps.install.outcome == 'success'
+        env:
+          TOOLS_PY: ${{ steps.tools.outputs.python-path }}
+        run: |
+          shopt -s nullglob
+          base=(bench-base-*.json)
+          target=(bench-target-*.json)
+          # A side with no JSON at all means every pass on it failed: log a skip, keep the run green.
+          empty=()
+          if [ ${#base[@]} -eq 0 ]; then empty+=("pyspark $BASELINE"); fi
+          if [ ${#target[@]} -eq 0 ]; then empty+=("pyspark $TARGET"); fi
+          if [ ${#empty[@]} -gt 0 ]; then
+            printf -v who '%s and ' "${empty[@]}"
+            PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare \
+              --skip "no benchmark results for ${who% and } (every pass failed; see the bench job log)" \
+              --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json
+            exit 0
+          fi
+          PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --baseline "${base[@]}" --target "${target[@]}" \
+            --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json > regressed.txt
+          if [ -s regressed.txt ]; then
+            echo "Regressed, confirming:"
+            cat regressed.txt
+            echo "confirm=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Re-run only the flagged benchmarks once more on each side, then compare all six files.
+      - name: Confirmation pass (baseline)
+        if: steps.compare.outputs.confirm == 'true'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          mapfile -t ids < regressed.txt
+          .venv-base/bin/python -m pytest "${ids[@]}" --benchmark-only \
+            --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-base-3.json
+      - name: Confirmation pass (target)
+        if: steps.compare.outputs.confirm == 'true'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          mapfile -t ids < regressed.txt
+          .venv-target/bin/python -m pytest "${ids[@]}" --benchmark-only \
+            --benchmark-min-rounds="$ROUNDS" --benchmark-json=bench-target-3.json
+      - name: Compare medians with the confirmation pass
+        if: steps.compare.outputs.confirm == 'true'
+        env:
+          TOOLS_PY: ${{ steps.tools.outputs.python-path }}
+        run: |
+          shopt -s nullglob
+          base=(bench-base-*.json)
+          target=(bench-target-*.json)
+          # A side with no JSON at all means every pass on it failed: log a skip, keep the run green.
+          empty=()
+          if [ ${#base[@]} -eq 0 ]; then empty+=("pyspark $BASELINE"); fi
+          if [ ${#target[@]} -eq 0 ]; then empty+=("pyspark $TARGET"); fi
+          if [ ${#empty[@]} -gt 0 ]; then
+            printf -v who '%s and ' "${empty[@]}"
+            PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare \
+              --skip "no benchmark results for ${who% and } (every pass failed; see the bench job log)" \
+              --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json
+            exit 0
+          fi
+          PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --baseline "${base[@]}" --target "${target[@]}" \
+            --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json > confirmed.txt
+          echo "Still regressed after confirmation:"
+          cat confirmed.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: canary-bench
+          path: |
+            comparison.json
+            bench-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  report:
+    needs: [resolve, compat, bench]
+    if: always() && needs.resolve.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install helper dependencies
+        run: |
+          python -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt ||
+            python -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: canary-result-*
+          merge-multiple: true
+          path: results
+      - uses: actions/download-artifact@v8
+        if: needs.bench.result != 'skipped'
+        continue-on-error: true
+        with:
+          name: canary-bench
+          path: bench
+      - name: Record the skipped benchmark
+        if: needs.bench.result == 'skipped'
+        env:
+          BASELINE: ${{ fromJSON(needs.resolve.outputs.bench).baseline }}
+          TARGET: ${{ fromJSON(needs.resolve.outputs.bench).target }}
+        run: |
+          mkdir -p bench
+          PYTHONPATH=scripts python -m spark_canary compare --skip "bench skipped for Dependabot" \
+            --baseline-version "$BASELINE" --target-version "$TARGET" --out bench/comparison.json
+      - name: File or update issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGETS: ${{ needs.resolve.outputs.targets }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' }}
+        run: |
+          dry_run=()
+          if [ "$DRY_RUN" = "true" ]; then dry_run=(--dry-run); fi
+          PYTHONPATH=scripts python -m spark_canary report --targets "$TARGETS" --results-dir results \
+            --comparison bench/comparison.json \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "${dry_run[@]}"
+
+  canary-failed:
+    needs: [resolve, compat, bench, report]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install helper dependencies
+        run: |
+          python -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt ||
+            python -m pip install --retries 5 --timeout 60 --require-hashes --only-binary :all: --no-deps -r scripts/spark_canary/requirements.txt
+      - name: File or update the workflow-failing issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEEDS: ${{ toJSON(needs) }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' }}
+        run: |
+          dry_run=()
+          if [ "$DRY_RUN" = "true" ]; then dry_run=(--dry-run); fi
+          PYTHONPATH=scripts python -m spark_canary report-failure --needs "$NEEDS" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "${dry_run[@]}"
+      - name: Fail the run
+        if: always()
+        run: exit 1
