@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="1" failures="1" skipped="1" tests="4" time="3.000" timestamp="2026-11-02T06:00:00.000000+00:00" hostname="runner">
+    <testcase classname="tests.test_core.TestFit" name="test_fit_normal" time="0.500" />
+    <testcase classname="tests.test_core.TestFit" name="test_fit_broken[norm]" time="0.500">
+      <failure message="AssertionError: assert 1 == 2">assert 1 == 2</failure>
+    </testcase>
+    <testcase classname="tests.test_spark_backend" name="test_session" time="1.000">
+      <error message="failed on setup with &quot;Py4JError&quot;">Py4JError</error>
+    </testcase>
+    <testcase classname="tests.test_core.TestFit" name="test_optional" time="0.000">
+      <skipped type="pytest.skip" message="optional dependency missing">skipped</skipped>
+    </testcase>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="0" skipped="1" tests="3" time="2.000" timestamp="2026-11-02T06:00:00.000000+00:00" hostname="runner">
+    <testcase classname="tests.test_core.TestFit" name="test_fit_normal" time="0.500" />
+    <testcase classname="tests.test_spark_backend" name="test_session[local]" time="1.000" />
+    <testcase classname="tests.test_core.TestFit" name="test_optional" time="0.000">
+      <skipped type="pytest.skip" message="optional dependency missing">skipped</skipped>
+    </testcase>
+  </testsuite>
+</testsuites>
