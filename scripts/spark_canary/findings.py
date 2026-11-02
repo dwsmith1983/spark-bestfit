@@ -25,7 +25,7 @@ TRACKED_PACKAGES = ("pyspark", "numpy", "pandas", "pyarrow")
 # Only these mean "the network or the index let us down"; anything else pip prints is a real install failure.
 TRANSIENT_PATTERN = re.compile(
     r"ReadTimeoutError|ConnectTimeoutError|ConnectionError|NewConnectionError|Max retries exceeded"
-    r"|Temporary failure in name resolution|ProtocolError|HTTP error 5\d\d"
+    r"|Temporary failure in name resolution|ProtocolError|HTTP error (?:5\d\d|429)|Too Many Requests"
     r"|\b5\d\d (?:Server Error|Service Unavailable|Bad Gateway|Gateway Time-?out|Internal Server Error)"
 )
 REASON_MARKERS = (
@@ -75,7 +75,12 @@ def derive_install_flags(constrained: Outcome, unconstrained: Outcome) -> tuple[
 
 
 def classify_pip_error(text: str) -> PipErrorKind:
-    """``transient`` only for known network or index trouble; build and resolve failures are ``resolution``."""
+    """``transient`` only for known network or index trouble; build and resolve failures are ``resolution``.
+
+    A resolver verdict wins over network noise: pip logs retry warnings and still reaches a real answer.
+    """
+    if any(marker in text for marker in REASON_MARKERS):
+        return "resolution"
     return "transient" if TRANSIENT_PATTERN.search(text) else "resolution"
 
 
@@ -358,22 +363,44 @@ def _bench_table(heading: str, rows: list[Comparison]) -> str:
     return "\n".join(lines)
 
 
-def findings_for_bench(rows: list[Comparison], baseline: str, target: str, run_url: str) -> list[Finding]:
-    """One regression finding when any benchmark regressed; speedups and missing rows are listed, never filed."""
+def _bench_packages(baseline: Mapping[str, str], target: Mapping[str, str]) -> str:
+    rows = [
+        f"| {name} | {_cell(baseline.get(name, 'not installed'))} | {_cell(target.get(name, 'not installed'))} |"
+        for name in TRACKED_PACKAGES
+    ]
+    return "\n".join(["| package | baseline | target |", "|---|---|---|", *rows])
+
+
+def findings_for_bench(
+    rows: list[Comparison],
+    baseline: str,
+    target: str,
+    run_url: str,
+    baseline_packages: Mapping[str, str] | None = None,
+    target_packages: Mapping[str, str] | None = None,
+    python: str | None = None,
+) -> list[Finding]:
+    """One regression finding when any benchmark regressed; speedups and missing rows are listed, never filed.
+
+    The fingerprint covers only which benchmarks regressed, so run-to-run ratio jitter doesn't re-comment.
+    """
     by_status = {status: [r for r in rows if r.status == status] for status in ("regression", "speedup", "missing")}
     if not by_status["regression"]:
         return []
+    same_python = f"both on Python {_cell(str(python))}" if python else "same Python"
     sections = [
         f"Benchmarks on pyspark {target} are more than 10% slower than on pyspark {baseline} "
-        "(median over interleaved passes, same Python and runner).",
+        f"(median over interleaved passes, {same_python} and runner).",
         f"Run: {run_url}",
-        _bench_table("Regressions", by_status["regression"]),
     ]
+    if baseline_packages or target_packages:
+        sections.append(_bench_packages(baseline_packages or {}, target_packages or {}))
+    sections.append(_bench_table("Regressions", by_status["regression"]))
     if by_status["speedup"]:
         sections.append(_bench_table("Speedups", by_status["speedup"]))
     if by_status["missing"]:
         sections.append(_bench_table("Missing on one side", by_status["missing"]))
-    details = "\n".join(sorted(f"{row.name} {row.ratio:.2f}" for row in by_status["regression"]))
+    details = "\n".join(sorted(row.name for row in by_status["regression"]))
     body, fingerprint = _assemble(details, sections)
     return [Finding(regression_title(target, baseline), (CANARY_LABEL, "performance"), body, fingerprint)]
 

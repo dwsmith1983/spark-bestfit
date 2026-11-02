@@ -52,6 +52,24 @@ def test_load_rounds_rejects_unreadable_json(tmp_path):
         load_rounds([bad])
 
 
+@pytest.mark.parametrize(
+    ("label", "entry"),
+    [
+        ("null_stats", {"fullname": TOGETHER, "stats": None}),
+        ("text_round", {"fullname": TOGETHER, "stats": {"data": [1.0, "fast"]}}),
+        ("null_round", {"fullname": TOGETHER, "stats": {"data": [1.0, None]}}),
+        ("data_not_list", {"fullname": TOGETHER, "stats": {"data": "1.0"}}),
+        ("no_fullname", {"stats": {"data": [1.0]}}),
+    ],
+)
+def test_load_rounds_rejects_malformed_entries(tmp_path, label, entry):
+    bad = tmp_path / f"bench_{label}.json"
+    bad.write_text(json.dumps({"benchmarks": [entry]}))
+
+    with pytest.raises(ValueError, match=f"bench_{label}.json"):
+        load_rounds([bad])
+
+
 def test_load_rounds_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_rounds([tmp_path / "never_written.json"])
@@ -135,9 +153,22 @@ def test_compare_skip_writes_marker(tmp_path, capsys):
     assert exit_code == 0
     assert capsys.readouterr().out == ""
     result = json.loads(out.read_text())
-    assert result == {"baseline": None, "target": "4.1.0", "skipped": "no common Python", "rows": []}
+    assert result == {"baseline": None, "target": "4.1.0", "skipped": "no common Python", "python": None, "rows": []}
+
+
+def test_compare_cli_records_python(tmp_path):
+    out = tmp_path / "comparison.json"
+    args = ["compare", "--baseline", str(BASELINE_FILES[0]), "--target", str(TARGET_FILES[0])]
+
+    assert cli.main(args + ["--python", "3.12", "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["python"] == "3.12"
+
+    assert cli.main(["compare", "--skip", "x", "--python", "", "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["python"] is None
 
 
 def test_compare_cli_requires_both_sides_without_skip(tmp_path):
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc:
         cli.main(["compare", "--baseline", str(BASELINE_FILES[0]), "--out", str(tmp_path / "c.json")])
+
+    assert exc.value.code == 2

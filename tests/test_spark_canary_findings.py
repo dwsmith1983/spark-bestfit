@@ -194,6 +194,14 @@ def test_derive_install_flags(constrained, unconstrained, expected):
         ("ProtocolError('Connection aborted.')", "transient"),
         ("ERROR: HTTP error 503 while getting https://files.pythonhosted.org/x.whl", "transient"),
         ("503 Service Unavailable for url: https://pypi.org/simple/pyspark/", "transient"),
+        ("ERROR: HTTP error 429 while getting https://files.pythonhosted.org/x.whl", "transient"),
+        ("429 Client Error: Too Many Requests for url: https://pypi.org/simple/pyspark/", "transient"),
+        (
+            "WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection "
+            "broken by 'NewConnectionError(...)': /simple/pyarrow/\n"
+            "ERROR: Cannot install pyarrow<19 and pyarrow>=19\nERROR: ResolutionImpossible: for help visit x",
+            "resolution",
+        ),
     ],
 )
 def test_classify_pip_error(text, expected):
@@ -341,13 +349,59 @@ def test_bench_body_lists_missing():
     assert "only_target" in finding.body
 
 
-def test_bench_fingerprint_rounds_ratios_and_ignores_run_url():
-    [first] = findings_for_bench([Comparison("bench_slow", 1.0, 1.501)], "4.0.1", "4.1.1", RUN_URL)
-    [second] = findings_for_bench([Comparison("bench_slow", 1.0, 1.499)], "4.0.1", "4.1.1", "https://x/2")
-    [third] = findings_for_bench([Comparison("bench_slow", 1.0, 1.6)], "4.0.1", "4.1.1", RUN_URL)
+def test_bench_fingerprint_ignores_ratios_and_run_url():
+    slow = [Comparison("bench_slow", 1.0, 1.5), Comparison("bench_slower", 1.0, 2.0)]
+    noisier = [Comparison("bench_slower", 1.0, 3.1), Comparison("bench_slow", 1.0, 1.2), Comparison("f", 1.0, 0.5)]
+
+    [first] = findings_for_bench(slow, "4.0.1", "4.1.1", RUN_URL)
+    [second] = findings_for_bench(noisier, "4.0.1", "4.1.1", "https://x/2")
 
     assert first.fingerprint == second.fingerprint
-    assert first.fingerprint != third.fingerprint
+    assert "1.50" in first.body
+    assert "3.10" in second.body
+
+
+def test_bench_fingerprint_changes_with_regressed_names():
+    [one] = findings_for_bench([Comparison("bench_slow", 1.0, 1.5)], "4.0.1", "4.1.1", RUN_URL)
+    [two] = findings_for_bench(
+        [Comparison("bench_slow", 1.0, 1.5), Comparison("bench_other", 1.0, 1.5)], "4.0.1", "4.1.1", RUN_URL
+    )
+    [other] = findings_for_bench([Comparison("bench_other", 1.0, 1.5)], "4.0.1", "4.1.1", RUN_URL)
+
+    assert len({one.fingerprint, two.fingerprint, other.fingerprint}) == 3
+
+
+def test_bench_body_shows_package_versions_per_side():
+    base = {"pyspark": "4.0.1", "numpy": "2.1.3", "pandas": "2.2.3", "pyarrow": "18.1.0"}
+    target = {"pyspark": "4.1.1", "numpy": "2.2|@evil", "pandas": "2.2.3"}
+    rows = [Comparison("bench_slow", 1.0, 1.5)]
+
+    [finding] = findings_for_bench(
+        rows, "4.0.1", "4.1.1", RUN_URL, baseline_packages=base, target_packages=target, python="3.12"
+    )
+    [plain] = findings_for_bench(rows, "4.0.1", "4.1.1", RUN_URL)
+
+    body = finding.body
+    assert "| package | baseline | target |" in body
+    assert "| pyspark | 4.0.1 | 4.1.1 |" in body
+    assert "| numpy | 2.1.3 | 2.2\\|@​evil |" in body
+    assert "| pandas | 2.2.3 | 2.2.3 |" in body
+    assert "| pyarrow | 18.1.0 | not installed |" in body
+    assert "@evil" not in body
+    assert "Python 3.12" in body
+    assert body.index("| package | baseline | target |") < body.index("### Regressions")
+    assert finding.fingerprint == plain.fingerprint
+
+
+def test_bench_body_omits_package_table_without_package_data():
+    [finding] = findings_for_bench([Comparison("bench_slow", 1.0, 1.5)], "4.0.1", "4.1.1", RUN_URL)
+    [empty] = findings_for_bench(
+        [Comparison("bench_slow", 1.0, 1.5)], "4.0.1", "4.1.1", RUN_URL, baseline_packages={}, target_packages={}
+    )
+
+    for body in (finding.body, empty.body):
+        assert "| package | baseline | target |" not in body
+        assert "Python None" not in body
 
 
 # --- checklist ---

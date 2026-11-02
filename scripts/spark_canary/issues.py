@@ -16,7 +16,7 @@ Runner = Callable[[list[str]], str]
 UpsertResult = Literal["created", "commented", "unchanged", "dry-run"]
 
 LABEL_COLOR = "FBCA04"
-SEARCH_LIMIT = "50"
+LIST_LIMIT = "200"
 FINGERPRINT_RE = re.compile(r"<!-- canary-fingerprint: ([0-9a-f]{64}) -->")
 
 
@@ -29,22 +29,24 @@ def gh(args: list[str]) -> str:
 
 
 def _find_issue(title: str, state: str, run: Runner) -> dict[str, Any] | None:
-    """The issue whose title equals ``title`` exactly, preferring an open one; search is only a prefilter."""
+    """The issue whose title equals ``title`` exactly, preferring an open one.
+
+    Lists by label rather than ``--search``: the search index lags new issues, which would let a second
+    run create a duplicate. Title matching happens here.
+    """
     listed = json.loads(
         run(
             [
                 "issue",
                 "list",
-                "--state",
-                state,
                 "--label",
                 CANARY_LABEL,
-                "--search",
-                f'"{title}" in:title',
+                "--state",
+                state,
                 "--json",
                 "number,title,state",
                 "--limit",
-                SEARCH_LIMIT,
+                LIST_LIMIT,
             ]
         )
     )

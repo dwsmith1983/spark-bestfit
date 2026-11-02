@@ -62,16 +62,14 @@ def test_creates_when_none_open():
     assert gh.calls[1] == [
         "issue",
         "list",
-        "--state",
-        "open",
         "--label",
         "spark-canary",
-        "--search",
-        f'"{TITLE}" in:title',
+        "--state",
+        "open",
         "--json",
         "number,title,state",
         "--limit",
-        "50",
+        "200",
     ]
     create = gh.calls[2]
     assert create[:2] == ["issue", "create"]
@@ -157,7 +155,18 @@ def test_passes_outside_range_searches_all_states_and_never_reopens():
     assert upsert(_finding(OUTSIDE, ("spark-canary", "dependencies")), gh) == "unchanged"
 
     listing = gh.calls[1]
-    assert listing[listing.index("--state") + 1] == "all"
+    assert listing == [
+        "issue",
+        "list",
+        "--label",
+        "spark-canary",
+        "--state",
+        "all",
+        "--json",
+        "number,title,state",
+        "--limit",
+        "200",
+    ]
     assert gh.verbs() == [("label", "create"), ("issue", "list")]
 
 
@@ -295,6 +304,51 @@ def test_report_files_bench_regression_and_passes_dry_run(tmp_path, monkeypatch)
     assert code == 0
     assert fake.titles == ["Spark canary: performance regression on pyspark 4.1.1 vs 4.0.1"]
     assert fake.dry_runs == [True]
+
+
+def _capture_upserts(monkeypatch) -> list[Finding]:
+    captured: list[Finding] = []
+    monkeypatch.setattr(cli, "upsert", lambda f, run, dry_run=False: captured.append(f) or "created")
+    return captured
+
+
+def _write_regression(bench: Path, python: str | None = None) -> Path:
+    bench.mkdir(exist_ok=True)
+    comparison = bench / "comparison.json"
+    rows = [{"name": "bench_slow", "baseline_median": 1.0, "target_median": 2.0}]
+    data = {"baseline": "4.0.1", "target": "4.1.1", "skipped": None, "python": python, "rows": rows}
+    comparison.write_text(json.dumps(data))
+    return comparison
+
+
+def test_report_shows_bench_package_versions_from_freeze_files(tmp_path, monkeypatch):
+    captured = _capture_upserts(monkeypatch)
+    _write_result(tmp_path / "results", "4.1.1")
+    comparison = _write_regression(tmp_path / "bench", python="3.12")
+    (tmp_path / "bench" / "freeze-base.txt").write_text("numpy==2.1.3\npyspark==4.0.1\nscipy==1.14.1\n")
+    (tmp_path / "bench" / "freeze-target.txt").write_text("numpy==2.2.0\npyspark==4.1.1\npyarrow==18.1.0\n")
+
+    code = _report(tmp_path, [_target("4.1.1")], comparison)
+
+    assert code == 0
+    [finding] = captured
+    assert "| pyspark | 4.0.1 | 4.1.1 |" in finding.body
+    assert "| numpy | 2.1.3 | 2.2.0 |" in finding.body
+    assert "| pyarrow | not installed | 18.1.0 |" in finding.body
+    assert "scipy" not in finding.body
+    assert "Python 3.12" in finding.body
+
+
+def test_report_without_freeze_files_has_no_package_table(tmp_path, monkeypatch):
+    captured = _capture_upserts(monkeypatch)
+    _write_result(tmp_path / "results", "4.1.1")
+    comparison = _write_regression(tmp_path / "bench")
+
+    code = _report(tmp_path, [_target("4.1.1")], comparison)
+
+    assert code == 0
+    [finding] = captured
+    assert "| package | baseline | target |" not in finding.body
 
 
 def test_report_logs_out_of_range_uninstallable_to_step_summary(tmp_path, monkeypatch, capsys):

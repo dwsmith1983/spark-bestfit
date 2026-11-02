@@ -53,6 +53,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         "baseline": args.baseline_version,
         "target": args.target_version,
         "skipped": args.skip,
+        "python": args.python or None,
         "rows": [row.to_json() for row in rows],
     }
     args.out.write_text(json.dumps(result, indent=2) + "\n")
@@ -127,13 +128,23 @@ def _target_findings(targets: list[dict], results_dir: Path, run_url: str) -> tu
 
 
 def _bench_findings(comparison: Path, run_url: str) -> tuple[list[Finding], bool]:
+    """Regression findings from ``comparison``; ``freeze-base.txt`` and ``freeze-target.txt`` beside it are optional."""
     try:
         data = json.loads(comparison.read_text())
         if data.get("skipped"):
             _log_summary(f"Benchmark comparison skipped: {data['skipped']}")
             return [], False
         rows = [Comparison.from_json(row) for row in data["rows"]]
-        return findings_for_bench(rows, data["baseline"], data["target"], run_url), False
+        findings = findings_for_bench(
+            rows,
+            data["baseline"],
+            data["target"],
+            run_url,
+            baseline_packages=parse_freeze(_read_optional(comparison.parent / "freeze-base.txt")),
+            target_packages=parse_freeze(_read_optional(comparison.parent / "freeze-target.txt")),
+            python=data.get("python"),
+        )
+        return findings, False
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"benchmark comparison {comparison} unusable: {exc!r}", file=sys.stderr)
         return [], True
@@ -192,6 +203,7 @@ def _parser() -> argparse.ArgumentParser:
     compare_cmd.add_argument("--target", type=Path, nargs="+", help="target --benchmark-json files")
     compare_cmd.add_argument("--baseline-version")
     compare_cmd.add_argument("--target-version")
+    compare_cmd.add_argument("--python", help="Python both sides ran on; empty means unknown")
     compare_cmd.add_argument("--skip", metavar="REASON", help="record that the comparison was skipped and why")
     compare_cmd.add_argument("--out", type=Path, required=True)
     compare_cmd.set_defaults(func=_cmd_compare)

@@ -149,8 +149,9 @@ jobs:
         run: |
           "$VENV/bin/pip" freeze > freeze.txt
 
-      # Runs after tolerated install or test failures and on timeout, but not after a setup step
-      # above broke: that is a canary malfunction, and recording it would file a false finding.
+      # Runs after tolerated install or test failures, but not after a setup step above broke:
+      # that is a canary malfunction, and recording it would file a false finding. A job timeout
+      # leaves the cut-off step `cancelled`, which `record` rejects, so a timeout ends the run red.
       - name: Record result
         if: always() && !failure()
         env:
@@ -216,7 +217,8 @@ jobs:
           java-version: ${{ startsWith(fromJSON(needs.resolve.outputs.bench).baseline, '3.') && '17' || '21' }}
 
       # Same install as compat: caps first, then a fresh venv without them. setuptools goes into
-      # both venvs; pyspark 3.x needs it on Python 3.12+ and it is inert for 4.x.
+      # both venvs; pyspark 3.x needs it on Python 3.12+ and it is inert for 4.x. Each side's
+      # pip freeze goes into the artifact so a regression issue can show its package versions.
       - name: Install baseline and target venvs
         id: install
         if: env.BENCH_PYTHON != ''
@@ -227,7 +229,7 @@ jobs:
           pip_try() { { "$@" 2>&1 >&3 | tee -a pip-error.txt >&2; } 3>&1; }
           pip_retry() { pip_try "$@" || pip_try "$@"; }
           install_side() {
-            local venv=$1 spark=$2
+            local venv=$1 spark=$2 freeze=$3
             "$PY" -m venv "$venv"
             if ! pip_retry "$venv/bin/pip" install --retries 5 --timeout 60 \
                 -e ".[spark,test-base]" "pyspark[sql]==$spark" "pytest-benchmark>=5.0.0"; then
@@ -238,9 +240,10 @@ jobs:
                 -e ".[test-base]" "pyspark[sql]==$spark" "pytest-benchmark>=5.0.0"
             fi
             pip_retry "$venv/bin/pip" install --retries 5 --timeout 60 setuptools
+            "$venv/bin/pip" freeze > "$freeze"
           }
-          install_side .venv-base "$BASELINE"
-          install_side .venv-target "$TARGET"
+          install_side .venv-base "$BASELINE" freeze-base.txt
+          install_side .venv-target "$TARGET" freeze-target.txt
       - name: Skip the comparison
         if: steps.install.outcome != 'success'
         env:
@@ -251,7 +254,7 @@ jobs:
           else
             reason="pyspark $BASELINE or pyspark $TARGET could not be installed for benchmarking (see the bench job log)"
           fi
-          PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --skip "$reason" \
+          PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --skip "$reason" --python "$BENCH_PYTHON" \
             --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json
 
       # Interleaved passes, each a fresh pytest process and JVM.
@@ -302,13 +305,14 @@ jobs:
           if [ ${#target[@]} -eq 0 ]; then empty+=("pyspark $TARGET"); fi
           if [ ${#empty[@]} -gt 0 ]; then
             printf -v who '%s and ' "${empty[@]}"
-            PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare \
+            PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --python "$BENCH_PYTHON" \
               --skip "no benchmark results for ${who% and } (every pass failed; see the bench job log)" \
               --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json
             exit 0
           fi
           PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --baseline "${base[@]}" --target "${target[@]}" \
-            --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json > regressed.txt
+            --python "$BENCH_PYTHON" --baseline-version "$BASELINE" --target-version "$TARGET" \
+            --out comparison.json > regressed.txt
           if [ -s regressed.txt ]; then
             echo "Regressed, confirming:"
             cat regressed.txt
@@ -338,30 +342,38 @@ jobs:
           TOOLS_PY: ${{ steps.tools.outputs.python-path }}
         run: |
           shopt -s nullglob
-          base=(bench-base-*.json)
-          target=(bench-target-*.json)
-          # A side with no JSON at all means every pass on it failed: log a skip, keep the run green.
-          empty=()
-          if [ ${#base[@]} -eq 0 ]; then empty+=("pyspark $BASELINE"); fi
-          if [ ${#target[@]} -eq 0 ]; then empty+=("pyspark $TARGET"); fi
-          if [ ${#empty[@]} -gt 0 ]; then
-            printf -v who '%s and ' "${empty[@]}"
-            PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare \
-              --skip "no benchmark results for ${who% and } (every pass failed; see the bench job log)" \
+          # A confirmation pass that wrote no JSON confirms nothing: record a skip instead of filing
+          # the first comparison's unconfirmed regression, and keep the run green.
+          missing=()
+          if [ ! -s bench-base-3.json ]; then missing+=("pyspark $BASELINE"); fi
+          if [ ! -s bench-target-3.json ]; then missing+=("pyspark $TARGET"); fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf -v who '%s and ' "${missing[@]}"
+            PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --python "$BENCH_PYTHON" \
+              --skip "confirmation pass produced no results for ${who% and }; regression not confirmed" \
               --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json
             exit 0
           fi
+          base=(bench-base-*.json)
+          target=(bench-target-*.json)
           PYTHONPATH=scripts "$TOOLS_PY" -m spark_canary compare --baseline "${base[@]}" --target "${target[@]}" \
-            --baseline-version "$BASELINE" --target-version "$TARGET" --out comparison.json > confirmed.txt
+            --python "$BENCH_PYTHON" --baseline-version "$BASELINE" --target-version "$TARGET" \
+            --out comparison.json > confirmed.txt
           echo "Still regressed after confirmation:"
           cat confirmed.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: canary-bench
+          # Most of these exist only on some runs; missing paths are left out of the artifact.
           path: |
             comparison.json
             bench-*.json
+            freeze-base.txt
+            freeze-target.txt
+            pip-error.txt
+            regressed.txt
+            confirmed.txt
           if-no-files-found: warn
           retention-days: 30
 

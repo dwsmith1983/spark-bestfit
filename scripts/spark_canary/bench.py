@@ -19,7 +19,7 @@ def load_rounds(paths: list[Path]) -> dict[str, list[float]]:
     """Merge the per-round timings (``stats.data``) of each benchmark across ``--benchmark-json`` files.
 
     A missing file raises ``FileNotFoundError``; a file that is not valid JSON, or has a benchmark
-    without round data, raises ``ValueError`` naming the file.
+    without a ``fullname`` or without numeric round data, raises ``ValueError`` naming the file.
     """
     rounds: dict[str, list[float]] = {}
     for path in paths:
@@ -28,12 +28,24 @@ def load_rounds(paths: list[Path]) -> dict[str, list[float]]:
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             raise ValueError(f"{path}: not a pytest-benchmark JSON file ({exc!r})") from exc
         for bench in benchmarks:
-            name = bench.get("fullname", "<unnamed>")
-            data = bench.get("stats", {}).get("data")
-            if not data:
-                raise ValueError(f"{path}: benchmark {name} has no stats.data (run with --benchmark-json)")
-            rounds.setdefault(name, []).extend(float(value) for value in data)
+            name, values = _bench_rounds(path, bench)
+            rounds.setdefault(name, []).extend(values)
     return rounds
+
+
+def _bench_rounds(path: Path, bench: Any) -> tuple[str, list[float]]:
+    """``(fullname, round timings)`` of one ``benchmarks`` entry; ``ValueError`` naming ``path`` when malformed."""
+    name = bench.get("fullname") if isinstance(bench, dict) else None
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"{path}: benchmark entry without a fullname")
+    stats = bench.get("stats")
+    data = stats.get("data") if isinstance(stats, dict) else None
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"{path}: benchmark {name} has no stats.data (run with --benchmark-json)")
+    try:
+        return name, [float(value) for value in data]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path}: benchmark {name} has non-numeric rounds ({exc!r})") from exc
 
 
 @dataclass(frozen=True)

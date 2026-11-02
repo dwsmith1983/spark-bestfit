@@ -19,8 +19,20 @@ from spark_canary.versions import (
     stable_versions,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "spark_canary" / "pyspark_releases.json"
+
+
+def _pyproject(tmp_path: Path, spark_range: str = ">=3.5.0,<5.0.0") -> Path:
+    """A minimal pyproject.toml, so these tests don't follow the real file's caps."""
+    path = tmp_path / "pyproject.toml"
+    path.write_text(
+        "[project]\n"
+        'name = "demo"\n'
+        'requires-python = ">=3.11,<3.14"\n'
+        "[project.optional-dependencies]\n"
+        f'spark = ["pyspark{spark_range}", "pyarrow>=12.0.0"]\n'
+    )
+    return path
 
 
 def _classifiers(*pythons: str) -> list[str]:
@@ -59,8 +71,8 @@ def test_benchmark_pair_needs_two():
         benchmark_pair([V("4.3.0")])
 
 
-def test_declared_range_reads_spark_extra():
-    rng = declared_range(REPO_ROOT / "pyproject.toml")
+def test_declared_range_reads_spark_extra(tmp_path):
+    rng = declared_range(_pyproject(tmp_path))
 
     assert "4.3.0" in rng
     assert "5.0.0" not in rng
@@ -134,7 +146,7 @@ def test_fetch_json_rejects_non_https():
         fetch_json("file:///etc/passwd")
 
 
-def test_resolve_cli_prints_plan(releases, monkeypatch, capsys):
+def test_resolve_cli_prints_plan(releases, monkeypatch, capsys, tmp_path):
     def fake_fetch(url: str, timeout: float = 30.0) -> dict:
         if url == "https://pypi.org/pypi/pyspark/json":
             return {"releases": releases}
@@ -143,7 +155,7 @@ def test_resolve_cli_prints_plan(releases, monkeypatch, capsys):
 
     monkeypatch.setattr(cli, "fetch_json", fake_fetch)
 
-    exit_code = cli.main(["resolve", "--pyproject", str(REPO_ROOT / "pyproject.toml")])
+    exit_code = cli.main(["resolve", "--pyproject", str(_pyproject(tmp_path))])
 
     plan = json.loads(capsys.readouterr().out)
     assert exit_code == 0

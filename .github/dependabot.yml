@@ -30,6 +30,14 @@ updates:
     labels:
       - "dependencies"
 
+  # Spark canary helper (hash-pinned requirements.txt)
+  - package-ecosystem: "pip"
+    directory: "/scripts/spark_canary"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
