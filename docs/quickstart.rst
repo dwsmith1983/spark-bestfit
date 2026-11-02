@@ -18,18 +18,44 @@ Compatibility Matrix
      - PyArrow
    * - **3.5.x**
      - 3.11, 3.12
-     - 1.24+ (< 2.0)
-     - 1.5+
-     - 12.0 - 16.x
-   * - **4.x**
-     - 3.12, 3.13
-     - 2.0+
-     - 2.2+
-     - 17.0+
+     - 1.24 to <2 (1.26.4)
+     - 1.5 to <4 (3.0.6)
+     - 12 to <19 (18.1.0)
+   * - **4.0.x**
+     - 3.11, 3.12, 3.13
+     - 1.24 to <3 (2.5.4)
+     - 2.0 to <4 (3.1.0)
+     - 12 to <19 (18.1.0)
+   * - **4.1.x**
+     - 3.11, 3.12, 3.13
+     - 1.24 to <3 (2.5.4)
+     - 2.2 to <4 (3.1.0)
+     - 15 to <19 (18.1.0)
+   * - **4.2.x**
+     - 3.11, 3.12, 3.13
+     - 1.24 to <3 (2.5.4)
+     - 2.2 to <4 (3.1.0)
+     - 18 to <19 (18.1.0)
+   * - **4.3.x**
+     - 3.11, 3.12, 3.13
+     - 1.24 to <3 (2.5.4)
+     - 2.2 to <4 (3.1.0)
+     - 18 to <19 (18.1.0)
+
+Each range is what pip may install: the lower bound is the higher of PySpark's ``[sql]``
+floor and spark-bestfit's own, and the upper bound is spark-bestfit's cap (or PySpark's
+``[sql]`` cap when that is lower, as for NumPy on 3.5). The version in brackets is what pip
+picked with ``pyspark[sql]==<patch>`` for the newest patch of each minor (3.5.9, 4.0.5, 4.1.4,
+4.2.1, 4.3.0) in November 2026. The Python column lists the versions both PySpark and
+spark-bestfit declare support for, plus any that CI tests for that Spark line.
+``pip install spark-bestfit[spark]`` picks matching versions on its own, except NumPy on
+Spark 3.5 (see the note below). A weekly canary tests every Spark minor from 3.5 up.
 
 .. note::
-   Spark 3.5.x does not support NumPy 2.0. If using Spark 3.5 with Python 3.12,
-   ensure ``setuptools`` is installed (provides ``distutils``).
+   Spark 3.5.x does not support NumPy 2.0. Only ``pyspark[sql]`` caps NumPy below 2, so a
+   plain ``pip install spark-bestfit[spark]`` with PySpark 3.5 installs NumPy 2. If you use
+   Spark 3.5, pin ``numpy<2``. If using Spark 3.5 with Python 3.12, ensure ``setuptools`` is
+   installed (provides ``distutils``).
 
 Installation
 ------------
