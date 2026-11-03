@@ -73,8 +73,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -e ".[test-base]"
-          pip install "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0"
+          pip install -e ".[test-base]" "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0"
       - name: Run unit tests (no Spark)
         run: |
           # Run all tests except Spark-marked tests, disable pytest-spark plugin
@@ -141,8 +140,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          pip install -e ".[test-base]"
-          pip install "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}" "${{ matrix.pyspark }}"
+          pip install -e ".[test-base]" "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}" "${{ matrix.pyspark }}"
           if [ -n "${{ matrix.extra-deps }}" ]; then pip install "${{ matrix.extra-deps }}"; fi
       - name: Show installed versions
         run: |
@@ -172,8 +170,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -e ".[test-base]"
-          pip install "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0" "pyarrow>=17.0.0,<19.0.0" "ray[default]>=2.9.0,<3.0.0"
+          pip install -e ".[test-base]" "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0" "pyarrow>=17.0.0,<19.0.0" "ray[default]>=2.9.0,<3.0.0"
       - name: Run Ray tests
         run: |
           pytest tests/test_ray_backend.py -v -p no:spark
