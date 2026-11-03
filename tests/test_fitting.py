@@ -1,9 +1,13 @@
 """Tests for fitting module."""
 
+from types import SimpleNamespace
+
 import numpy as np
+import pandas as pd
 import pytest
 import scipy.stats as st
 
+from spark_bestfit.estimation import _strings_to_object
 from spark_bestfit.fitting import (
     AD_PVALUE_DISTRIBUTIONS,
     FITTING_SAMPLE_SIZE,
@@ -14,6 +18,7 @@ from spark_bestfit.fitting import (
     compute_information_criteria,
     compute_ks_statistic,
     compute_pdf_range,
+    create_fitting_udf,
     create_sample_data,
     evaluate_pdf,
     extract_distribution_params,
@@ -1143,3 +1148,78 @@ class TestTruncatedDist:
         dx = x_range[1] - x_range[0]
         integral = np.sum(truncated.pdf(x_range)) * dx
         assert np.isclose(integral, 1.0, atol=0.01)
+
+
+class TestStringsToObject:
+    """Tests for _strings_to_object, applied to UDF output before it goes to Arrow."""
+
+    def test_string_dtype_columns_become_object(self):
+        """StringDtype columns turn into object columns with the same values."""
+        df = pd.DataFrame(
+            {
+                "column_name": pd.Series(["value", None], dtype=pd.StringDtype()),
+                "distribution": pd.Series(["norm", "expon"], dtype=pd.StringDtype()),
+                "sse": [0.1, 0.2],
+            }
+        )
+
+        result = _strings_to_object(df)
+
+        assert result["column_name"].dtype == object
+        assert result["distribution"].dtype == object
+        assert result["column_name"].iloc[0] == "value"
+        assert pd.isna(result["column_name"].iloc[1])
+        assert result["distribution"].tolist() == ["norm", "expon"]
+        assert result["sse"].dtype == np.float64
+
+    def test_input_frame_is_not_modified(self):
+        """The caller's DataFrame keeps its StringDtype columns."""
+        df = pd.DataFrame({"distribution": pd.Series(["norm"], dtype=pd.StringDtype())})
+
+        _strings_to_object(df)
+
+        assert isinstance(df["distribution"].dtype, pd.StringDtype)
+
+    def test_frame_without_string_dtype_columns_is_unchanged(self):
+        """Object, float and list columns pass through as they are."""
+        df = pd.DataFrame(
+            {
+                "distribution": pd.Series(["norm"], dtype=object),
+                "parameters": [[0.0, 1.0]],
+                "sse": [0.1],
+            }
+        )
+
+        result = _strings_to_object(df)
+
+        pd.testing.assert_frame_equal(result, df)
+
+
+@pytest.mark.spark
+class TestFittingUdfStringColumns:
+    """The fitting UDF must hand string columns to Arrow as plain object dtype."""
+
+    def test_udf_output_has_no_string_dtype_columns(self, infer_arrow_strings):
+        """pandas 3 str columns become Arrow large_string, which PySpark 4.1 rejects.
+
+        PySpark 4.1 (SPARK-51739) validates struct children against the declared
+        StringType, so the UDF output must not carry pd.StringDtype columns.
+        """
+        pytest.importorskip("pyspark")
+        np.random.seed(42)
+        data = np.random.normal(loc=50, scale=10, size=500)
+        y_hist, bin_edges = np.histogram(data, bins=30, density=True)
+        fitting_udf = create_fitting_udf(
+            histogram_broadcast=SimpleNamespace(value=(y_hist, bin_edges)),
+            data_sample_broadcast=SimpleNamespace(value=data),
+            column_name="value",
+            data_stats=compute_data_stats(data),
+            lazy_metrics=True,
+        )
+
+        result = fitting_udf.func(pd.Series(["norm", "expon"]))
+
+        string_dtype_columns = [c for c in result.columns if isinstance(result[c].dtype, pd.StringDtype)]
+        assert string_dtype_columns == []
+        assert result["column_name"].tolist() == ["value", "value"]
+        assert result["distribution"].tolist() == ["norm", "expon"]

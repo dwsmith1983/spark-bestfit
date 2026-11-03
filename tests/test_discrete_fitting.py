@@ -1,6 +1,9 @@
 """Tests for discrete distribution fitting."""
 
+from types import SimpleNamespace
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from spark_bestfit.discrete_fitting import (
@@ -10,6 +13,7 @@ from spark_bestfit.discrete_fitting import (
     compute_discrete_ks_statistic,
     compute_discrete_sse,
     compute_ks_ad_metrics_discrete,
+    create_discrete_fitting_udf,
     fit_discrete_mle,
     fit_single_discrete_distribution,
     get_discrete_param_names,
@@ -613,3 +617,31 @@ class TestBootstrapDiscreteConfidenceIntervals:
         assert "mu" in ci
         lower, upper = ci["mu"]
         assert lower < upper
+
+
+@pytest.mark.spark
+class TestDiscreteFittingUdfStringColumns:
+    """The discrete fitting UDF must hand string columns to Arrow as plain object dtype."""
+
+    def test_udf_output_has_no_string_dtype_columns(self, infer_arrow_strings):
+        """pandas 3 str columns become Arrow large_string, which PySpark 4.1 rejects.
+
+        PySpark 4.1 (SPARK-51739) validates struct children against the declared
+        StringType, so the UDF output must not carry pd.StringDtype columns.
+        """
+        pytest.importorskip("pyspark")
+        np.random.seed(42)
+        data = np.random.poisson(lam=7, size=500)
+        fitting_udf = create_discrete_fitting_udf(
+            histogram_broadcast=SimpleNamespace(value=compute_discrete_histogram(data)),
+            data_sample_broadcast=SimpleNamespace(value=data),
+            column_name="counts",
+            lazy_metrics=True,
+        )
+
+        result = fitting_udf.func(pd.Series(["poisson", "geom"]))
+
+        string_dtype_columns = [c for c in result.columns if isinstance(result[c].dtype, pd.StringDtype)]
+        assert string_dtype_columns == []
+        assert result["column_name"].tolist() == ["counts", "counts"]
+        assert result["distribution"].tolist() == ["poisson", "geom"]
