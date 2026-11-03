@@ -128,8 +128,10 @@ def compute_ks_statistic(dist: rv_continuous, params: Tuple[float, ...], data: n
         Tuple of (ks_statistic, pvalue)
     """
     try:
-        # Use scipy's kstest with the distribution name and fitted parameters
-        result = st.kstest(data, dist.name, args=params)
+        # Pass the CDF callable, not dist.name: SciPy 1.18 maps the name "norm"
+        # to the standard normal ndtr ufunc, which rejects loc/scale in args
+        # (scipy/scipy#25448).
+        result = st.kstest(data, dist.cdf, args=params)
         ks_stat = result.statistic
         pvalue = result.pvalue
 
