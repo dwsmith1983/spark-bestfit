@@ -78,8 +78,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -e ".[test-base]"
-          pip install "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0"
+          pip install -e ".[test-base]" "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0"
       - name: Run unit tests (no Spark)
         run: |
           # Run all tests except Spark-marked tests, disable pytest-spark plugin
@@ -113,12 +112,14 @@ jobs:
           # Spark 3.5.x with Python 3.11 and 3.12 (NumPy 1.x)
           - python-version: "3.11"
             spark-version: "3.5"
+            java: "17"
             pyspark: "pyspark>=3.5.0,<4.0.0"
             numpy: "numpy>=1.24.0,<2.0.0"
             pandas: "pandas>=1.5.0,<3.0.0"
             pyarrow: "pyarrow>=12.0.0,<17.0.0"
           - python-version: "3.12"
             spark-version: "3.5"
+            java: "17"
             pyspark: "pyspark>=3.5.0,<4.0.0"
             numpy: "numpy>=1.26.0,<2.0.0"
             pandas: "pandas>=2.0.0,<3.0.0"
@@ -127,12 +128,14 @@ jobs:
           # Spark 4.x with Python 3.12 and 3.13 (NumPy 2.x)
           - python-version: "3.12"
             spark-version: "4.x"
+            java: "21"
             pyspark: "pyspark>=4.0.0,<5.0.0"
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
           - python-version: "3.13"
             spark-version: "4.x"
+            java: "21"
             pyspark: "pyspark>=4.0.0,<5.0.0"
             numpy: "numpy>=2.0.0,<3.0.0"
             pandas: "pandas>=2.2.0,<3.0.0"
@@ -144,10 +147,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      # Spark 3.5 runs on Java 8, 11 and 17; Spark 4.x needs 17 or 21.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
       - name: Install dependencies
         run: |
-          pip install -e ".[test-base]"
-          pip install "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}" "${{ matrix.pyspark }}"
+          pip install -e ".[test-base]" "${{ matrix.numpy }}" "${{ matrix.pandas }}" "${{ matrix.pyarrow }}" "${{ matrix.pyspark }}"
           if [ -n "${{ matrix.extra-deps }}" ]; then pip install "${{ matrix.extra-deps }}"; fi
       - name: Show installed versions
         run: |
@@ -177,8 +184,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -e ".[test-base]"
-          pip install "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0" "pyarrow>=17.0.0,<19.0.0" "ray[default]>=2.9.0,<3.0.0"
+          pip install -e ".[test-base]" "numpy>=2.0.0,<3.0.0" "pandas>=2.2.0,<3.0.0" "pyarrow>=17.0.0,<19.0.0" "ray[default]>=2.9.0,<3.0.0"
       - name: Run Ray tests
         run: |
           pytest tests/test_ray_backend.py -v -p no:spark

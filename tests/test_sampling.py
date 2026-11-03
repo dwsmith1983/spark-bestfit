@@ -303,7 +303,8 @@ class TestSamplingEdgeCases:
         samples = df["sample"].values
 
         # K-S test: samples should come from norm(loc, scale)
-        ks_stat, p_value = st.kstest(samples, "norm", args=(loc, scale))
+        # Use the CDF callable: SciPy 1.18 breaks kstest("norm", args=...) (scipy/scipy#25448)
+        ks_stat, p_value = st.kstest(samples, st.norm.cdf, args=(loc, scale))
 
         # With 5000 samples, p-value should be > 0.01 if from correct distribution
         assert p_value > 0.01, f"K-S test failed: stat={ks_stat}, p={p_value}"
