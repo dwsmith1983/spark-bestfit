@@ -648,6 +648,18 @@ class TestRayBackendRayDataset:
         # Data should be from normal(50, 10)
         assert 40 < result.mean() < 60
 
+    def test_collect_column_arrow_backed_ray_dataset(self, ray_backend):
+        """collect_column returns numpy for Datasets that convert to Arrow-backed pandas."""
+        pa = pytest.importorskip("pyarrow")
+        np.random.seed(42)
+        table = pa.table({"value": np.random.normal(50, 10, 500)})
+        ds = ray.data.from_arrow(table)
+
+        result = ray_backend.collect_column(ds, "value")
+
+        assert isinstance(result, np.ndarray)
+        np.testing.assert_array_equal(result, table.column("value").to_numpy())
+
     def test_get_column_stats_ray_dataset(self, ray_backend, ray_dataset):
         """RayBackend computes column statistics from Ray Dataset."""
         stats = ray_backend.get_column_stats(ray_dataset, "value")
@@ -1165,6 +1177,29 @@ class TestRayBackendDistributedPearson:
         corr = ray_backend.compute_correlation(ds, ["a", "b", "c"], method="pearson")
 
         np.testing.assert_array_almost_equal(corr, corr.T, decimal=15)
+
+    def test_distributed_pearson_arrow_backed_matches_pandas(self, ray_backend):
+        """Distributed Pearson is correct when batches hold Arrow-backed columns."""
+        pa = pytest.importorskip("pyarrow")
+        np.random.seed(42)
+        x = np.random.normal(0, 1, 500)
+        data = pd.DataFrame({"x": x, "y": 0.6 * x + 0.8 * np.random.normal(0, 1, 500)})
+        ds = ray.data.from_arrow(pa.Table.from_pandas(data, preserve_index=False))
+
+        corr = ray_backend.compute_correlation(ds, ["x", "y"], method="pearson")
+
+        np.testing.assert_array_almost_equal(corr, data.corr(method="pearson").values, decimal=10)
+
+    def test_distributed_pearson_integer_columns_matches_pandas(self, ray_backend):
+        """Distributed Pearson is correct for integer columns."""
+        np.random.seed(42)
+        a = np.random.randint(0, 100, 500)
+        data = pd.DataFrame({"a": a, "b": a + np.random.randint(0, 50, 500)})
+        ds = ray.data.from_pandas(data)
+
+        corr = ray_backend.compute_correlation(ds, ["a", "b"], method="pearson")
+
+        np.testing.assert_array_almost_equal(corr, data.corr(method="pearson").values, decimal=10)
 
 
 class TestRayBackendEmptyDataset:
