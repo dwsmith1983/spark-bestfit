@@ -629,6 +629,22 @@ class TestComputeKsStatistic:
             assert np.isfinite(ks_stat), f"K-S stat not finite for {dist.name}"
             assert 0 <= pvalue <= 1, f"p-value out of range for {dist.name}"
 
+    def test_ks_statistic_norm_with_loc_scale_matches_frozen_cdf(self):
+        """Normal K-S with loc/scale params must match the frozen-CDF reference.
+
+        SciPy 1.18 maps kstest(data, "norm", args=...) to the standard normal
+        ndtr ufunc, which rejects loc/scale (scipy/scipy#25448).
+        """
+        rng = np.random.default_rng(7)
+        loc, scale = 5.0, 2.0
+        data = rng.normal(loc=loc, scale=scale, size=500)
+
+        ks_stat, pvalue = compute_ks_statistic(st.norm, (loc, scale), data)
+
+        expected = st.kstest(data, st.norm(loc=loc, scale=scale).cdf)
+        assert ks_stat == pytest.approx(expected.statistic)
+        assert pvalue == pytest.approx(expected.pvalue)
+
 
 class TestFitSingleDistributionWithKS:
     """Tests for fit_single_distribution including K-S statistic fields."""

@@ -354,9 +354,9 @@ class RayBackend:
             Numpy array of column values
         """
         if self._is_ray_dataset(df):
-            return df.select_columns([column]).to_pandas()[column].values
+            return df.select_columns([column]).to_pandas()[column].to_numpy()
         else:
-            return df[column].values
+            return df[column].to_numpy()
 
     def get_column_stats(self, df: Any, column: str) -> Dict[str, float]:
         """Compute min, max, and count for a column.
@@ -408,10 +408,10 @@ class RayBackend:
         """
         if self._is_ray_dataset(df):
             sampled = df.random_sample(fraction, seed=seed)
-            return sampled.select_columns([column]).to_pandas()[column].values
+            return sampled.select_columns([column]).to_pandas()[column].to_numpy()
         else:
             sample_df = df[[column]].sample(frac=fraction, random_state=seed)
-            return sample_df[column].values
+            return sample_df[column].to_numpy()
 
     def create_dataframe(
         self,
@@ -493,8 +493,10 @@ class RayBackend:
 
         def compute_partial_stats(batch: pd.DataFrame) -> pd.DataFrame:
             """Compute sufficient statistics for one batch (vectorized)."""
-            # Get data matrix, drop rows with any NaN
-            data = batch[col_names].dropna().values
+            # Get data matrix, drop rows with any NaN. Force float64: Arrow-backed
+            # columns would otherwise give an object array, and the byte buffers
+            # below are decoded as float64.
+            data = batch[col_names].dropna().to_numpy(dtype=np.float64)
             n = len(data)
 
             if n == 0:
