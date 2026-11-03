@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v3.0.4 (2026-11-03)
+
+### Bug Fixes
+
+- Spark fits work on pyspark 4.1 with pandas 3. Every fit previously failed
+  with `ArrowInvalid: ... large_string vs string`
+  ([#186](https://github.com/dwsmith1983/spark-bestfit/pull/186))
+
+- Ray backend: distributed Pearson correlation returned wrong values for
+  Arrow-backed data (Ray 2.59 and later) and for integer columns
+  ([#185](https://github.com/dwsmith1983/spark-bestfit/pull/185))
+
+- Ray backend: `sample_column` and `collect_column` return NumPy arrays again
+  under Ray 2.59 ([#185](https://github.com/dwsmith1983/spark-bestfit/pull/185))
+
+- `compute_ks_statistic` works with SciPy 1.18
+  ([#185](https://github.com/dwsmith1983/spark-bestfit/pull/185))
+
+### Documentation
+
+- Compatibility tables now list each Spark minor with the Python, NumPy,
+  pandas and PyArrow versions it installs. Spark 3.5 users should pin `numpy<2`
+  ([#184](https://github.com/dwsmith1983/spark-bestfit/pull/184))
+
 ## v3.0.3 (2026-03-31)
 
 ### Bug Fixes
