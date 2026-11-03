@@ -133,7 +133,15 @@ jobs:
             java: "21"
             pyspark: "pyspark>=4.0.0,<5.0.0"
             numpy: "numpy>=2.0.0,<3.0.0"
-            pandas: "pandas>=2.2.0,<3.0.0"
+            pandas: "pandas>=3.0.0,<4.0.0"
+            pyarrow: "pyarrow>=17.0.0,<19.0.0"
+          # Regression lane: PySpark 4.1 rejects the large_string columns pandas 3 produces
+          - python-version: "3.13"
+            spark-version: "4.1"
+            java: "21"
+            pyspark: "pyspark>=4.1.0,<4.2.0"
+            numpy: "numpy>=2.0.0,<3.0.0"
+            pandas: "pandas>=3.0.0,<4.0.0"
             pyarrow: "pyarrow>=17.0.0,<19.0.0"
 
     name: Spark Tests (Python ${{ matrix.python-version }}, Spark ${{ matrix.spark-version }})
