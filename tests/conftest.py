@@ -285,3 +285,21 @@ def sample_data():
     """Create sample data array for Q-Q plots."""
     np.random.seed(42)
     return np.random.normal(50, 10, 1000)
+
+
+@pytest.fixture
+def infer_arrow_strings():
+    """Make pandas infer string columns as ``pd.StringDtype``, the pandas 3 default.
+
+    pandas 3 always does this. pandas 2.1+ opts in through ``future.infer_string``;
+    older pandas has no such option, so tests using the fixture are skipped there.
+    """
+    if int(pd.__version__.split(".")[0]) >= 3:
+        yield
+        return
+    try:
+        pd.get_option("future.infer_string")
+    except pd.errors.OptionError:
+        pytest.skip("pandas < 2.1 cannot infer strings as StringDtype")
+    with pd.option_context("future.infer_string", True):
+        yield

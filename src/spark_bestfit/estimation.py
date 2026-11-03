@@ -477,6 +477,19 @@ def fit_censored_mle(
     return tuple(result.x)
 
 
+def _strings_to_object(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy of ``df`` with every ``pd.StringDtype`` column cast to object.
+
+    With pyarrow installed (pyspark requires it), pandas 3 stores strings in a
+    pyarrow-backed ``str`` dtype by default, which pyarrow turns into large_string
+    even when asked for string. PySpark 4.1 (SPARK-51739) checks struct children
+    against the declared StringType (string) and rejects large_string, so a UDF
+    returning a struct with StringType fields must hand Arrow object columns instead.
+    """
+    string_columns = {col: object for col in df.columns if isinstance(df[col].dtype, pd.StringDtype)}
+    return df.astype(string_columns)
+
+
 def create_fitting_udf(
     histogram_broadcast: Broadcast[Tuple[np.ndarray, np.ndarray]],
     data_sample_broadcast: Broadcast[np.ndarray],
@@ -575,7 +588,7 @@ def create_fitting_udf(
         # Ensure non-nullable columns have no None values
         df["distribution"] = df["distribution"].astype(str)
         df["sse"] = df["sse"].astype(float)
-        return df
+        return _strings_to_object(df)
 
     return fit_distributions_batch
 

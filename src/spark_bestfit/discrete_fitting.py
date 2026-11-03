@@ -28,6 +28,7 @@ except ImportError:
     _PYSPARK_AVAILABLE = False
 
 from spark_bestfit.distributions import DiscreteDistributionRegistry
+from spark_bestfit.estimation import _strings_to_object
 from spark_bestfit.fitting import _filter_bootstrap_outliers
 
 # Output schema for discrete fitting results (only if PySpark is available)
@@ -573,7 +574,7 @@ def create_discrete_fitting_udf(
         df = pd.DataFrame(results)
         df["distribution"] = df["distribution"].astype(str)
         df["sse"] = df["sse"].astype(float)
-        return df
+        return _strings_to_object(df)
 
     return fit_discrete_distributions_batch
 
