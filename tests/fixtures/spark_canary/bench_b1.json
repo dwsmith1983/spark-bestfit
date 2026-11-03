@@ -1,0 +1,5 @@
+{"benchmarks": [
+  {"fullname": "tests/benchmarks/test_benchmark_x.py::TestX::test_fit_together", "stats": {"data": [1.5, 1.6]}},
+  {"fullname": "tests/benchmarks/test_benchmark_x.py::TestX::test_fit_together_100k", "stats": {"data": [2.0]}},
+  {"fullname": "tests/benchmarks/test_benchmark_x.py::TestX::test_only_target", "stats": {"data": [0.3]}}
+]}

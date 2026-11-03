@@ -130,9 +130,39 @@ chore: update pre-commit hook versions
    - Documentation build
    - 75% minimum coverage
 
+   A PR that changes `scripts/spark_canary/` or `.github/workflows/spark-canary.yml` also runs
+   the Spark canary (below) in dry-run mode: it prints the issues it would file instead of
+   filing them. Starting the canary by hand (Run workflow, i.e. `workflow_dispatch`) from any
+   branch files real issues, so only do that when you want them.
+
 5. **Review and merge**
    - Address any feedback
    - Squash merge preferred for clean history
+
+## Spark Release Canary
+
+Every Monday, `.github/workflows/spark-canary.yml` looks up the newest PyPI patch of each
+Spark minor from 3.5 up. It installs spark-bestfit with each one:
+
+```bash
+pip install ".[spark,test-base]" "pyspark[sql]==<version>"
+```
+
+Then it runs the Spark tests and benchmarks the newest minor against the one before it. What it
+finds becomes an issue labelled `spark-canary`. When an open issue already has the same title,
+a later run adds a comment if anything changed instead of opening a second one:
+
+| Issue title | Meaning |
+|-------------|---------|
+| `Spark canary: tests fail on pyspark {ver}` | The Spark tests fail on that release |
+| `Spark canary: performance regression on pyspark {target} vs {baseline}` | At least one benchmark's median is more than 10% slower on the newest minor than on the previous one |
+| `Spark canary: spark-bestfit[spark] cannot install with pyspark {ver}` | A release inside the declared `pyspark` range can't be installed under the current pins |
+| `Spark canary: pyspark {ver} passes, outside the declared range` | The tests pass on a release that the `pyspark` range in `pyproject.toml` excludes, so the range can widen. Once closed, it is never reopened or filed again |
+| `Spark canary: workflow failing` | The canary itself broke; check the linked run |
+
+The canary never closes an issue. A maintainer closes it once the fix is merged. Every issue
+ends with a checklist: update the `pyspark` range in `pyproject.toml` if support changed, the
+Compatibility table in `README.md`, and the Compatibility Matrix in `docs/quickstart.rst`.
 
 ## Makefile Commands
 

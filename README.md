@@ -75,10 +75,15 @@ results = fitter.fit(df, column="value")
 
 ## Compatibility
 
-| Spark | Python | NumPy |
-|-------|--------|-------|
-| 3.5.x | 3.11-3.12 | < 2.0 |
-| 4.x | 3.12-3.13 | 2.0+ |
+| Spark | Python | NumPy | pandas | PyArrow |
+|-------|--------|-------|--------|---------|
+| 3.5.x | 3.11-3.12 | 1.24 to <2 (1.26.4) | 1.5 to <4 (3.0.6) | 12 to <19 (18.1.0) |
+| 4.0.x | 3.11-3.13 | 1.24 to <3 (2.5.4) | 2.0 to <4 (3.1.0) | 12 to <19 (18.1.0) |
+| 4.1.x | 3.11-3.13 | 1.24 to <3 (2.5.4) | 2.2 to <4 (3.1.0) | 15 to <19 (18.1.0) |
+| 4.2.x | 3.11-3.13 | 1.24 to <3 (2.5.4) | 2.2 to <4 (3.1.0) | 18 to <19 (18.1.0) |
+| 4.3.x | 3.11-3.13 | 1.24 to <3 (2.5.4) | 2.2 to <4 (3.1.0) | 18 to <19 (18.1.0) |
+
+Ranges are what pip may install; the version in brackets is what pip picked with `pyspark[sql]==<patch>` for the newest patch of each minor (3.5.9, 4.0.5, 4.1.4, 4.2.1, 4.3.0) in November 2026. `pip install spark-bestfit[spark]` picks matching versions on its own, except on Spark 3.5: only `pyspark[sql]` caps NumPy below 2, so pin `numpy<2` there. A weekly canary tests every Spark minor from 3.5 up.
 
 ## Documentation
 
