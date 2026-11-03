@@ -6,8 +6,8 @@
 # this file only wires the jobs together.
 #
 # pull_request runs (changes to the canary itself) are dry runs: they print the issues they would
-# file and use fewer benchmark rounds. A workflow_dispatch run from any branch files real issues,
-# exactly like the scheduled run, so only dispatch it when that is what you want.
+# file. A workflow_dispatch run from any branch files real issues, exactly like the scheduled run,
+# so only dispatch it when that is what you want.
 name: Spark release canary
 
 on:
@@ -179,17 +179,18 @@ jobs:
 
   bench:
     needs: resolve
-    # Dependabot's action bumps touch this file; a 150-minute A/B per bump buys nothing.
+    # Dependabot's action bumps touch this file; a 180-minute A/B per bump buys nothing.
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 180
     env:
       BASELINE: ${{ fromJSON(needs.resolve.outputs.bench).baseline }}
       TARGET: ${{ fromJSON(needs.resolve.outputs.bench).target }}
       BENCH_PYTHON: ${{ fromJSON(needs.resolve.outputs.bench).python }}
-      # 23 benchmarks, about 5 s per round for the 1M-row cases; 5 rounds keeps the six passes
-      # inside the job timeout. PR runs only check the wiring.
-      ROUNDS: ${{ github.event_name == 'pull_request' && '2' || '5' }}
+      # One round of all 23 benchmarks takes about 6 minutes, and each pass spends about 12 more
+      # on calibration and Spark start-up, so a pass at 2 rounds runs about 24 minutes. A third
+      # round would reach the 30-minute step limit.
+      ROUNDS: 2
     steps:
       - uses: actions/checkout@v7
         with:
